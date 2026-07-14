@@ -1,0 +1,24 @@
+{
+  "name": "goldenstore",
+  "version": "1.0.0",
+  "description": "Goldenstore — المتجر الحصري للتطبيقات المهكرة (Vercel + Firebase + Cloudflare R2)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev --listen 3000",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.726.0",
+    "@aws-sdk/s3-request-presigner": "^3.726.0",
+    "@hono/node-server": "^2.0.3",
+    "firebase-admin": "^13.0.0",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vercel": "^39.0.0"
+  }
+}

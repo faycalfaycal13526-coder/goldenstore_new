@@ -146,7 +146,7 @@
         list.append(el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
           el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
           el('div', { class: 'info' },
-            el('div', { class: 'nm' }, c.name),
+            el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
             el('div', { class: 'sub' }, `${c.count || 0} ${t('تطبيق')}`),
           ),
           ico('chevronStart', 'icon'),

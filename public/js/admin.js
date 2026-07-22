@@ -1,5 +1,6 @@
 (async function () {
   const { api, el, ico, toast, formatBytes, formatNum, formatDate, themeToggleBtn } = window.GS;
+  const t = (window.GSI18N && window.GSI18N.t) ? window.GSI18N.t : (s) => s;
   const root = document.getElementById('content');
 
   let me = null;
@@ -270,6 +271,7 @@
     }));
 
     const themeBtn = themeToggleBtn();
+    themeBtn.classList.remove('tab');
     themeBtn.classList.add('theme-toggle-float');
     const wrap = el('div', { class: 'login-wrap' },
       themeBtn,
@@ -283,12 +285,49 @@
     setTimeout(() => passInput.focus(), 0);
   }
 
+  function renderTopbar() {
+    const themeBtn = themeToggleBtn();
+    themeBtn.classList.remove('tab');
+    themeBtn.classList.add('icon-btn');
+    const logoutBtn = el('button', {
+      class: 'icon-btn',
+      type: 'button',
+      'aria-label': 'خروج',
+      title: 'خروج',
+      onclick: async () => {
+        try { await api('/api/logout', { method: 'POST' }); } catch {}
+        renderLogin();
+      },
+    }, ico('logout'));
+
+    return el('div', { class: 'admin-topbar' },
+      el('div', { class: 'admin-topbar-inner' },
+        el('a', { class: 'admin-brand', href: '/', 'aria-label': 'Golden Store' },
+          el('img', { src: '/images/logo.png', alt: 'Golden Store' }),
+          el('span', null, 'Golden'),
+          el('b', null, 'Store'),
+        ),
+        el('div', { class: 'spacer' }),
+        el('div', { class: 'admin-title' }, 'لوحة التحكم'),
+        el('div', { class: 'admin-actions' }, themeBtn, logoutBtn),
+      ),
+    );
+  }
+
   async function renderApp() {
     showSpinner();
     try {
       cats = (await api('/api/categories')).categories;
     } catch {}
     root.innerHTML = '';
+
+    const shell = el('div', { class: 'admin-shell' });
+    const topbar = renderTopbar();
+
+    const logoutTab = el('button', { class: 'tab', onclick: async () => {
+      try { await api('/api/logout', { method: 'POST' }); } catch {}
+      renderLogin();
+    } }, ico('logout'), 'خروج');
 
     const tabs = el('div', { class: 'admin-tabs' },
       tabBtn('dashboard', 'dashboard', 'لوحة المعلومات'),
@@ -297,18 +336,14 @@
       tabBtn('new', 'plus', 'إضافة جديد'),
       tabBtn('requests', 'flag', 'الطلبات والبلاغات'),
       tabBtn('notifications', 'bell', 'الإشعارات'),
+      tabBtn('app-update', 'download', 'رابط تحميل التطبيق'),
       el('span', { class: 'tab-spacer' }),
-      (window.GSI18N && window.GSI18N.switcherEl ? window.GSI18N.switcherEl() : document.createComment('lang')),
-      themeToggleBtn(),
-      el('button', { class: 'tab', onclick: async () => {
-        await api('/api/logout', { method: 'POST' });
-        renderLogin();
-      } }, ico('logout'), 'خروج'),
+      logoutTab,
     );
-    root.append(tabs);
 
-    const body = el('div', { id: 'tab-body' });
-    root.append(body);
+    const body = el('div', { class: 'admin-body', id: 'tab-body' });
+    shell.append(topbar, tabs, body);
+    root.append(shell);
 
     if (activeTab === 'dashboard') await renderDashboard(body);
     else if (activeTab === 'apps') await renderAppsList(body, 'app');
@@ -316,6 +351,7 @@
     else if (activeTab === 'new') await renderNewApp(body);
     else if (activeTab === 'requests') await renderRequests(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
+    else if (activeTab === 'app-update') await renderAppUpdate(body);
     else if (activeTab.startsWith('edit:')) await renderEditApp(body, activeTab.slice(5));
   }
 
@@ -341,7 +377,7 @@
           el('div', { class: 'panel-head' }, ico('trending'), 'الأكثر تنزيلاً'),
           stats.top_apps.length ? el('div', { class: 'table-wrap' },
             (() => {
-              const t = el('table', { class: 'table' },
+              const tableEl = el('table', { class: 'table' },
                 el('thead', null, el('tr', null,
                   el('th', null, ''), el('th', null, 'الاسم'),
                   el('th', null, 'التنزيلات'), el('th', null, ''),
@@ -355,7 +391,7 @@
                   el('td', { class: 'cell-actions' }, el('a', { class: 'btn btn-sm btn-secondary', href: `/app?slug=${a.slug}`, target: '_blank' }, ico('external'), 'عرض')),
                 ))),
               );
-              return t;
+              return tableEl;
             })(),
           ) : emptyMsg('لا توجد بيانات بعد', 'ارفع تطبيقك الأول لرؤية الإحصائيات.'),
         ),
@@ -366,7 +402,7 @@
             const b = e.currentTarget; b.disabled = true;
             try {
               const r = await api('/api/admin/migrate-types', { method: 'POST' });
-              toast(`تم تعيين النوع لـ ${r.updated} عنصر (الإجمالي ${r.total})`, 'success');
+              toast(t('تم تحديث أنواع العناصر') + ': ' + r.updated + ' / ' + r.total, 'success');
             } catch { toast('فشل التحديث', 'error'); }
             b.disabled = false;
           } }, ico('check'), 'تعيين النوع للعناصر القديمة'),
@@ -531,6 +567,80 @@
     }
   }
 
+  // -------- app download link (upload APK to R2, link appears on landing page) --------
+  async function renderAppUpdate(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    try {
+      let current = null;
+      try { current = await api('/api/app-update'); } catch {}
+
+      const apkDz = dropzone({ accept: '.apk', label: 'اسحب أو اختر ملف APK للتطبيق' });
+      const versionInput = el('input', { class: 'input', type: 'text', placeholder: 'مثلاً: 1.2.0 (اختياري)', value: current && current.version_name || '', 'aria-label': t('إصدار التطبيق') });
+      const notesInput = el('textarea', { class: 'input', rows: 3, placeholder: 'ملاحظات قصيرة تظهر في نافذة التحديث (اختياري)', 'aria-label': t('ملاحظات التحديث') }, current && current.notes || '');
+      const notifyInput = el('input', { type: 'checkbox' });
+      notifyInput.checked = true;
+
+      const saveBtn = el('button', { class: 'btn btn-primary', type: 'button' }, ico('download'), t('نشر التحديث'));
+      const currentInfo = current && current.apk_url
+        ? el('div', { class: 'hint' }, `الرابط الحالي: ${current.apk_url} — الإصدار: ${current.version_name || '—'}`)
+        : null;
+      const resultInfo = el('div', { class: 'push-info', style: { fontSize: '13px', marginTop: '8px', lineHeight: '1.6' } });
+
+      saveBtn.onclick = async () => {
+        const files = apkDz.getFiles();
+        if (!files.length) { toast(t('اختر ملف APK أولاً'), 'error'); return; }
+        const version_name = versionInput.value.trim() || undefined;
+        const version_code = version_name ? Math.floor(Date.now() / 1000) : 0;
+        const notes = notesInput.value.trim();
+        saveBtn.disabled = true;
+        try {
+          toast(t('جارٍ رفع APK…'));
+          const apk_key = await r2Upload(files[0], 'apk', 'goldenstore-app', (r) => apkDz.setProgress(0, r));
+          const res = await api('/api/admin/app-update', {
+            method: 'POST',
+            body: { version_name, version_code, apk_key, notes, force: false, send_notification: notifyInput.checked },
+          });
+          resultInfo.textContent = t('تم حفظ الرابط') + (res && res.push ? ` — ${res.push.success || 0}/${res.push.targeted || 0} ` + t('إشعار') : '');
+          toast(t('تم نشر التحديث'), 'success');
+        } catch (e) {
+          toast(t('فشل نشر التحديث'), 'error');
+        } finally {
+          saveBtn.disabled = false;
+        }
+      };
+
+      body.innerHTML = '';
+      body.append(
+        el('div', { class: 'panel' },
+          el('div', { class: 'panel-head' }, ico('download'), t('رفع تحديث التطبيق')),
+          el('div', { class: 'form' },
+            el('div', { class: 'field' },
+              el('label', null, t('ملف APK'), el('span', { class: 'req' }, ' *')),
+              apkDz,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, t('إصدار التطبيق'), ' ', el('span', { style: { color: 'var(--text-3)', fontSize: '12px' } }, '(اختياري — لإظهار نافذة تحديث داخل التطبيق)')),
+              versionInput,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, t('ملاحظات التحديث')),
+              notesInput,
+            ),
+            el('div', { class: 'field' },
+              el('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' } }, notifyInput, t('إرسال إشعار للمستخدمين')),
+            ),
+            currentInfo,
+            saveBtn,
+            resultInfo,
+          ),
+        ),
+      );
+    } catch (e) {
+      body.innerHTML = '';
+      body.append(emptyMsg('تعذر التحميل', e.message));
+    }
+  }
+
   function notificationCard(n, refreshList) {
     const type = n.type === 'new_app' || n.type === 'update' || n.type === 'announcement' ? n.type : 'announcement';
     const badgeLabel = type === 'new_app' ? 'تطبيق جديد' : type === 'update' ? 'تحديث' : 'إعلان';
@@ -620,7 +730,7 @@
         body.append(emptyMsg(`لا توجد ${kind === 'game' ? 'ألعاب' : 'تطبيقات'} بعد`, `أضف ${noun}اً جديداً من زر «${kind === 'game' ? 'إضافة لعبة' : 'إضافة تطبيق'}».`));
         return;
       }
-      const t = el('div', { class: 'table-wrap' },
+      const tableWrap = el('div', { class: 'table-wrap' },
         el('table', { class: 'table' },
           el('thead', null, el('tr', null,
             el('th', null, ''),
@@ -639,7 +749,7 @@
               el('div', null, a.name),
               (a.stars > 0) ? el('span', { class: 'star-pin', style: 'position:relative; top:auto; inset-inline-end:auto; display:inline-flex; margin-top:6px;' }, ico('star'), formatNum(a.stars)) : null,
             ),
-            el('td', { 'data-label': 'التصنيف' }, cats.find(c => c.slug === a.category)?.name || a.category),
+            el('td', { 'data-label': 'التصنيف' }, t(cats.find(c => c.slug === a.category)?.name) || t(a.category) || '—'),
             el('td', { 'data-label': 'الإصدار' }, a.version_name || '—'),
             el('td', { 'data-label': 'الحجم' }, formatBytes(a.size_bytes)),
             el('td', { 'data-label': 'التنزيلات' }, formatNum(a.downloads)),
@@ -658,7 +768,7 @@
           ))),
         ),
       );
-      body.append(t);
+      body.append(tableWrap);
     } catch (e) {
       body.innerHTML = '';
       body.append(emptyMsg('تعذر التحميل', e.message));
@@ -724,7 +834,7 @@
         activeTab = `edit:${res.id}`;
         renderApp();
       } catch (err) {
-        toast(`فشل الرفع: ${err.message || ''}`, 'error');
+        toast(t('فشل الرفع') + ': ' + (err.message || ''), 'error');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '';
         submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));
@@ -997,7 +1107,7 @@
         const isGameCat = c.slug.startsWith('game_');
         if (currentType === 'game' && !isGameCat && c.slug !== 'other') return;
         if (currentType !== 'game' && isGameCat) return;
-        const opt = el('option', { value: c.slug }, c.name);
+        const opt = el('option', { value: c.slug }, t(c.name));
         if (selected === c.slug) opt.selected = true;
         sel.append(opt);
       });

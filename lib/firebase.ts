@@ -152,6 +152,12 @@ export async function messaging() {
   return getMessaging(fbApp);
 }
 
+export async function getAuthAdmin() {
+  const { getAuth } = await import('firebase-admin/auth');
+  const fbApp = await firebaseApp();
+  return getAuth(fbApp);
+}
+
 export async function verifyFirebaseToken(idToken: string): Promise<{ uid: string; email?: string; name?: string } | null> {
   try {
     const { getAuth } = await import('firebase-admin/auth');

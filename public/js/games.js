@@ -1,7 +1,7 @@
-// Games page — same Play-style layout as home, but restricted to type=game.
+// Games page — same Play-style layout as the apps page, restricted to type=game.
 (function () {
   const S = window.Store;
-  const { el, ico, api, t } = S;
+  const { el, ico, api, getQuery, t } = S;
   const root = document.getElementById('root');
 
   S.bottomNav('games');
@@ -23,11 +23,11 @@
 
     function renderTabs() {
       tabsBar.innerHTML = '';
-      TOP_TABS.forEach((tab) => {
+      TOP_TABS.forEach((t_item) => {
         tabsBar.append(el('button', {
-          class: `tab ${tab.key === topTab ? 'active' : ''}`,
-          onclick: () => { if (topTab !== tab.key) { topTab = tab.key; renderTabs(); renderContent(); } },
-        }, t(tab.label)));
+          class: `tab ${t_item.key === topTab ? 'active' : ''}`,
+          onclick: () => { if (topTab !== t_item.key) { topTab = t_item.key; renderTabs(); renderContent(); } },
+        }, t(t_item.label)));
       });
     }
 
@@ -35,7 +35,13 @@
     renderTabs();
     renderContent();
 
-    function q(params) { return `/api/apps?type=game&${params}`; }
+    function baseQuery() { return 'type=game'; }
+    function filt(apps) { return apps || []; }
+
+    function q(params) {
+      const base = baseQuery();
+      return `/api/apps?${base ? base + '&' : ''}${params}`;
+    }
 
     async function renderContent() {
       content.innerHTML = '';
@@ -51,23 +57,6 @@
       }
     }
 
-    async function renderCategories() {
-      const { categories } = await api('/api/categories?type=game');
-      content.innerHTML = '';
-      const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
-      categories.forEach((c) => {
-        list.append(el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
-          el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
-          el('div', { class: 'info' },
-            el('div', { class: 'nm' }, c.name),
-            el('div', { class: 'sub' }, `${c.count || 0} ${t('لعبة')}`),
-          ),
-          ico('chevronStart', 'icon'),
-        ));
-      });
-      content.append(el('div', { class: 'section' }, list));
-    }
-
     async function renderForYou() {
       const [recent, popular, top] = await Promise.all([
         api(q('sort=recent&limit=60')).catch(() => ({ apps: [] })),
@@ -76,30 +65,48 @@
       ]);
       content.innerHTML = '';
 
-      const recentApps = recent.apps || [];
-      const popularApps = popular.apps || [];
-      const topApps = top.apps || [];
+      const recentApps = filt(recent.apps);
+      const popularApps = filt(popular.apps);
+      const topApps = filt(top.apps);
 
-      if (!recentApps.length && !popularApps.length) {
+      // Build a single deduplicated pool of ALL games
+      const seenAll = new Set();
+      const allApps = [];
+      [...recentApps, ...popularApps, ...topApps].forEach((a) => {
+        if (!a || seenAll.has(a.slug)) return;
+        seenAll.add(a.slug);
+        allApps.push(a);
+      });
+
+      if (!allApps.length) {
         content.append(S.emptyState(t('لا توجد ألعاب بعد'), t('ميّز تطبيقاً كـ«لعبة» من لوحة التحكم لتظهر هنا.'), 'gamepad'));
         return;
       }
 
-      const carouselApps = pickCarousel([...recentApps, ...popularApps, ...topApps]);
+      // Editors' choice carousel
+      const carouselApps = pickCarousel(allApps).slice(0, 6);
       if (carouselApps.length) content.append(S.featureCarousel(carouselApps));
 
-      const recommended = (popularApps.length ? popularApps : recentApps).slice(0, 12);
-      content.append(posterSection(t('ألعاب موصى بها'), recommended));
+      // Track which slugs are shown in browsable sections to avoid duplication
+      const usedSlugs = new Set();
 
-      const usedSlugs = new Set(recommended.map((a) => a.slug));
-      carouselApps.forEach((a) => usedSlugs.add(a.slug));
-      const rest = recentApps.filter((a) => !usedSlugs.has(a.slug));
-      content.append(listSection(t('قد يعجبك أيضاً'), rest));
+      // Recommended poster row
+      const recommended = (popularApps.length ? popularApps : recentApps).slice(0, 8);
+      if (recommended.length) {
+        content.append(posterSection(t('ألعاب موصى بها'), recommended));
+        recommended.forEach((a) => usedSlugs.add(a.slug));
+      }
+
+      // Full catalog with grid/list toggle — exactly like the apps page
+      const leftover = allApps.filter((a) => !usedSlugs.has(a.slug));
+      const inRecommended = allApps.filter((a) => usedSlugs.has(a.slug));
+      const others = [...inRecommended, ...leftover];
+      if (others.length) content.append(toggleSection('', others));
     }
 
     async function renderTop() {
       const res = await api(q('sort=popular&limit=60'));
-      const apps = (res.apps || []).slice(0, 50);
+      const apps = filt(res.apps).slice(0, 50);
       content.innerHTML = '';
       if (!apps.length) { content.append(S.emptyState(t('لا توجد ألعاب بعد'), null, 'gamepad')); return; }
       content.append(rankedList(apps));
@@ -107,23 +114,29 @@
 
     async function renderTopRated() {
       const res = await api(q('sort=rating&limit=60'));
-      const apps = (res.apps || []).filter((a) => S.ratingCountOf(a) > 0).slice(0, 50);
+      const apps = filt(res.apps).filter((a) => S.ratingCountOf(a) > 0).slice(0, 50);
       content.innerHTML = '';
       if (!apps.length) { content.append(S.emptyState(t('لا توجد ألعاب مقيّمة بعد'), t('قيّم الألعاب لتظهر هنا الأعلى تقييماً.'), 'gamepad')); return; }
       content.append(rankedList(apps));
     }
-  });
 
-  function rankedList(apps) {
-    const list = el('div', { class: 'applist' });
-    apps.forEach((a, i) => {
-      const row = S.listRow(a);
-      const rank = el('div', { style: { width: '24px', textAlign: 'center', fontWeight: '700', color: 'var(--text-2)', fontSize: '15px', flexShrink: '0' } }, String(i + 1));
-      row.insertBefore(rank, row.firstChild);
-      list.append(row);
-    });
-    return el('div', { class: 'section' }, list);
-  }
+    async function renderCategories() {
+      const { categories } = await api('/api/categories?type=game');
+      content.innerHTML = '';
+      const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+      categories.forEach((c) => {
+        list.append(el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
+          el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
+          el('div', { class: 'info' },
+            el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
+            el('div', { class: 'sub' }, `${c.count || 0} ${t('لعبة')}`),
+          ),
+          ico('chevronStart', 'icon'),
+        ));
+      });
+      content.append(el('div', { class: 'section' }, list));
+    }
+  });
 
   function pickCarousel(pool) {
     const seen = new Set();
@@ -147,13 +160,50 @@
     );
   }
 
-  function listSection(title, apps) {
+  // Section with a vertical (list) / grid (2-col icons) view switch.
+  const VIEW_KEY = 'gs_games_view';
+  function toggleSection(title, apps) {
     if (!apps || !apps.length) return el('span');
+    let mode = localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+
+    const body = el('div');
+    const gridBtn = el('button', { type: 'button', 'aria-label': t('شبكة'), title: t('شبكة') }, ico('grid', 'icon'));
+    const listBtn = el('button', { type: 'button', 'aria-label': t('قائمة'), title: t('قائمة') }, ico('list', 'icon'));
+
+    function render() {
+      body.innerHTML = '';
+      gridBtn.classList.toggle('on', mode === 'grid');
+      listBtn.classList.toggle('on', mode === 'list');
+      if (mode === 'grid') {
+        const grid = el('div', { class: 'grid-list' });
+        apps.forEach((a) => grid.append(S.gridCard(a)));
+        body.append(grid);
+      } else {
+        const list = el('div', { class: 'applist' });
+        apps.forEach((a) => list.append(S.listRow(a)));
+        body.append(list);
+      }
+    }
+    function setMode(m) { if (m === mode) return; mode = m; try { localStorage.setItem(VIEW_KEY, m); } catch (e) {} render(); }
+    gridBtn.onclick = () => setMode('grid');
+    listBtn.onclick = () => setMode('list');
+
+    render();
+    const head = el('div', { class: 'section-head' });
+    if (title) head.append(el('h2', null, title));
+    else head.style.justifyContent = 'flex-start';
+    head.append(el('div', { class: 'view-toggle' }, gridBtn, listBtn));
+    return el('div', { class: 'section' }, head, body);
+  }
+
+  function rankedList(apps) {
     const list = el('div', { class: 'applist' });
-    apps.forEach((a) => list.append(S.listRow(a)));
-    return el('div', { class: 'section' },
-      el('div', { class: 'section-head' }, el('h2', null, title)),
-      list,
-    );
+    apps.forEach((a, i) => {
+      const row = S.listRow(a);
+      const rank = el('div', { style: { width: '24px', textAlign: 'center', fontWeight: '700', color: 'var(--text-2)', fontSize: '15px', flexShrink: '0' } }, String(i + 1));
+      row.insertBefore(rank, row.firstChild);
+      list.append(row);
+    });
+    return el('div', { class: 'section' }, list);
   }
 })();

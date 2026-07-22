@@ -14,13 +14,15 @@
   }
 
   const apkStateHandlers = Object.create(null);
-  window.__gsApkDownloadUpdate = function (slug, status, progress) {
+  const storeApkHandler = window.__gsApkDownloadUpdate;
+  window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
+    if (typeof storeApkHandler === 'function' && slug === 'app-update') storeApkHandler(slug, status, progress, message);
     const h = apkStateHandlers[slug];
-    if (h) h(status, (typeof progress === 'number' ? progress : -1));
+    if (h) h(status, (typeof progress === 'number' ? progress : -1), message);
   };
 
   function sdkName(sdk) {
-    const map = { 21: t('أندرويد') + ' 5.0', 22: '5.1', 23: '6.0', 24: '7.0', 25: '7.1', 26: '8.0', 27: '8.1', 28: '9', 29: '10', 30: '11', 31: '12', 32: '12L', 33: '13', 34: '14', 35: '15' };
+    const map = { 21: '5.0', 22: '5.1', 23: '6.0', 24: '7.0', 25: '7.1', 26: '8.0', 27: '8.1', 28: '9', 29: '10', 30: '11', 31: '12', 32: '12L', 33: '13', 34: '14', 35: '15' };
     return map[sdk] || (sdk ? `SDK ${sdk}` : '—');
   }
 
@@ -93,14 +95,14 @@
       el('div', { class: 'd-titles' },
         el('div', { class: 'd-name' }, app.name),
         el('div', { class: 'd-dev' }, app.developer || S.STORE.name),
-        el('div', { class: 'd-sub' }, [S.categoryName(app.category), t('يحتوي على عمليات شراء داخل التطبيق')].filter(Boolean).join(' • ')),
+        el('div', { class: 'd-sub' }, S.categoryName(app.category) || S.STORE.name),
       ),
     ));
 
     // Stats row
     const rt = ratingOf(app);
     content.append(el('div', { class: 'd-stats' },
-      stat(rt ? el('span', null, rt, ico('star', 'icon fill')) : el('span', null, t('جديد')), t('تقييم')),
+      stat(rt ? el('span', null, rt, ico('star', 'icon fill')) : el('span', null, '—'), t('تقييمات')),
       stat(formatCount(app.downloads), t('تنزيلات')),
       stat(formatBytes(app.size_bytes || 0), t('الحجم')),
       stat(sdkName(app.min_sdk), t('أندرويد')),
@@ -244,7 +246,7 @@
       catch (e) { submitBtn.disabled = false; errLine.textContent = t('تعذّر الإرسال، حاول مجدداً'); }
     });
 
-    const card = el('div', { class: 'dialog-card', dir: 'rtl' },
+    const card = el('div', { class: 'dialog-card', dir: document.documentElement.dir || 'rtl' },
       el('div', { class: 'dialog-head' },
         el('div', { class: 'dialog-title' }, ico(icon, 'icon'), title),
         el('button', { class: 'dialog-close', 'aria-label': t('إغلاق'), onclick: () => close() }, ico('close')),
@@ -268,8 +270,8 @@
       icon: 'refresh', title: t('طلب تحديث'), submitLabel: t('إرسال الطلب'),
       fields: [
         { key: 'current', label: t('الإصدار الحالي'), value: app.version_name || '—', readonly: true },
-        { key: 'new_version', label: t('الإصدار الجديد'), required: true, placeholder: 'مثال: 2.5.1', maxlength: '60' },
-        { key: 'source', label: t('رابط المصدر'), placeholder: 'مثال: https://play.google.com/...', maxlength: '500' },
+        { key: 'new_version', label: t('الإصدار الجديد'), required: true, placeholder: t('مثال: 2.5.1'), maxlength: '60' },
+        { key: 'source', label: t('رابط المصدر'), placeholder: t('مثال: https://play.google.com/...'), maxlength: '500' },
       ],
       onSubmit: (v) => api(`/api/apps/${encodeURIComponent(app.slug)}/request-update`, {
         method: 'POST', body: { new_version: v.new_version, source: v.source },
@@ -283,7 +285,7 @@
       fields: [
         { key: 'reason', label: t('سبب البلاغ'), required: true, type: 'select',
           options: [t('التطبيق فيه فيروس'), t('رابط التحميل لا يعمل'), t('محتوى غير لائق'), t('انتهاك حقوق نشر'), t('معلومات خاطئة'), t('سبب آخر')] },
-        { key: 'details', label: t('تفاصيل إضافية'), type: 'textarea', placeholder: 'اشرح المشكلة…', maxlength: '2000' },
+        { key: 'details', label: t('تفاصيل إضافية'), type: 'textarea', placeholder: t('اشرح المشكلة…'), maxlength: '2000' },
       ],
       onSubmit: (v) => api(`/api/apps/${encodeURIComponent(app.slug)}/report`, {
         method: 'POST', body: { reason: v.reason, details: v.details },
@@ -348,7 +350,14 @@
       label.textContent = t('تثبيت');
     }
 
-    apkStateHandlers[app.slug] = function (status, progress) {
+    apkStateHandlers[app.slug] = function (status, progress, message) {
+      const errMap = {
+        signature_mismatch: t('تعارض توقيع الحزمة: ألغِ التطبيق المثبت ثم ثبّت النسخة الجديدة.'),
+        package_mismatch: t('اسم الحزمة غير متطابق مع التطبيق.'),
+        apk_parse_failed: t('تعذّر قراءة ملف APK.'),
+        install_error: t('فشل التثبيت.'),
+        file_missing: t('ملف التحميل مفقود.'),
+      };
       if (status === 'downloading') {
         btn.classList.add('installing');
         btn.disabled = true;
@@ -378,7 +387,6 @@
         label.textContent = t('تم التنزيل، جارٍ التثبيت…');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
-        S.earnPoints(app.slug);
         return;
       }
       if (status === 'installing') {
@@ -395,7 +403,7 @@
       if (status === 'failed') {
         S.removeActiveDownload(app.slug);
         showIdle();
-        toast(t('تعذّر التنزيل، حاول مجدداً'), 'error');
+        toast(errMap[message] || t('تعذّر التنزيل، حاول مجدداً'), 'error');
       }
     };
 
@@ -518,7 +526,6 @@
         S.addToDownloadHistory(app);
         showInstalled();
         toast(t('اكتمل التحميل وحفظ الملف في جهازك'), 'success');
-        S.earnPoints(app.slug);
       } catch (e) {
         // Streaming failed (network/limits) — fall back to a normal download so
         // the user still gets the file, and don't fake an "installed" state.
@@ -562,7 +569,6 @@
         markInstalledStored(app.slug);
         S.addToDownloadHistory(app);
         showInstalled();
-        S.earnPoints(app.slug);
       } else {
         setProgress(currentProgress);
         // Continue advancing the bar smoothly until completion
@@ -586,8 +592,7 @@
               S.addToDownloadHistory(app);
               showInstalled();
               toast(t('اكتمل التحميل'), 'success');
-              S.earnPoints(app.slug);
-            }, 800);
+                  }, 800);
           }
         }, stepInterval);
       }

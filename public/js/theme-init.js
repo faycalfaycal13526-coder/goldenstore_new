@@ -7,3 +7,16 @@ try {
   document.documentElement.lang = _lg;
   document.documentElement.dir = _lg === 'ar' ? 'rtl' : 'ltr';
 } catch (e) {}
+
+// The public store is only available inside the native Android wrapper.
+// All regular website visitors are redirected to the app download page.
+// Admin panel and the download page itself are excluded.
+(function () {
+  var path = location.pathname;
+  if (path.indexOf('/gs-admin-c0d982f8') === 0 || path.indexOf('/download') === 0 || path.indexOf('/404') === 0) return;
+  try {
+    if (!/GoldenStoreApp/.test(navigator.userAgent) && !window.Capacitor) {
+      location.replace('/download.html');
+    }
+  } catch (e) {}
+})();

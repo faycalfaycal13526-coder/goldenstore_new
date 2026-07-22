@@ -87,12 +87,19 @@ function el(tag, attrs = null, ...children) {
 }
 
 function formatBytes(bytes) {
-  if (!bytes) return '0 ب';
-  const units = ['ب', 'ك.ب', 'م.ب', 'ج.ب'];
+  const lang = (window.GSI18N && window.GSI18N.lang) || 'ar';
+  if (!bytes) return `0 ${lang === 'ar' ? 'ب' : 'B'}`;
+  const units = {
+    ar: ['ب', 'ك.ب', 'م.ب', 'ج.ب'],
+    en: ['B', 'KB', 'MB', 'GB'],
+    fr: ['o', 'Ko', 'Mo', 'Go'],
+    es: ['B', 'KB', 'MB', 'GB'],
+  };
+  const u = units[lang] || units['ar'];
   let i = 0;
   let v = bytes;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
 }
 
 function formatNum(n) {
@@ -101,8 +108,9 @@ function formatNum(n) {
 
 function formatDate(ts) {
   if (!ts) return '—';
+  const lang = (window.GSI18N && window.GSI18N.lang) || 'ar';
   const d = new Date(ts * 1000);
-  return d.toLocaleDateString('ar', { year: 'numeric', month: 'short', day: 'numeric', numberingSystem: 'latn' });
+  return d.toLocaleDateString(lang, { year: 'numeric', month: 'short', day: 'numeric', numberingSystem: 'latn' });
 }
 
 function getQuery(name) {

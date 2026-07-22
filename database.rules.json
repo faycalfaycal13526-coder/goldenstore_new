@@ -1,31 +1,3 @@
 {
-  "rules": {
-    "user_points": {
-      "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
-      }
-    },
-    "withdrawals": {
-      "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
-      }
-    },
-    "referral_codes": {
-      ".read": "auth != null",
-      "$code": {
-        ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
-      }
-    },
-    "referral_claims": {
-      "$owner": {
-        ".read": "auth != null && auth.uid === $owner",
-        "$id": {
-          ".write": "auth != null && ((!data.exists() && newData.child('invitee_uid').val() === auth.uid) || auth.uid === $owner)",
-          ".validate": "newData.hasChildren(['invitee_uid', 'points', 'ts'])"
-        }
-      }
-    }
-  }
+  "rules": {}
 }

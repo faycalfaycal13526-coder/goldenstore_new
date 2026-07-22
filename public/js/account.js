@@ -107,18 +107,7 @@
       ),
     );
 
-    // Points entry — quick access to the rewards page
-    content.append(
-      el('a', { class: 'points-banner', href: '/points' },
-        el('img', { src: '/images/points.png', alt: '', class: 'points-banner-icon' }),
-        el('div', { class: 'points-banner-info' },
-          el('div', { class: 'points-banner-title' }, t('نقاط التشغيل')),
-          el('div', { class: 'points-banner-sub' }, t('اكسب نقاطاً مع كل تثبيت واسحب أرباحك')),
-        ),
-        ico('chevronStart', 'icon icon-sm'),
-      ),
-    );
-
+    // Settings title
     // Settings title
     content.append(el('div', { class: 'page-title', style: { padding: '16px 16px 0' } }, t('الإعدادات')));
 
@@ -193,7 +182,7 @@
     const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
     function close() { overlay.remove(); document.removeEventListener('keydown', esc); }
     function esc(e) { if (e.key === 'Escape') close(); }
-    const card = el('div', { class: 'dialog-card', dir: 'rtl' },
+    const card = el('div', { class: 'dialog-card', dir: document.documentElement.dir || 'rtl' },
       el('div', { class: 'dialog-head' },
         el('div', { class: 'dialog-title' }, ico('logout', 'icon'), t('تسجيل الخروج')),
         el('button', { class: 'dialog-close', 'aria-label': t('إغلاق'), onclick: () => close() }, ico('close')),

@@ -44,6 +44,7 @@ function apiBaseUrl() {
   const cfg = window.Capacitor.getConfig && window.Capacitor.getConfig();
   return (cfg && cfg.apiBase) || 'https://goldenstore.vercel.app';
 }
+
 function fullApiUrl(path) {
   const base = apiBaseUrl();
   return base && path.startsWith('/') ? base + path : path;
@@ -190,18 +191,6 @@ function ratingOf(app) {
 
 function getQuery(name) { return new URLSearchParams(location.search).get(name) || ''; }
 
-const REF_PENDING_KEY = 'gs_ref_pending';
-function getPendingReferral() {
-  try { return localStorage.getItem(REF_PENDING_KEY) || ''; } catch { return ''; }
-}
-function clearPendingReferral() {
-  try { localStorage.removeItem(REF_PENDING_KEY); } catch {}
-}
-function setPendingReferral(code) {
-  const value = sanitizeText(code, 32);
-  if (!value) return;
-  try { localStorage.setItem(REF_PENDING_KEY, value); } catch {}
-}
 
 function toast(msg, type = 'info', ms = 3000) {
   let stack = document.querySelector('.toast-stack');
@@ -344,17 +333,28 @@ const CAT_NAMES = {
   medical: 'طبّي', personalization: 'تخصيص', sports: 'رياضة', weather: 'طقس',
   auto: 'سيارات ومركبات', beauty: 'جمال وتجميل', art_design: 'فنّ وتصميم',
   house_home: 'منزل', parenting: 'أبوّة وأمومة', events: 'فعاليات', comics: 'قصص مصوّرة',
-  other: 'أخرى',
+  vpn: 'VPN وخصوصية', system: 'أدوات النظام', wallpapers: 'خلفيات', files: 'إدارة الملفات',
+  connectivity: 'اتصال وشبكات', other: 'أخرى',
   // Game categories
   game_action: 'أكشن', game_adventure: 'مغامرات', game_arcade: 'أركيد', game_board: 'ألعاب لوحية',
   game_card: 'ورق (كوتشينة)', game_casino: 'كازينو', game_casual: 'عادية', game_educational: 'تعليمية',
   game_music: 'موسيقى', game_puzzle: 'ألغاز', game_racing: 'سباقات', game_rpg: 'تقمّص أدوار',
   game_simulation: 'محاكاة', game_sports: 'رياضية', game_strategy: 'استراتيجية',
   game_trivia: 'معلومات عامة', game_word: 'كلمات', game_other: 'ألعاب أخرى',
+  game_family: 'عائلية', game_shooter: 'إطلاق نار', game_action_adventure: 'حركة ومغامرة',
+  game_role_playing: 'ألعاب جماعية',
   // Legacy
   games: 'ألعاب',
 };
-function categoryName(slug) { return t(CAT_NAMES[slug] || ''); }
+function categoryName(slug) {
+  if (!slug) return '';
+  const known = CAT_NAMES[slug];
+  if (known) return t(known);
+  const lookup = window.GSI18N && window.GSI18N.lookup;
+  const arKey = typeof lookup === 'function' ? lookup(slug) : null;
+  if (arKey) return t(arKey);
+  return t(slug);
+}
 
 /* -------------------------- States UI -------------------------- */
 function spinner() { return el('div', { class: 'center' }, el('div', { class: 'spinner' })); }
@@ -536,9 +536,14 @@ async function openNotifications() {
 
   list.forEach((n) => {
     const type = n.type === 'new_app' || n.type === 'update' || n.type === 'announcement' ? n.type : 'announcement';
-    const row = n.app_slug
-      ? el('a', { class: 'notif-row', href: `/app?slug=${encodeURIComponent(n.app_slug)}` })
-      : el('div', { class: 'notif-row' });
+    let row;
+    if (type === 'update' && n.data && n.data.apk_url) {
+      row = el('a', { class: 'notif-row', href: '#', onclick: (e) => { e.preventDefault(); showUpdateDialog(n.data); overlay.remove(); } });
+    } else if (n.app_slug) {
+      row = el('a', { class: 'notif-row', href: `/app?slug=${encodeURIComponent(n.app_slug)}` });
+    } else {
+      row = el('div', { class: 'notif-row' });
+    }
     row.append(
       el('div', { class: 'notif-ico' }, ico(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell')),
       el('div', { class: 'notif-info' },
@@ -597,7 +602,6 @@ const NAV_ITEMS_RAW = [
   { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/' },
   { key: 'games', label: 'الألعاب', icon: 'gamepad', href: '/games' },
   { key: 'library', label: 'مكتبتي', icon: 'download', href: '/account?tab=library' },
-  { key: 'points', label: 'نقاطي', icon: 'coin', href: '/points' },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];
 function bottomNav(active) {
@@ -688,289 +692,6 @@ function ready(fn) {
 
 function isLoggedIn() { return !!_user; }
 
-/* --------------------------- Points (نقاط التشغيل) --------------------------- */
-const POINTS_CONFIG = {
-  points_per_download: 10,
-  points_per_dollar: 1000,
-  min_withdraw_usd: 5,
-  min_withdraw_points: 5000,
-  referral_inviter: 10,
-  referral_invitee: 5,
-};
-
-const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-
-function pointsDb() {
-  if (typeof firebase === 'undefined' || !firebase.database) {
-    throw new Error('firebase_database_unavailable');
-  }
-  return firebase.database();
-}
-
-async function currentPointsUser() {
-  if (!window.GAuth) return null;
-  let user = typeof window.GAuth.getUser === 'function' ? window.GAuth.getUser() : null;
-  if (!user && typeof window.GAuth.ready === 'function') {
-    user = await window.GAuth.ready();
-  }
-  if (!user && typeof window.GAuth.getUser === 'function') {
-    user = window.GAuth.getUser();
-  }
-  return user && user.uid ? user : null;
-}
-
-function unauthorizedError() {
-  const e = new Error('unauthorized');
-  e.status = 401;
-  return e;
-}
-
-function sanitizeText(value, maxLen) {
-  return String(value == null ? '' : value).trim().slice(0, maxLen);
-}
-
-function normalizeReferralCode(code) {
-  return sanitizeText(code, 32).toUpperCase();
-}
-
-function randomReferralCode() {
-  const bytes = new Uint8Array(6);
-  if (window.crypto && window.crypto.getRandomValues) {
-    window.crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-  }
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    out += REFERRAL_CODE_ALPHABET[bytes[i] % REFERRAL_CODE_ALPHABET.length];
-  }
-  return out;
-}
-
-function referralError(code) {
-  const e = new Error(code);
-  e.data = { error: code };
-  return e;
-}
-
-// Rejects if the wrapped promise doesn't settle in time. Firebase RTDB
-// operations hang indefinitely (no rejection) when the database instance is
-// unreachable/not provisioned, which would otherwise leave the page spinning
-// forever — this converts that into a normal error the UI can surface.
-function withTimeout(promise, ms, label) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const e = new Error(label || 'timeout');
-      e.code = 'timeout';
-      reject(e);
-    }, ms);
-    Promise.resolve(promise).then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
-
-function transactionPromise(ref, updateFn) {
-  return new Promise((resolve, reject) => {
-    ref.transaction(updateFn, (error, committed, snapshot) => {
-      if (error) reject(error);
-      else resolve({ committed, snapshot });
-    }, false);
-  });
-}
-
-async function readOnce(ref, ms = 12000, label = 'timeout') {
-  return withTimeout(ref.once('value'), ms, label);
-}
-
-async function processReferralClaims(uid) {
-  if (!uid) return;
-  try {
-    const db = pointsDb();
-    const claimsRef = db.ref(`referral_claims/${uid}`);
-    const userRef = db.ref(`user_points/${uid}`);
-    const [claimsSnap, userSnap] = await withTimeout(Promise.all([
-      claimsRef.once('value'),
-      userRef.once('value'),
-    ]), 6000, 'referrals_timeout');
-
-    const state = userSnap && userSnap.val ? (userSnap.val() || {}) : {};
-    const referredInvitees = state.referred_invitees && typeof state.referred_invitees === 'object'
-      ? state.referred_invitees
-      : {};
-    const claims = [];
-    if (claimsSnap && claimsSnap.forEach) {
-      claimsSnap.forEach((child) => {
-        const val = child.val() || {};
-        const inviteeUid = sanitizeText(val.invitee_uid, 128);
-        if (!inviteeUid) return;
-        claims.push({ id: child.key, invitee_uid: inviteeUid, points: Number(val.points || 0), processed: !!val.processed });
-      });
-    }
-    if (!claims.length) return;
-
-    const byInvitee = new Map();
-    claims.forEach((claim) => {
-      if (!byInvitee.has(claim.invitee_uid)) byInvitee.set(claim.invitee_uid, []);
-      byInvitee.get(claim.invitee_uid).push(claim.id);
-    });
-    const newInvitees = Array.from(byInvitee.keys()).filter((inviteeUid) => !referredInvitees[inviteeUid]);
-    if (newInvitees.length) {
-      await withTimeout(transactionPromise(userRef, (current) => {
-        const currentState = current && typeof current === 'object' ? current : {};
-        const currentInvitees = currentState.referred_invitees && typeof currentState.referred_invitees === 'object'
-          ? currentState.referred_invitees
-          : {};
-        const stillNew = newInvitees.filter((inviteeUid) => !currentInvitees[inviteeUid]);
-        if (!stillNew.length) return currentState;
-        const next = Object.assign({}, currentState);
-        next.balance = Number(next.balance || 0) + (POINTS_CONFIG.referral_inviter * stillNew.length);
-        next.total_earned = Number(next.total_earned || 0) + (POINTS_CONFIG.referral_inviter * stillNew.length);
-        next.referral_points = Number(next.referral_points || 0) + (POINTS_CONFIG.referral_inviter * stillNew.length);
-        next.referral_count = Number(next.referral_count || 0) + stillNew.length;
-        next.referred_invitees = Object.assign({}, currentInvitees);
-        stillNew.forEach((inviteeUid) => { next.referred_invitees[inviteeUid] = true; });
-        next.updated_at = Date.now();
-        return next;
-      }), 6000, 'referrals_timeout');
-    }
-    await withTimeout(
-      Promise.all(claims.map((claim) => claimsRef.child(claim.id).update({ processed: true }).catch(() => {}))),
-      6000,
-      'referrals_timeout',
-    ).catch(() => {});
-  } catch (e) {}
-}
-
-async function ensureReferralCode(user) {
-  if (!user || !user.uid) throw unauthorizedError();
-  const db = pointsDb();
-  const uid = user.uid;
-  const userRef = db.ref(`user_points/${uid}`);
-  const userSnap = await withTimeout(userRef.once('value'), 6000, 'referral_timeout');
-  const current = userSnap && userSnap.val ? (userSnap.val() || {}) : {};
-  if (current.referral_code) {
-    await withTimeout(transactionPromise(db.ref(`referral_codes/${current.referral_code}`), (value) => value || uid), 6000, 'referral_timeout').catch(() => {});
-    return current.referral_code;
-  }
-
-  for (let i = 0; i < 8; i += 1) {
-    const code = randomReferralCode();
-    const codeRef = db.ref(`referral_codes/${code}`);
-    const codeSnap = await withTimeout(codeRef.once('value'), 6000, 'referral_timeout');
-    if (codeSnap && codeSnap.exists && codeSnap.exists()) continue;
-    const codeTxn = await transactionPromise(codeRef, (value) => {
-      if (value && value !== uid) return value;
-      return uid;
-    });
-    if (!codeTxn.committed) continue;
-    const userTxn = await transactionPromise(userRef, (value) => {
-      const state = value && typeof value === 'object' ? value : {};
-      if (state.referral_code) return state;
-      const next = Object.assign({}, state, {
-        referral_code: code,
-        updated_at: Date.now(),
-      });
-      return next;
-    });
-    if (userTxn.committed) return code;
-    const latestSnap = await withTimeout(userRef.once('value'), 6000, 'referral_timeout');
-    const latest = latestSnap && latestSnap.val ? (latestSnap.val() || {}) : {};
-    if (latest.referral_code) {
-      if (latest.referral_code !== code) {
-        await withTimeout(codeRef.remove(), 6000, 'referral_timeout').catch(() => {});
-      }
-      return latest.referral_code;
-    }
-    await withTimeout(codeRef.remove(), 6000, 'referral_timeout').catch(() => {});
-  }
-
-  throw new Error('referral_code_unavailable');
-}
-
-async function getReferral() {
-  const user = await currentPointsUser();
-  if (!user || !user.uid) throw unauthorizedError();
-  const uid = user.uid;
-  processReferralClaims(uid).catch(() => {});
-  const code = await ensureReferralCode(user);
-  const db = pointsDb();
-  const snap = await withTimeout(db.ref(`user_points/${uid}`).once('value'), 8000, 'referral_timeout');
-  const state = snap && snap.val ? (snap.val() || {}) : {};
-  return {
-    code,
-    referred_by: state.referred_by || '',
-    referral_count: Number(state.referral_count || 0),
-    referral_points: Number(state.referral_points || 0),
-    invite_url: `${location.origin}/points?ref=${code}`,
-  };
-}
-
-async function applyReferral(rawCode) {
-  const code = normalizeReferralCode(rawCode);
-  if (!code || code.length !== 6 || !new RegExp(`^[${REFERRAL_CODE_ALPHABET}]{6}$`).test(code)) {
-    const e = referralError('invalid_code');
-    e.status = 400;
-    throw e;
-  }
-
-  const user = await currentPointsUser();
-  if (!user || !user.uid) throw unauthorizedError();
-  const db = pointsDb();
-  const uid = user.uid;
-  const codeSnap = await withTimeout(db.ref(`referral_codes/${code}`).once('value'), 12000, 'referral_timeout').catch(() => null);
-  if (!codeSnap || !codeSnap.exists || !codeSnap.exists()) {
-    const e = referralError('invalid_code');
-    e.status = 400;
-    throw e;
-  }
-  const inviterUid = codeSnap.val();
-  if (!inviterUid || typeof inviterUid !== 'string') {
-    const e = referralError('invalid_code');
-    e.status = 400;
-    throw e;
-  }
-  if (inviterUid === uid) {
-    const e = referralError('self_referral');
-    e.status = 400;
-    throw e;
-  }
-
-  const userRef = db.ref(`user_points/${uid}`);
-  let lastError = null;
-  const txn = await transactionPromise(userRef, (current) => {
-    lastError = null;
-    const state = current && typeof current === 'object' ? current : {};
-    if (state.referred_by) {
-      lastError = 'already_referred';
-      return;
-    }
-    const next = Object.assign({}, state);
-    next.balance = Number(next.balance || 0) + POINTS_CONFIG.referral_invitee;
-    next.total_earned = Number(next.total_earned || 0) + POINTS_CONFIG.referral_invitee;
-    next.referred_by = code;
-    next.updated_at = Date.now();
-    return next;
-  });
-  if (!txn.committed) {
-    const e = referralError(lastError || 'already_referred');
-    e.status = 400;
-    throw e;
-  }
-
-  try {
-    const claimRef = db.ref(`referral_claims/${inviterUid}`).push();
-    await withTimeout(claimRef.set({
-      invitee_uid: uid,
-      points: POINTS_CONFIG.referral_inviter,
-      ts: Date.now(),
-    }), 12000, 'referral_timeout');
-  } catch (e) {}
-
-  return { ok: true, invitee_reward: POINTS_CONFIG.referral_invitee };
-}
-
 async function authedApi(path, opts = {}) {
   if (!window.GAuth || !window.GAuth.getIdToken) { const e = new Error('unauthorized'); e.status = 401; throw e; }
   // Pages render optimistically from the cached user, so Firebase may not have
@@ -982,187 +703,6 @@ async function authedApi(path, opts = {}) {
   return api(path, { ...opts, headers });
 }
 
-// REST read fallback: the realtime SDK connection (websocket/long-polling) is
-// blocked on some networks/browsers, which made the points page fail even
-// though the database itself is reachable over plain HTTPS.
-async function rtdbRestGet(path) {
-  const base = (typeof firebase !== 'undefined' && firebase.app && firebase.app().options.databaseURL) || '';
-  if (!base) throw new Error('rtdb_unavailable');
-  const url = `${base.replace(/\/+$/, '')}/${path}.json`;
-  let token = null;
-  try {
-    token = window.GAuth && window.GAuth.getIdToken ? await window.GAuth.getIdToken() : null;
-  } catch {}
-  let res = await withTimeout(fetch(token ? `${url}?auth=${encodeURIComponent(token)}` : url), 10000, 'points_timeout');
-  if (!res.ok && token && (res.status === 401 || res.status === 403)) {
-    res = await withTimeout(fetch(url), 10000, 'points_timeout');
-  }
-  if (!res.ok) { const e = new Error('rtdb_rest_failed'); e.status = res.status; throw e; }
-  return res.json();
-}
-
-async function pointsBalance() {
-  const user = await currentPointsUser();
-  if (!user || !user.uid) throw unauthorizedError();
-  const uid = user.uid;
-  // Process referral claims in the background — don't block balance display
-  withTimeout(processReferralClaims(uid), 8000, 'referrals_timeout').catch(() => {});
-
-  let state = {};
-  let rawWithdrawals = {};
-  try {
-    const db = pointsDb();
-    const [pointsSnap, withdrawalsSnap] = await withTimeout(Promise.all([
-      db.ref(`user_points/${uid}`).once('value'),
-      db.ref(`withdrawals/${uid}`).once('value').catch(() => null),
-    ]), 7000, 'points_timeout');
-    state = pointsSnap && pointsSnap.val && pointsSnap.val() ? pointsSnap.val() : {};
-    rawWithdrawals = withdrawalsSnap && withdrawalsSnap.val ? (withdrawalsSnap.val() || {}) : {};
-  } catch (sdkErr) {
-    const [restState, restWithdrawals] = await Promise.all([
-      rtdbRestGet(`user_points/${uid}`),
-      rtdbRestGet(`withdrawals/${uid}`).catch(() => null),
-    ]);
-    state = restState && typeof restState === 'object' ? restState : {};
-    rawWithdrawals = restWithdrawals && typeof restWithdrawals === 'object' ? restWithdrawals : {};
-  }
-
-  const balance = Number(state.balance || 0);
-  const dollars = Number((balance / POINTS_CONFIG.points_per_dollar).toFixed(2));
-
-  let withdrawals = [];
-  try {
-    withdrawals = Object.entries(rawWithdrawals)
-      .map(([id, record]) => ({ id, ...(record && typeof record === 'object' ? record : {}) }))
-      .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
-      .slice(0, 50);
-  } catch {}
-
-  return {
-    balance,
-    dollars,
-    total_earned: Number(state.total_earned || 0),
-    total_withdrawn_usd: Number(state.withdrawn_amount || 0),
-    can_withdraw: balance >= POINTS_CONFIG.min_withdraw_points,
-    withdrawals,
-    config: POINTS_CONFIG,
-  };
-}
-
-async function pointsWithdraw(payload = {}) {
-  const user = await currentPointsUser();
-  if (!user || !user.uid) throw unauthorizedError();
-  const db = pointsDb();
-  const uid = user.uid;
-  const method = sanitizeText(payload.method, 40);
-  const account = sanitizeText(payload.account, 200);
-  const requestedAmount = payload.amount_usd == null || payload.amount_usd === ''
-    ? null
-    : Math.floor(Number(payload.amount_usd));
-  const pointsRef = db.ref(`user_points/${uid}`);
-  const withdrawalsRef = db.ref(`withdrawals/${uid}`);
-
-  let lastError = null;
-  let appliedAmount = null;
-  let withdrawalData = null;
-
-  const { committed, snapshot } = await withTimeout(transactionPromise(pointsRef, (current) => {
-    lastError = null;
-    const state = current && typeof current === 'object' ? current : {};
-    const balance = Number(state.balance || 0);
-    const totalEarned = Number(state.total_earned || 0);
-    const withdrawnAmount = Number(state.withdrawn_amount || 0);
-    const totalWithdrawals = Number(state.total_withdrawals || 0);
-    const earnedApps = state.earned_apps && typeof state.earned_apps === 'object' ? state.earned_apps : {};
-    const maxUsd = Math.floor(balance / POINTS_CONFIG.points_per_dollar);
-    const amountUsd = requestedAmount == null ? maxUsd : requestedAmount;
-
-    if (maxUsd < POINTS_CONFIG.min_withdraw_usd) {
-      lastError = 'insufficient_points';
-      return;
-    }
-    if (!Number.isFinite(amountUsd) || amountUsd < POINTS_CONFIG.min_withdraw_usd) {
-      lastError = 'below_minimum';
-      return;
-    }
-    if (amountUsd > maxUsd) {
-      lastError = 'insufficient_points';
-      return;
-    }
-
-    appliedAmount = amountUsd;
-    withdrawalData = {
-      uid,
-      email: user.email || '',
-      name: user.displayName || '',
-      points_spent: amountUsd * POINTS_CONFIG.points_per_dollar,
-      amount_usd: amountUsd,
-      method,
-      account,
-      status: 'pending',
-      ts: Date.now(),
-    };
-
-    return {
-      balance: balance - withdrawalData.points_spent,
-      total_earned: totalEarned,
-      withdrawn_amount: withdrawnAmount + amountUsd,
-      total_withdrawals: totalWithdrawals + 1,
-      earned_apps: earnedApps,
-      updated_at: Date.now(),
-    };
-  }), 12000, 'withdraw_timeout');
-
-  if (!committed) {
-    const e = new Error(lastError || 'withdraw_failed');
-    e.status = 400;
-    if (lastError) e.data = { error: lastError };
-    throw e;
-  }
-
-  const pushRef = withdrawalsRef.push();
-  await pushRef.set(withdrawalData);
-  const finalState = snapshot && snapshot.val ? (snapshot.val() || {}) : {};
-  return {
-    ok: true,
-    balance: Number(finalState.balance || 0),
-    amount_usd: appliedAmount,
-    withdrawal_id: pushRef.key,
-  };
-}
-
-// Grant points for installing an app. Safe to call multiple times — the
-// database only awards once per app per user. Silently no-ops for signed-out users.
-async function earnPoints(slug) {
-  if (!slug) return null;
-  const user = await currentPointsUser();
-  if (!user || !user.uid) return null;
-  try {
-    const db = pointsDb();
-    const uid = user.uid;
-    const ref = db.ref(`user_points/${uid}`);
-    let earned = 0;
-    await transactionPromise(ref, (current) => {
-      const state = current && typeof current === 'object' ? current : {};
-      const earnedApps = state.earned_apps && typeof state.earned_apps === 'object' ? state.earned_apps : {};
-      if (earnedApps[slug]) return state;
-      earned = POINTS_CONFIG.points_per_download;
-      return {
-        balance: Number(state.balance || 0) + earned,
-        total_earned: Number(state.total_earned || 0) + earned,
-        withdrawn_amount: Number(state.withdrawn_amount || 0),
-        total_withdrawals: Number(state.total_withdrawals || 0),
-        earned_apps: Object.assign({}, earnedApps, { [slug]: true }),
-        updated_at: Date.now(),
-      };
-    });
-    if (earned) {
-      toast('+' + earned + ' ' + t('نقطة في حسابك'), 'success');
-      return { ok: true, earned };
-    }
-    return null;
-  } catch (e) { return null; }
-}
 // Shows a login-required modal; returns a Promise that resolves to the user
 // (after successful sign-in) or rejects if cancelled.
 function requireAuth() {
@@ -1209,9 +749,6 @@ function goToLogin() {
 }
 
 function initAuth() {
-  const refCode = sanitizeText(getQuery('ref'), 32);
-  if (refCode) setPendingReferral(refCode);
-
   // Localhost-only preview bypass (never active in production).
   if (isLocalhost() && getQuery('devskip') === '1') { onAuthed(devUser()); return; }
 
@@ -1247,8 +784,121 @@ async function signOut() {
   location.href = '/';
 }
 
+/* ----------------------------- App update popup ----------------------------- */
+const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
+
+function getCurrentAppVersion() {
+  try {
+    const cfg = window.Capacitor && window.Capacitor.getConfig && window.Capacitor.getConfig();
+    if (cfg && cfg.appVersion) return String(cfg.appVersion);
+  } catch (e) {}
+  return '1.0';
+}
+
+function shouldShowUpdate(update) {
+  if (!update || !update.version_name || !update.apk_url) return false;
+  try {
+    const dismissed = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
+    if (!update.force && dismissed[update.version_name]) return false;
+  } catch (e) {}
+  return String(update.version_name) !== getCurrentAppVersion();
+}
+
+function showUpdateDialog(update) {
+  if (!update || !update.apk_url) return;
+  const existing = document.getElementById('gs-update-dialog');
+  if (existing) existing.remove();
+
+  const overlay = el('div', {
+    id: 'gs-update-dialog',
+    style: {
+      position: 'fixed', inset: '0', zIndex: '300',
+      background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+    },
+  });
+  const card = el('div', {
+    style: {
+      background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '20px',
+      maxWidth: '420px', width: '100%', padding: '24px', textAlign: 'center', boxShadow: '0 24px 80px rgba(0,0,0,.4)',
+    },
+  },
+    el('div', { style: { fontSize: '48px', marginBottom: '10px' } }, '⬆'),
+    el('h2', { style: { fontSize: '20px', marginBottom: '8px' } }, t('تحديث جديد متاح')),
+    el('p', { style: { color: 'var(--text-2)', fontSize: '14px', lineHeight: '1.7', marginBottom: '18px' } },
+      update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.'),
+    ),
+  );
+
+  const android = window.GSAndroid;
+  function startDownload() {
+    if (android && typeof android.downloadApk === 'function') {
+      const filename = 'goldenstore-' + (update.version_name || 'update') + '.apk';
+      try {
+        android.downloadApk(update.apk_url, filename, 'app-update', 'com.goldenstore.app');
+        card.innerHTML = '<div style="font-size:48px;margin-bottom:10px">⬇</div><h2 style="font-size:20px;margin-bottom:8px">' + t('جارٍ التحميل…') + '</h2><p style="color:var(--text-2);font-size:14px;line-height:1.7">' + t('سيتم التثبيت تلقائياً عند اكتمال التحميل.') + '</p>';
+        return;
+      } catch (e) {}
+    }
+    // Fallback: open the APK URL in the system/browser.
+    window.open(update.apk_url, '_blank');
+    setTimeout(() => overlay.remove(), 200);
+  }
+
+  const actions = el('div', { style: { display: 'flex', gap: '10px', flexDirection: 'column' } },
+    el('button', {
+      class: 'btn btn-primary btn-lg',
+      type: 'button',
+      onclick: startDownload,
+    }, ico('download'), t('تحميل الآن')),
+    update.force ? null : el('button', {
+      class: 'btn btn-secondary',
+      type: 'button',
+      onclick: () => {
+        try { const d = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}'); d[update.version_name] = Date.now(); localStorage.setItem(APP_UPDATE_DISMISS_KEY, JSON.stringify(d)); } catch (e) {}
+        overlay.remove();
+      },
+    }, t('لاحقاً')),
+  );
+  card.append(actions);
+
+  overlay.append(card);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay && !update.force) overlay.remove(); });
+  document.body.append(overlay);
+}
+
+window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
+  if (slug !== 'app-update') return;
+  if (status === 'failed') {
+    const map = {
+      signature_mismatch: t('تعارض توقيع الحزمة: ألغِ التطبيق المثبت ثم ثبّت النسخة الجديدة.'),
+      package_mismatch: t('اسم الحزمة غير متطابق مع التطبيق.'),
+      apk_parse_failed: t('تعذّر قراءة ملف APK.'),
+      install_error: t('فشل التثبيت.'),
+      file_missing: t('ملف التحميل مفقود.'),
+    };
+    toast(map[message] || t('فشل التحميل'), 'error');
+    const card = document.querySelector('#gs-update-dialog .gs-update-card');
+    if (card) card.innerHTML = '<div style="font-size:48px;margin-bottom:10px">⚠</div><h2 style="font-size:20px;margin-bottom:8px">' + t('فشل التحديث') + '</h2><p style="color:var(--text-2);font-size:14px;line-height:1.7">' + (map[message] || t('تعذّر تحديث التطبيق. حاول إلغاء التثبيت وإعادة المحاولة.')) + '</p>';
+  } else if (status === 'installed') {
+    toast(t('تم التحديث بنجاح'), 'success');
+    setTimeout(() => { try { location.reload(); } catch (e) {} }, 500);
+  }
+};
+
+async function checkAppUpdate() {
+  if (!isNativeApp()) return;
+  try {
+    const update = await api('/api/app-update', { timeoutMs: 8000 });
+    if (shouldShowUpdate(update)) showUpdateDialog(update);
+  } catch (e) { console.error('[appUpdate] check failed', e); }
+}
+
 /* ----------------------------- Boot ----------------------------- */
-function boot() { initAuth(); }
+function boot() {
+  initAuth();
+  // Check for a newer app version shortly after the store renders.
+  if (isNativeApp()) setTimeout(checkAppUpdate, 2000);
+}
 
 /* ----------------------------- Download History ----------------------------- */
 const DL_HISTORY_KEY = 'gs_downloads';
@@ -1363,17 +1013,42 @@ function onActiveDownloadsChange(fn) {
   var currentToken = null;
   var registeredToken = null;
 
+  function getStoredReg() {
+    try { return JSON.parse(localStorage.getItem('__gs_push_reg')); } catch (e) { return null; }
+  }
+  function setStoredReg(token, uid) {
+    try { localStorage.setItem('__gs_push_reg', JSON.stringify({ token: token, uid: uid, ts: Date.now() })); } catch (e) {}
+  }
+  function clearStoredReg() {
+    try { localStorage.removeItem('__gs_push_reg'); } catch (e) {}
+  }
+
+  function currentUid() {
+    try { return window.Store && window.Store.getUser && window.Store.getUser().uid; } catch (e) { return null; }
+  }
+
   async function registerIfPossible() {
     if (!currentToken) return;
     if (registeredToken === currentToken) return;
+    if (!window.Store || !window.Store.isLoggedIn || !window.Store.isLoggedIn()) return;
+    var uid = currentUid();
+    var stored = getStoredReg();
+    if (stored && stored.token === currentToken && stored.uid === uid) {
+      registeredToken = currentToken;
+      return;
+    }
     try {
-      if (!window.Store || !window.Store.isLoggedIn || !window.Store.isLoggedIn()) return;
       await authedApi('/api/notifications/register-token', {
         method: 'POST',
         body: JSON.stringify({ token: currentToken, platform: 'android' }),
       });
       registeredToken = currentToken;
-    } catch (e) { /* retry on next auth/token event */ }
+      setStoredReg(currentToken, uid);
+      console.log('[pushBridge] token registered', currentToken.slice(0, 16));
+    } catch (e) {
+      console.error('[pushBridge] register token failed', e);
+      try { toast(t('فشل تفعيل الإشعارات: ') + (e && e.message ? e.message : 'unknown'), 'error', 4000); } catch (t) {}
+    }
   }
 
   window.__gsRegisterPushToken = function (token) {
@@ -1386,6 +1061,7 @@ function onActiveDownloadsChange(fn) {
     var tok = token || currentToken;
     if (!tok) return;
     registeredToken = null;
+    clearStoredReg();
     try {
       api('/api/notifications/unregister-token', {
         method: 'POST',
@@ -1413,10 +1089,10 @@ window.Store = {
   topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications,
   ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
-  pointsConfig: POINTS_CONFIG, getReferral, applyReferral, getPendingReferral, clearPendingReferral,
-  earnPoints, pointsBalance, pointsWithdraw,
+  apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
+  checkAppUpdate, showUpdateDialog,
 };
 
 document.addEventListener('DOMContentLoaded', boot);

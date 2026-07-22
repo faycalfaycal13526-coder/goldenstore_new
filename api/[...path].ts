@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { getCookie, setCookie } from 'hono/cookie';
 import { getRequestListener } from '@hono/node-server';
 import crypto from 'node:crypto';
-import { firestore, getFieldValue, verifyFirebaseToken, messaging } from '../lib/firebase.js';
+import { firestore, getFieldValue, verifyFirebaseToken, messaging, getAuthAdmin } from '../lib/firebase.js';
 import {
   r2PresignPut,
   r2PresignGet,
@@ -202,6 +202,7 @@ function notificationPublic(doc: any) {
     body: sanitizeText(d.body, 1000),
     type,
     app_slug: sanitizeText(d.app_slug, 120),
+    data: d.data || null,
     created_at: Number(d.created_at || 0),
   };
 }
@@ -250,12 +251,14 @@ async function addNotification(db: any, data: any) {
   const body = sanitizeText(data.body, 1000);
   const type = data.type === 'new_app' || data.type === 'update' ? data.type : 'announcement';
   const app_slug = sanitizeText(data.app_slug, 120);
+  const payloadData = data.data && typeof data.data === 'object' ? data.data : null;
   const created_at = Number(data.created_at || nowSec());
   const ref = await db.collection('notifications').add({
     title,
     body,
     type,
     app_slug: app_slug || '',
+    data: payloadData,
     created_at,
   });
   // Push to all registered (logged-in) devices. This MUST be awaited: on
@@ -272,6 +275,7 @@ async function addNotification(db: any, data: any) {
       app_slug: app_slug || '',
       id: ref.id,
       image,
+      data: payloadData,
     });
   } catch (err: any) {
     console.error('[fcm] push failed:', err?.message || err);
@@ -287,7 +291,7 @@ type PushResult = { targeted: number; success: number; failure: number; errors: 
 
 async function sendPushToRegistered(
   db: any,
-  n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string },
+  n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
 ): Promise<PushResult> {
   const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   let tokensSnap: any;
@@ -321,6 +325,10 @@ async function sendPushToRegistered(
     image: n.image || '',
     store_logo: STORE_LOGO_URL,
   };
+  // Include extra payload data (e.g. app update link) as a JSON string.
+  if (n.data && typeof n.data === 'object') {
+    try { dataPayload.extra = JSON.stringify(n.data); } catch {}
+  }
   // Send in batches of 500 (FCM multicast limit).
   const invalidTokens: string[] = [];
   for (let i = 0; i < tokens.length; i += 500) {
@@ -373,12 +381,67 @@ app.get('/store', (c) => {
   });
 });
 
+// Latest published app update (used by the download landing page and the Android app).
+app.get('/app-update', async (c) => {
+  try {
+    const db = await firestore();
+    const doc = await db.collection('app_updates').doc('current').get();
+    if (!doc.exists) return c.json({});
+    const d = doc.data() || {};
+    const version_code = safeInt(d.version_code, 0, 999999999);
+    const apk_url = sanitizeUrl(d.apk_url) || sanitizeUrl(d.url) || '';
+    const notes = sanitizeText(d.notes, 1000);
+    const out: Record<string, any> = {
+      version_name: sanitizeText(d.version_name, 60) || '',
+      version_code,
+      apk_url,
+      url: apk_url,
+      notes,
+      message: notes,
+      force: d.force === true,
+      created_at: Number(d.created_at || 0),
+    };
+    // Native update-check.js expects { update: {...} }
+    out.update = { ...out };
+    return c.json(out);
+  } catch (err: any) {
+    console.error('[app-update] get failed:', err?.message || err);
+    return c.json({});
+  }
+});
+
+// Issue a Firebase custom auth token for an anonymous guest session.
+// This lets the Android app work without requiring a SHA-1 fingerprint for
+// Google Sign-In. The client trades this token for a real Firebase session.
+app.get('/auth/token', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'auth-token', 20, 60)) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
+  try {
+    const uid = 'gs_' + randomId();
+    const auth = await getAuthAdmin();
+    const token = await auth.createCustomToken(uid);
+    return c.json({ token, uid });
+  } catch (err: any) {
+    console.error('[auth/token] failed:', err?.message || err);
+    return c.json({ error: 'token_creation_failed' }, 500);
+  }
+});
+
 app.get('/notifications', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') || '30') || 30, 50);
   const db = await firestore();
   const notifications = await listNotifications(db, limit);
   return c.json({ notifications });
 });
+
+async function requireFirebaseUser(c: any) {
+  const authHeader = c.req.header('authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) return null;
+  return verifyFirebaseToken(token);
+}
 
 // Register an FCM device token for the logged-in user. Only authenticated
 // users can register, so pushes are delivered to registered users only.
@@ -1060,6 +1123,7 @@ app.post('/admin/notifications', async (c) => {
   const title = sanitizeText(body.title, 200);
   const text = sanitizeText(body.body, 1000);
   if (!title) return c.json({ error: 'title_required' }, 400);
+
   const { ref, push } = await addNotification(db, {
     title,
     body: text,
@@ -1069,6 +1133,70 @@ app.post('/admin/notifications', async (c) => {
   // `push` reports how many devices were targeted / succeeded so the dashboard
   // can tell whether the notification actually went out over FCM.
   return c.json({ ok: true, id: ref.id, push });
+});
+
+// Publish/update the public app download link. This is shown on the landing
+// page and checked by the Android app on launch. Optionally sends a push
+// notification so users open the update dialog.
+app.post('/admin/app-update', async (c) => {
+  const body = await c.req.json().catch(() => ({} as any));
+  const version_name = sanitizeText(body.version_name, 60);
+  const version_code = safeInt(body.version_code, 0, 999999999);
+
+  let apk_url = sanitizeUrl(body.apk_url);
+  let apk_key = String(body.apk_key || '').trim();
+  let size_bytes = 0;
+
+  if (!apk_url && !apk_key) return c.json({ error: 'apk_url_or_key_required' }, 400);
+
+  if (apk_key) {
+    if (!isValidR2Key(apk_key, 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
+    const head = await r2Head(apk_key);
+    if (!head) return c.json({ error: 'apk_not_found_in_r2' }, 400);
+    apk_url = r2PublicUrl(apk_key);
+    size_bytes = head.size || 0;
+  }
+
+  if (!apk_url) return c.json({ error: 'apk_url_required' }, 400);
+
+  const db = await firestore();
+  const updateDoc: any = {
+    version_name: version_name || '',
+    version_code,
+    apk_url,
+    apk_key: apk_key || undefined,
+    notes: sanitizeText(body.notes, 1000),
+    force: body.force === true,
+    size_bytes,
+    created_at: nowSec(),
+  };
+  await db.collection('app_updates').doc('current').set(updateDoc);
+
+  let push: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
+  if (body.send_notification) {
+    try {
+      const title = version_name ? `تحديث Golden Store ${version_name}` : 'تحديث Golden Store متاح';
+      const { push: p } = await addNotification(db, {
+        type: 'update',
+        title,
+        body: updateDoc.notes || 'حمل النسخة الجديدة الآن',
+        app_slug: '',
+        data: {
+          version_name: updateDoc.version_name,
+          version_code: updateDoc.version_code,
+          apk_url: updateDoc.apk_url,
+          notes: updateDoc.notes,
+          force: updateDoc.force,
+        },
+        created_at: updateDoc.created_at,
+      });
+      push = p;
+    } catch (err: any) {
+      console.error('[admin/app-update] notification failed:', err?.message || err);
+      push.errors.push(err?.message || String(err));
+    }
+  }
+  return c.json({ ok: true, update: updateDoc, push });
 });
 
 // Diagnostics: how many device tokens are registered right now.
@@ -1539,239 +1667,6 @@ app.delete('/admin/apps/:id', async (c) => {
   if (a.icon_key) await r2Delete(a.icon_key).catch(() => {});
   if (a.feature_key) await r2Delete(a.feature_key).catch(() => {});
   await ref.delete();
-  return c.json({ ok: true });
-});
-
-// ---------------- Points system (نقاط التشغيل) ----------------
-// Points are earned server-side only. Firebase ID token is verified to prevent
-// forgery, and each app can award points to a given user only once. Withdrawals
-// require a minimum balance and are logged for manual admin review/payout.
-
-const POINTS_PER_DOWNLOAD = 10;     // points granted per first install of an app
-const POINTS_PER_DOLLAR = 1000;     // 1000 points = $1
-const MIN_WITHDRAW_USD = 5;          // minimum payout request
-const MIN_WITHDRAW_POINTS = MIN_WITHDRAW_USD * POINTS_PER_DOLLAR; // 5000
-
-async function requireFirebaseUser(c: any): Promise<{ uid: string; email?: string; name?: string } | null> {
-  const authHeader = c.req.header('authorization') || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) return null;
-  return verifyFirebaseToken(token);
-}
-
-function pointsConfig() {
-  return {
-    points_per_download: POINTS_PER_DOWNLOAD,
-    points_per_dollar: POINTS_PER_DOLLAR,
-    min_withdraw_usd: MIN_WITHDRAW_USD,
-    min_withdraw_points: MIN_WITHDRAW_POINTS,
-  };
-}
-
-// Get points balance + withdrawal history
-app.get('/points/balance', async (c) => {
-  const user = await requireFirebaseUser(c);
-  if (!user) return c.json({ error: 'unauthorized' }, 401);
-
-  const db = await firestore();
-  const doc = await db.collection('user_points').doc(user.uid).get();
-  const data = doc.exists ? (doc.data() as any) : {};
-  const balance = data.balance || 0;
-
-  // Recent withdrawal requests for this user
-  let withdrawals: any[] = [];
-  try {
-    const wsnap = await db.collection('withdrawals').where('uid', '==', user.uid).get();
-    withdrawals = wsnap.docs
-      .map((d: any) => ({ id: d.id, amount_usd: d.data().amount_usd, points_spent: d.data().points_spent, method: d.data().method || '', account: d.data().account || '', status: d.data().status || 'pending', ts: d.data().ts || 0 }))
-      .sort((a: any, b: any) => (b.ts || 0) - (a.ts || 0))
-      .slice(0, 50);
-  } catch {}
-
-  return c.json({
-    balance,
-    dollars: Math.round((balance / POINTS_PER_DOLLAR) * 100) / 100,
-    total_earned: data.total_earned || 0,
-    total_withdrawn_usd: data.withdrawn_amount || 0,
-    earned_apps: data.earned_apps || [],
-    can_withdraw: balance >= MIN_WITHDRAW_POINTS,
-    withdrawals,
-    config: pointsConfig(),
-  });
-});
-
-// Earn points after downloading an app
-app.post('/points/earn', async (c) => {
-  const ip = getClientIp(c);
-  if (!rateLimit(ip, 'points-earn', 20, 60)) {
-    return c.json({ error: 'rate_limit_exceeded' }, 429);
-  }
-
-  const user = await requireFirebaseUser(c);
-  if (!user) return c.json({ error: 'unauthorized' }, 401);
-
-  const body = await c.req.json().catch(() => ({} as any));
-  const slug = String(body.slug || '').trim();
-  if (!slug || !isValidSlug(slug)) return c.json({ error: 'invalid_slug' }, 400);
-
-  // Verify the app exists and is a real, downloadable app (must have an APK).
-  // This blocks farming points off non-existent or non-downloadable slugs.
-  const db = await firestore();
-  const appSnap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
-  if (appSnap.empty) return c.json({ error: 'app_not_found' }, 404);
-  if (!(appSnap.docs[0].data() as any).apk_key) return c.json({ error: 'app_not_downloadable' }, 400);
-
-  const pointsRef = db.collection('user_points').doc(user.uid);
-
-  // Use a transaction to prevent race conditions and double-earning
-  const result = await db.runTransaction(async (tx: any) => {
-    const pointsDoc = await tx.get(pointsRef);
-    const data = pointsDoc.exists ? (pointsDoc.data() as any) : {
-      balance: 0, total_earned: 0, total_claimed: 0, claimed_amount: 0,
-      earned_apps: [], created_at: nowSec(),
-    };
-
-    const earnedApps: string[] = data.earned_apps || [];
-
-    // Check if points were already earned for this app
-    if (earnedApps.includes(slug)) {
-      return { already_earned: true, balance: data.balance || 0 };
-    }
-
-    // Award points
-    const newBalance = (data.balance || 0) + POINTS_PER_DOWNLOAD;
-    const newTotalEarned = (data.total_earned || 0) + POINTS_PER_DOWNLOAD;
-    earnedApps.push(slug);
-
-    tx.set(pointsRef, {
-      ...data,
-      balance: newBalance,
-      total_earned: newTotalEarned,
-      earned_apps: earnedApps,
-      updated_at: nowSec(),
-    }, { merge: true });
-
-    return { already_earned: false, balance: newBalance, earned: POINTS_PER_DOWNLOAD };
-  });
-
-  if (result.already_earned) {
-    return c.json({ ok: false, error: 'already_earned', balance: result.balance });
-  }
-  return c.json({ ok: true, earned: result.earned, balance: result.balance });
-});
-
-// Request a withdrawal (payout). Minimum is MIN_WITHDRAW_USD. Points are
-// deducted atomically and a pending request is logged for admin review.
-app.post('/points/withdraw', async (c) => {
-  const ip = getClientIp(c);
-  if (!rateLimit(ip, 'points-withdraw', 5, 300)) {
-    return c.json({ error: 'rate_limit_exceeded' }, 429);
-  }
-
-  const user = await requireFirebaseUser(c);
-  if (!user) return c.json({ error: 'unauthorized' }, 401);
-
-  const body = await c.req.json().catch(() => ({} as any));
-  const method = sanitizeText(body.method, 40);
-  const account = sanitizeText(body.account, 200);
-  if (!method) return c.json({ error: 'invalid_method' }, 400);
-  if (!account || account.length < 3) return c.json({ error: 'invalid_account' }, 400);
-  // Optional explicit amount in whole dollars; default = withdraw everything.
-  const requestedUsd = body.amount_usd != null ? Math.floor(Number(body.amount_usd)) : null;
-  if (requestedUsd != null && (!Number.isFinite(requestedUsd) || requestedUsd <= 0)) {
-    return c.json({ error: 'invalid_amount' }, 400);
-  }
-
-  const db = await firestore();
-  const pointsRef = db.collection('user_points').doc(user.uid);
-  const withdrawalRef = db.collection('withdrawals').doc();
-
-  const result = await db.runTransaction(async (tx: any) => {
-    const pointsDoc = await tx.get(pointsRef);
-    const data = pointsDoc.exists ? (pointsDoc.data() as any) : {};
-    const balance = data.balance || 0;
-
-    const maxUsd = Math.floor(balance / POINTS_PER_DOLLAR);
-    if (maxUsd < MIN_WITHDRAW_USD) {
-      return { error: 'insufficient_points', balance };
-    }
-    const amountUsd = requestedUsd == null ? maxUsd : requestedUsd;
-    if (amountUsd < MIN_WITHDRAW_USD) return { error: 'below_minimum', balance };
-    if (amountUsd > maxUsd) return { error: 'insufficient_points', balance };
-
-    const pointsSpent = amountUsd * POINTS_PER_DOLLAR;
-    const newBalance = balance - pointsSpent;
-
-    tx.set(pointsRef, {
-      ...data,
-      balance: newBalance,
-      total_withdrawals: (data.total_withdrawals || 0) + 1,
-      withdrawn_amount: (data.withdrawn_amount || 0) + amountUsd,
-      updated_at: nowSec(),
-    }, { merge: true });
-
-    tx.set(withdrawalRef, {
-      uid: user.uid,
-      email: user.email || '',
-      name: user.name || '',
-      points_spent: pointsSpent,
-      amount_usd: amountUsd,
-      method,
-      account,
-      status: 'pending',
-      ts: nowSec(),
-    });
-
-    return { ok: true, balance: newBalance, amount_usd: amountUsd, withdrawal_id: withdrawalRef.id };
-  });
-
-  if (result.error) {
-    return c.json({ error: result.error, balance: result.balance || 0 }, 400);
-  }
-  return c.json(result);
-});
-
-// Admin: view all withdrawal requests
-app.get('/admin/points/withdrawals', requireAdmin, async (c) => {
-  const db = await firestore();
-  let docs: any[];
-  try {
-    const snap = await db.collection('withdrawals').orderBy('ts', 'desc').limit(200).get();
-    docs = snap.docs;
-  } catch {
-    const snap = await db.collection('withdrawals').get();
-    docs = snap.docs.sort((a: any, b: any) => (b.data().ts || 0) - (a.data().ts || 0)).slice(0, 200);
-  }
-  const withdrawals = docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
-  return c.json({ withdrawals });
-});
-
-// Admin: approve/reject a withdrawal request
-app.patch('/admin/points/withdrawals/:id', requireAdmin, async (c) => {
-  const id = c.req.param('id');
-  const body = await c.req.json().catch(() => ({} as any));
-  const status = String(body.status || '').trim();
-  if (!['approved', 'rejected'].includes(status)) return c.json({ error: 'invalid_status' }, 400);
-
-  const db = await firestore();
-  const ref = db.collection('withdrawals').doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) return c.json({ error: 'not_found' }, 404);
-
-  const data = snap.data() as any;
-
-  // If rejecting a still-pending request, refund the spent points.
-  if (status === 'rejected' && data.status === 'pending') {
-    const pointsRef = db.collection('user_points').doc(data.uid);
-    const FV = await getFieldValue();
-    await pointsRef.update({
-      balance: FV.increment(data.points_spent || 0),
-      total_withdrawals: FV.increment(-1),
-      withdrawn_amount: FV.increment(-(data.amount_usd || 0)),
-    });
-  }
-
-  await ref.update({ status, resolved_at: nowSec() });
   return c.json({ ok: true });
 });
 

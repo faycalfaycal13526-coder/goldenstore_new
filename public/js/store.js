@@ -221,6 +221,7 @@ function toast(msg, type = 'info', ms = 3000) {
 
 /* ----------------------------- Cards ----------------------------- */
 // Square poster card (horizontal rows)
+// <bdi> keeps Latin/mixed app names from breaking RTL punctuation order.
 function posterCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'poster' },
@@ -680,8 +681,9 @@ function topbarSearch(user) {
 }
 
 // Back/title top bar (detail)
-// Smart back: return to wherever the user came from; only fall back to home
-// when this page was opened directly (deep link / cold start).
+// Smart back: return to wherever the user came from (search, home, games…);
+// only fall back to the home page when this page was opened directly
+// (deep link / cold start), where history.back() has nowhere to go.
 function topbarNav(title = '', actions = []) {
   return el('div', { class: 'topbar-nav' },
     el('button', { class: 'icon-btn', 'aria-label': t('رجوع'), onclick: () => {
@@ -1115,6 +1117,15 @@ window.__gsDownloadStatesSnapshot = function (states) {
       }
       try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status, progress, message: st.filename || '' } })); } catch (e) {}
     });
+    // Native is the SOURCE OF TRUTH: prune web-side entries it no longer
+    // tracks (installs completed / cancelled while this page was closed).
+    // Without this, the library keeps showing "جارٍ التثبيت" forever.
+    const valid = new Set(Object.keys(states));
+    const apkMap = getApkStateMap();
+    Object.keys(apkMap).forEach((slug) => {
+      if (slug === 'app-update') return; // self-update flow tracks itself
+      if (!valid.has(slug)) { removeApkState(slug); removeActiveDownload(slug); }
+    });
     notifyActiveDownloads();
   } catch (e) { console.error('[statesSnapshot]', e); }
 };
@@ -1202,6 +1213,18 @@ function installedVersionOnDevice(packageName) {
   try {
     if (window.GSAndroid && typeof window.GSAndroid.isPackageInstalled === 'function') {
       return window.GSAndroid.isPackageInstalled(packageName) || '';
+    }
+  } catch (e) {}
+  return '';
+}
+// Slug-based installed check: the native registry remembers slug→package for
+// every real install, so this keeps فتح/إلغاء التثبيت correct even when the
+// store metadata package name is missing or wrong. Returns versionName or ''.
+function isSlugInstalled(slug) {
+  if (!isNativeApp() || !slug) return '';
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.isSlugInstalled === 'function') {
+      return window.GSAndroid.isSlugInstalled(slug) || '';
     }
   } catch (e) {}
   return '';
@@ -1439,7 +1462,7 @@ window.Store = {
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
-  installedVersionOnDevice, versionIsNewer, cancelDownload,
+  installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,
   checkAppUpdate, showUpdateDialog,
 };
 

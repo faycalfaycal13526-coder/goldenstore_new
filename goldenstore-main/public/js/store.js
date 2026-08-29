@@ -191,6 +191,21 @@ function ratingOf(app) {
 
 function getQuery(name) { return new URLSearchParams(location.search).get(name) || ''; }
 
+// Public origin of the store website for share links. Inside the native
+// WebView the document origin is a local scheme (capacitor://localhost), so
+// shared links must point at the real site instead.
+function publicOrigin() {
+  try {
+    if (isNativeApp()) {
+      const cfg = window.Capacitor && window.Capacitor.getConfig && window.Capacitor.getConfig();
+      const base = (cfg && (cfg.apiBase || cfg.server && cfg.server.url)) || '';
+      if (base) return base.replace(/\/+$/, '');
+      return 'https://goldenstore-new.vercel.app';
+    }
+  } catch (e) {}
+  return location.origin;
+}
+
 
 function toast(msg, type = 'info', ms = 3000) {
   let stack = document.querySelector('.toast-stack');
@@ -284,7 +299,7 @@ function featureSlide(a) {
           rt ? el('span', { class: 'fc-bar-rate' }, rt, ico('star', 'icon fill')) : null,
         ),
       ),
-      el('span', { class: 'fc-bar-btn' }, t('عرض')),
+      el('span', { class: 'fc-bar-btn' }, t('تثبيت')),
     ),
   );
   return slide;
@@ -307,15 +322,61 @@ function featureCarousel(apps, opts = {}) {
 
   let idx = 0;
   let timer = null;
-  function paint() {
-    track.style.transform = `translateX(${-idx * 100}%)`;
-    Array.from(dots.children).forEach((d, i) => d.classList.toggle('on', i === idx));
+  // Auto-advance is OFF by default — users complained that the carousel
+  // "scrolls by itself" which interrupted manual touch scrolling. Manual
+  // touch scroll + dots is the Google Play model.
+  const AUTO_ADVANCE = false;
+
+  // --- Touch-scroll carousel ---
+  // The track is a native horizontal scroller: momentum, edge resistance and
+  // swipe direction all follow the finger exactly (like Google Play). The
+  // active index is derived from the scroll position; dots stay in sync.
+  function slideWidth() {
+    return track.clientWidth || wrap.clientWidth || 1;
   }
-  function go(i, manual) { idx = (i + list.length) % list.length; paint(); if (manual) restart(); }
+  function maxIndex() { return Math.max(0, list.length - 1); }
+  function setIdx(i) {
+    const clamped = Math.max(0, Math.min(maxIndex(), i));
+    if (clamped === idx) return;
+    idx = clamped;
+    Array.from(dots.children).forEach((d, k) => d.classList.toggle('on', k === idx));
+  }
+  function goTo(i, smooth) {
+    const clamped = Math.max(0, Math.min(maxIndex(), i));
+    try { track.scrollTo({ left: clamped * slideWidth(), behavior: smooth ? 'smooth' : 'auto' }); }
+    catch (e) { track.scrollLeft = clamped * slideWidth(); }
+    setIdx(clamped);
+  }
+  function go(i, manual) { goTo(i, true); if (manual && AUTO_ADVANCE) restart(); }
   function restart() {
     if (timer) clearInterval(timer);
-    if (list.length > 1) timer = setInterval(() => go(idx + 1), opts.interval || 4500);
+    if (!AUTO_ADVANCE || list.length <= 1) return;
+    timer = setInterval(() => go(idx >= maxIndex() ? 0 : idx + 1), opts.interval || 6000);
   }
+  function paint() { goTo(idx, false); }
+
+  let rafPending = false;
+  track.addEventListener('scroll', () => {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      const w = slideWidth();
+      if (w > 0) setIdx(Math.round(track.scrollLeft / w));
+    });
+  }, { passive: true });
+
+  // Resume auto-advance (if enabled) after the user finishes touching.
+  let touchResumeTimer = null;
+  track.addEventListener('touchstart', () => {
+    if (timer) clearInterval(timer);
+    if (touchResumeTimer) clearTimeout(touchResumeTimer);
+  }, { passive: true });
+  track.addEventListener('touchend', () => {
+    if (!AUTO_ADVANCE) return;
+    if (touchResumeTimer) clearTimeout(touchResumeTimer);
+    touchResumeTimer = setTimeout(restart, 4000);
+  }, { passive: true });
   wrap.addEventListener('mouseenter', () => { if (timer) clearInterval(timer); });
   wrap.addEventListener('mouseleave', restart);
   paint();
@@ -472,6 +533,17 @@ const NOTIF_SEEN_KEY = 'gs_notif_seen';
 function notifSeenAt() {
   try { return Number(localStorage.getItem(NOTIF_SEEN_KEY) || 0) || 0; } catch { return 0; }
 }
+// Notifications baseline: set once at first sign-in so everything that
+// existed on the platform BEFORE this user joined never appears to them.
+function notifBaseline(uid) {
+  try {
+    if (!uid) return 0;
+    const k = 'gs_notif_base_' + uid;
+    let b = Number(localStorage.getItem(k) || 0) || 0;
+    if (!b) { b = Math.floor(Date.now() / 1000); localStorage.setItem(k, String(b)); }
+    return b;
+  } catch { return 0; }
+}
 function setNotifSeenAt(ts) {
   try { localStorage.setItem(NOTIF_SEEN_KEY, String(Math.max(0, Number(ts || 0) || 0))); } catch {}
 }
@@ -494,7 +566,9 @@ async function refreshBellBadge() {
   const badge = document.querySelector('.bell-btn .bell-badge');
   if (!badge) return;
   try {
-    const list = await fetchNotifications();
+    let list = await fetchNotifications();
+    const base = notifBaseline(_user && _user.uid);
+    if (base) list = list.filter((n) => Number(n.created_at || 0) > base);
     const count = notifUnreadCount(list);
     badge.textContent = count ? String(count) : '';
     badge.classList.toggle('hidden', !count);
@@ -523,6 +597,9 @@ async function openNotifications() {
   try {
     list = await fetchNotifications();
   } catch {}
+  // Hide everything created before this user's sign-in baseline.
+  const base = notifBaseline(_user && _user.uid);
+  if (base) list = list.filter((n) => Number(n.created_at || 0) > base);
   const seen = maxNotifCreated(list);
   if (seen) setNotifSeenAt(Math.max(notifSeenAt(), seen));
   await refreshBellBadge();
@@ -672,11 +749,14 @@ function cachedUser() {
 }
 
 function hideGate() { if (_gateEl) { _gateEl.remove(); _gateEl = null; } }
+// The mandatory sign-in gate is hidden through hideAuthGate() (called by
+// initAuth's onAuthChange handler), nothing else needed here.
 
 function onAuthed(user) {
   const firstRender = !_authed;
   _user = user;
   _authed = true;
+  if (user && user.uid && !String(user.uid).startsWith('gs_')) notifBaseline(user.uid);
   hideGate();
   document.body.style.overflow = '';
   if (firstRender) {
@@ -748,19 +828,73 @@ function goToLogin() {
   location.replace('/login?next=' + encodeURIComponent(next));
 }
 
+function showAuthGate() {
+  // Full-screen sign-in gate: nothing in the store is reachable until the
+  // user signs in with Google. Notifications are only registered after this
+  // succeeds, so users never receive platform notifications before signing in.
+  if (document.getElementById('gs-auth-gate')) return;
+  const gate = el('div', { id: 'gs-auth-gate', class: 'gate' });
+  const inner = el('div', null,
+    el('div', { class: 'logo' }, el('img', { src: '/images/logo.png', alt: 'Golden Store' })),
+    el('h1', null, 'Golden', el('b', null, 'Store')),
+    el('p', null, t('سجّل الدخول بحساب Google للوصول إلى المتجر وتطبيقاته وإشعاراته.')),
+    el('button', { class: 'gbtn auth-google-btn', type: 'button', html: '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span class="gbtn-label">' + t('متابعة باستخدام Google') + '</span>' }),
+    el('div', { class: 'gate-spinner hidden' }, el('div', { class: 'spinner' })),
+    el('div', { class: 'gate-error hidden' }),
+  );
+  gate.append(inner);
+  document.body.append(gate);
+  document.body.style.overflow = 'hidden';
+
+  const btn = gate.querySelector('.gbtn');
+  const spin = gate.querySelector('.gate-spinner');
+  const errBox = gate.querySelector('.gate-error');
+  function setError(msg) {
+    if (!errBox) return;
+    errBox.textContent = msg;
+    errBox.classList.remove('hidden');
+    if (spin) spin.classList.add('hidden');
+    if (btn) { btn.disabled = false; btn.style.display = 'inline-flex'; }
+  }
+  function mapError(e) {
+    const code = e && e.code;
+    if (code === 'auth/in-app-browser') return t('افتح الصفحة في متصفّح مثل Chrome لإتمام تسجيل الدخول.');
+    if (code === 'auth/unauthorized-domain') return t('هذا النطاق غير مُصرَّح به في Firebase Authentication.');
+    if (code === 'auth/operation-not-allowed') return t('مزوّد Google غير مُفعَّل في Firebase.');
+    if (code === 'auth/network-request-failed') return t('تعذّر الاتصال بالشبكة. تحقّق من الإنترنت وحاول مجدداً.');
+    if (code === 'auth/popup-blocked') return t('المتصفّح حظر النافذة المنبثقة. اسمح بها ثم حاول مجدداً.');
+    return t('تعذّر تسجيل الدخول. حاول مجدداً.');
+  }
+  if (btn) btn.addEventListener('click', async () => {
+    if (errBox) errBox.classList.add('hidden');
+    if (btn) btn.disabled = true;
+    if (spin) spin.classList.remove('hidden');
+    try {
+      const user = await window.GAuth.signInWithGoogle();
+      if (user) return; // onAuthChange will tear the gate down
+      if (spin) spin.classList.add('hidden');
+      if (btn) btn.disabled = false;
+    } catch (e) {
+      setError(mapError(e));
+    }
+  });
+}
+
+function hideAuthGate() {
+  const gate = document.getElementById('gs-auth-gate');
+  if (gate) gate.remove();
+  document.body.style.overflow = '';
+}
+
 function initAuth() {
   // Localhost-only preview bypass (never active in production).
   if (isLocalhost() && getQuery('devskip') === '1') { onAuthed(devUser()); return; }
 
-  // Optimistic render: if the user signed in before, show the store immediately
-  // and let Firebase confirm the session in the background (avoids login flash).
-  const cached = cachedUser();
-  if (cached) onAuthed(cached);
-
-  // If GAuth isn't available (SDK failed to load), allow browsing as guest.
+  // If GAuth isn't available (SDK failed to load), keep the gate visible
+  // with a retry affordance instead of letting guests browse the store.
   if (!window.GAuth || typeof window.GAuth.onAuthChange !== 'function') {
     console.error('GAuth not available — Firebase SDK may have failed to load');
-    if (!cached) onAuthed(null);
+    showAuthGate();
     return;
   }
 
@@ -769,15 +903,16 @@ function initAuth() {
     if (user) {
       cacheUser(user);
       onAuthed(user);
+      hideAuthGate();
     } else {
-      // No valid session: allow browsing as guest.
+      // No valid session: block the store behind the sign-in gate.
       cacheUser(null);
       _user = null;
-      if (!_authed) onAuthed(null);
+      hideGate();
+      showAuthGate();
     }
   });
 }
-
 async function signOut() {
   cacheUser(null);
   try { await window.GAuth.signOut(); } catch {}
@@ -883,6 +1018,16 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
     toast(t('تم التحديث بنجاح'), 'success');
     setTimeout(() => { try { location.reload(); } catch (e) {} }, 500);
   }
+};
+
+// Native bridge notifies the web layer when any package is uninstalled.
+// Pages that care (app detail) listen for 'gs-package-uninstalled' and can
+// match the removed package name against the app they display.
+window.__gsPackageUninstalled = function (packageName) {
+  try {
+    if (!packageName) return;
+    window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { packageName: packageName } }));
+  } catch (e) {}
 };
 
 async function checkAppUpdate() {
@@ -1032,6 +1177,9 @@ function onActiveDownloadsChange(fn) {
     if (registeredToken === currentToken) return;
     if (!window.Store || !window.Store.isLoggedIn || !window.Store.isLoggedIn()) return;
     var uid = currentUid();
+    // Only real signed-in users (Google accounts) get push notifications.
+    // Anonymous guest sessions use uid prefix 'gs_' and must never register.
+    if (!uid || String(uid).indexOf('gs_') === 0) return;
     var stored = getStoredReg();
     if (stored && stored.token === currentToken && stored.uid === uid) {
       registeredToken = currentToken;
@@ -1084,6 +1232,7 @@ function onActiveDownloadsChange(fn) {
 window.Store = {
   STORE, api, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
+  publicOrigin,
   posterCard, listRow, gridCard, featureCarousel, categoryName,
   spinner, skeletonHome, skeletonDetail, skeletonList, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,

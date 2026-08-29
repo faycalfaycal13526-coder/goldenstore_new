@@ -58,16 +58,21 @@
   S.ready(async () => {
     root.innerHTML = '';
 
-    const menuBtn = el('button', { class: 'icon-btn', 'aria-label': t('مشاركة'), onclick: () => share() }, ico('share'));
+    const menuBtn = el('button', { class: 'icon-btn', 'aria-label': t('مشاركة'), onclick: () => share(app) }, ico('share'));
     const nav = S.topbarNav('', [menuBtn]);
     root.append(nav);
     const content = el('div', { class: 'detail' });
     root.append(content);
     content.append(S.skeletonDetail());
 
-    function share() {
-      const url = location.href;
-      if (navigator.share) navigator.share({ url }).catch(() => {});
+    function share(a) {
+      // Share/copy the PUBLIC web link of the app on the store site — never a
+      // local WebView URL like capacitor://localhost (meaningless outside the app).
+      const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
+      const url = origin
+        ? `${origin}/app?slug=${encodeURIComponent(a && a.slug ? a.slug : slug)}`
+        : location.href;
+      if (navigator.share) navigator.share({ title: (a && a.name) || 'Golden Store', url }).catch(() => {});
       else { navigator.clipboard && navigator.clipboard.writeText(url); toast(t('تم نسخ الرابط'), 'success'); }
     }
 
@@ -343,6 +348,68 @@
       label.innerHTML = '';
       label.append(ico('check', 'icon'), document.createTextNode(t('تم التثبيت')));
     }
+
+    // ---- Post-install actions: Open + Uninstall (native app only) ----
+    function openInstalled(a) {
+      if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.openInstalledApp === 'function') {
+        try { window.GSAndroid.openInstalledApp(a.package_name || '', a.slug || ''); return; } catch (e) {}
+      }
+      toast(t('تعذّر فتح التطبيق'), 'error');
+    }
+    function uninstallInstalled(a) {
+      if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.uninstallApp === 'function') {
+        try { window.GSAndroid.uninstallApp(a.package_name || ''); return; } catch (e) {}
+      }
+      toast(t('غير متاح في هذا المتصفح'), 'info');
+    }
+    // Open the system installer for a previously-downloaded APK file
+    // (lets the user retry installation if they dismissed the prompt).
+    function openDownloadedApk(a, filename) {
+      if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.openDownloadedApk === 'function') {
+        try {
+          window.GSAndroid.openDownloadedApk(filename || '', a.slug || '', a.package_name || '');
+          toast(t('جارٍ فتح مثبّت النظام…'), 'info');
+        } catch (e) { toast(t('تعذّر فتح الملف'), 'error'); }
+        return;
+      }
+      toast(t('غير متاح في هذا المتصفح'), 'info');
+    }
+    function deleteDownloadedApk(a, filename) {
+      if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.deleteDownloadedApk === 'function') {
+        try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
+      }
+    }
+    function showInstalledActions(a) {
+      if (!isNativeApp()) return;
+      removeInstalledActions();
+      const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
+        el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openInstalled(a) },
+          ico('play', 'icon'), t('فتح')),
+        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => uninstallInstalled(a) },
+          ico('trash', 'icon'), t('إلغاء التثبيت')),
+      );
+      const anchor = document.querySelector('.detail .d-actions');
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+    }
+    // Show "open APK / delete file" actions after a download completes but
+    // before the package is actually installed (e.g. user dismissed the
+    // installer or installation is still pending).
+    function showDownloadedActions(a, filename) {
+      if (!isNativeApp()) return;
+      removeInstalledActions();
+      const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
+        el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openDownloadedApk(a, filename) },
+          ico('download', 'icon'), t('تثبيت')),
+        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => { deleteDownloadedApk(a, filename); removeInstalledActions(); showIdle(); toast(t('تم حذف ملف التحميل'), 'info'); } },
+          ico('trash', 'icon'), t('حذف الملف')),
+      );
+      const anchor = document.querySelector('.detail .d-actions');
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+    }
+    function removeInstalledActions() {
+      const existing = document.getElementById('gs-installed-actions');
+      if (existing) existing.remove();
+    }
     function showIdle() {
       resetBar();
       btn.classList.remove('installed');
@@ -387,6 +454,10 @@
         label.textContent = t('تم التنزيل، جارٍ التثبيت…');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
+        // Also show the post-download actions bar immediately so the user can
+        // retry the install or delete the file if the system installer prompt
+        // was dismissed.
+        showDownloadedActions(app, filename);
         return;
       }
       if (status === 'installing') {
@@ -398,6 +469,18 @@
       if (status === 'installed') {
         markInstalledStored(app.slug);
         showInstalled();
+        showInstalledActions(app);
+        return;
+      }
+      if (status === 'uninstalled') {
+        unmarkInstalledStored(app.slug);
+        removeInstalledActions();
+        showIdle();
+        toast(t('تم إلغاء تثبيت التطبيق'), 'info');
+        return;
+      }
+      if (status === 'open_failed') {
+        toast(t('التطبيق غير مثبت على هذا الجهاز'), 'error');
         return;
       }
       if (status === 'failed') {
@@ -407,12 +490,24 @@
       }
     };
 
+    // Listen for native uninstall events: when THIS app's package is removed
+    // from the device, drop the local installed state and restore the button.
+    window.addEventListener('gs-package-uninstalled', (e) => {
+      const pkg = e && e.detail && e.detail.packageName;
+      if (!pkg || !app.package_name) return;
+      if (pkg === app.package_name) {
+        unmarkInstalledStored(app.slug);
+        removeInstalledActions();
+        showIdle();
+      }
+    });
+
     const filename = `${app.slug || 'app'}-${app.version_name || ''}.apk`.replace(/-+/g, '-');
 
     async function runInstall() {
       if (btn.classList.contains('installing')) return;
-      // Already installed: tapping toggles back to the "install" state.
-      if (btn.classList.contains('installed')) { unmarkInstalledStored(app.slug); showIdle(); return; }
+      // Already installed: tapping the button opens the app directly.
+      if (btn.classList.contains('installed')) { openInstalled(app); return; }
 
       // Require login before downloading (skip in native wrapper where anonymous
       // downloads are allowed and the redirect sign-in flow interrupts the flow)
@@ -598,6 +693,7 @@
       }
     } else if (isInstalled(app.slug)) {
       showInstalled();
+      if (isNativeApp()) showInstalledActions(app);
     }
 
     // Split dropdown attached to the install button: request-update / report.

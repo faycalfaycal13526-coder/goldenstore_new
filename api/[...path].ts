@@ -111,7 +111,14 @@ app.use('/apps/:slug', async (c, next) => {
 // ---------------- helpers ----------------
 
 async function requireAdmin(c: any, next: any) {
-  const token = getCookie(c, COOKIE_NAME);
+  // Cookie session first; fall back to a Bearer JWT in the Authorization
+  // header. Some WebView flows drop cookies on XHR redirects, which used to
+  // cause random 401s mid-upload.
+  let token = getCookie(c, COOKIE_NAME);
+  const authHeader = c.req.header('authorization') || '';
+  if (!token && authHeader.toLowerCase().startsWith('bearer ')) {
+    token = authHeader.slice(7).trim();
+  }
   const secret = process.env.JWT_SECRET || '';
   if (!token || !secret) return c.json({ error: 'unauthorized' }, 401);
   const payload = verifyJwt(token, secret);
@@ -1289,7 +1296,7 @@ app.post('/admin/upload-url', async (c) => {
   const rand = randomId().slice(0, 6);
   const folder = kind === 'apk' ? 'apk' : kind === 'icon' ? 'icon' : kind === 'feature' ? 'feature' : 'ss';
   const key = `${folder}/${slugHint}-${ts}-${rand}.${ext}`;
-  const url = await r2PresignPut(key, contentType, 3600);
+  const url = await r2PresignPut(key, contentType, 7200);
   return c.json({ url, key });
 });
 

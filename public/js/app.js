@@ -14,9 +14,12 @@
   }
 
   const apkStateHandlers = Object.create(null);
+  // The central hub (store.js) must ALWAYS run — it maintains the global
+  // registry (gs_apk_states / gs_active_dl) used by the library and future
+  // page loads. Never swallow non-"app-update" events here.
   const storeApkHandler = window.__gsApkDownloadUpdate;
   window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
-    if (typeof storeApkHandler === 'function' && slug === 'app-update') storeApkHandler(slug, status, progress, message);
+    if (typeof storeApkHandler === 'function') storeApkHandler(slug, status, progress, message);
     const h = apkStateHandlers[slug];
     if (h) h(status, (typeof progress === 'number' ? progress : -1), message);
   };
@@ -152,20 +155,26 @@
   });
 
   async function loadSimilar(app, container) {
+    const simTitle = app.type === 'game' ? t('ألعاب مماثلة') : t('تطبيقات مماثلة');
+    // Skeleton placeholder while the similar list loads (smooth content loading).
+    const section = el('div', { class: 'd-section' },
+      el('h3', null, simTitle),
+      S.skeletonSimilar(),
+    );
+    container.append(section);
     try {
       const catParam = app.category ? `&category=${encodeURIComponent(app.category)}` : '';
       const typeParam = app.type ? `&type=${encodeURIComponent(app.type)}` : '';
       const res = await api(`/api/apps?limit=20${catParam}${typeParam}&sort=popular`);
       const similar = (res.apps || []).filter((a) => a.slug !== app.slug).slice(0, 10);
-      if (!similar.length) return;
-      const simTitle = app.type === 'game' ? t('ألعاب مماثلة') : t('تطبيقات مماثلة');
+      if (!similar.length) { section.remove(); return; }
       const row = el('div', { class: 'hrow' });
       similar.forEach((a) => row.append(S.posterCard(a)));
-      container.append(el('div', { class: 'd-section' },
-        el('h3', null, simTitle),
-        row,
-      ));
-    } catch {}
+      section.innerHTML = '';
+      section.append(el('h3', null, simTitle), row);
+    } catch (e) {
+      section.remove();
+    }
   }
 
   // Static 5-star bar reflecting an average value (filled vs empty).
@@ -380,17 +389,32 @@
         try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
       }
     }
-    function showInstalledActions(a) {
+    function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
+      const withOpen = opts.withOpen !== false;
       removeInstalledActions();
-      const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
-        el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openInstalled(a) },
-          ico('play', 'icon'), t('فتح')),
-        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => uninstallInstalled(a) },
-          ico('trash', 'icon'), t('إلغاء التثبيت')),
-      );
+      const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' });
+      if (withOpen) {
+        bar.append(
+          el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openInstalled(a) },
+            ico('play', 'icon'), t('فتح')),
+          el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => uninstallInstalled(a) },
+            ico('trash', 'icon'), t('إلغاء التثبيت')),
+        );
+      } else {
+        bar.append(
+          el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => uninstallInstalled(a) },
+            ico('trash', 'icon'), t('إلغاء التثبيت')),
+        );
+      }
       const anchor = document.querySelector('.detail .d-actions');
-      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      if (anchor && anchor.parentNode) {
+        if (withOpen) anchor.style.display = 'none'; // the pair replaces the install button
+        anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      } else {
+        const det = document.querySelector('.detail');
+        if (det) det.prepend(bar);
+      }
     }
     // Show "open APK / delete file" actions after a download completes but
     // before the package is actually installed (e.g. user dismissed the
@@ -449,15 +473,14 @@
         return;
       }
       if (status === 'downloaded') {
+        // APK is on the device — never leave the button stuck disabled in
+        // "installing…": switch to an active "جاهز للتثبيت" + retry/delete.
         setProgress(1);
-        btn.classList.add('installing');
-        btn.disabled = true;
-        label.textContent = t('تم التنزيل، جارٍ التثبيت…');
+        btn.classList.remove('installing');
+        btn.disabled = false;
+        label.textContent = t('جاهز للتثبيت');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
-        // Also show the post-download actions bar immediately so the user can
-        // retry the install or delete the file if the system installer prompt
-        // was dismissed. The native bridge reports the real filename.
         showDownloadedActions(app, message || filename);
         return;
       }
@@ -471,8 +494,13 @@
       }
       if (status === 'installed') {
         markInstalledStored(app.slug);
-        showInstalled();
-        showInstalledActions(app);
+        S.removeActiveDownload(app.slug);
+        S.removeApkState(app.slug);
+        const devVer = S.installedVersionOnDevice(app.package_name || '');
+        const hasUpdate = S.versionIsNewer(app.version_name || '', devVer);
+        showInstalled(hasUpdate ? 'update' : 'open');
+        showInstalledActions(app, { withOpen: !hasUpdate });
+        toast(t('تم تثبيت التطبيق بنجاح'), 'success');
         return;
       }
       if (status === 'cancelled') {
@@ -546,7 +574,7 @@
         });
         nativeActiveDownloadRegistered = true;
         try {
-          window.GSAndroid.downloadApk(dlUrl, filename, app.slug || '', app.package_name || '');
+          window.GSAndroid.downloadApk(dlUrl, filename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
         } catch (e) {
           delete apkStateHandlers[app.slug];
@@ -657,7 +685,7 @@
         markInstalledStored(app.slug);
         const hasUpdate = S.versionIsNewer(app.version_name || '', deviceVer);
         showInstalled(hasUpdate ? 'update' : 'open');
-        showInstalledActions(app);
+        showInstalledActions(app, { withOpen: !hasUpdate });
         return;
       }
       // Not installed on the device — never trust a stale local registry.

@@ -14,9 +14,14 @@
   }
 
   const apkStateHandlers = Object.create(null);
+  // IMPORTANT: the central hub (store.js) must ALWAYS run — it maintains the
+  // global registry (gs_apk_states / gs_active_dl) used by the library, home
+  // badges and future page loads. Previously this wrapper swallowed every
+  // non-"app-update" event, so states were never cleaned up while this page
+  // was open and the install button appeared "stuck" on other screens.
   const storeApkHandler = window.__gsApkDownloadUpdate;
   window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
-    if (typeof storeApkHandler === 'function' && slug === 'app-update') storeApkHandler(slug, status, progress, message);
+    if (typeof storeApkHandler === 'function') storeApkHandler(slug, status, progress, message);
     const h = apkStateHandlers[slug];
     if (h) h(status, (typeof progress === 'number' ? progress : -1), message);
   };
@@ -152,20 +157,26 @@
   });
 
   async function loadSimilar(app, container) {
+    const simTitle = app.type === 'game' ? t('ألعاب مماثلة') : t('تطبيقات مماثلة');
+    // Skeleton placeholder while the similar list loads (smooth content loading).
+    const section = el('div', { class: 'd-section' },
+      el('h3', null, simTitle),
+      S.skeletonSimilar(),
+    );
+    container.append(section);
     try {
       const catParam = app.category ? `&category=${encodeURIComponent(app.category)}` : '';
       const typeParam = app.type ? `&type=${encodeURIComponent(app.type)}` : '';
       const res = await api(`/api/apps?limit=20${catParam}${typeParam}&sort=popular`);
       const similar = (res.apps || []).filter((a) => a.slug !== app.slug).slice(0, 10);
-      if (!similar.length) return;
-      const simTitle = app.type === 'game' ? t('ألعاب مماثلة') : t('تطبيقات مماثلة');
+      if (!similar.length) { section.remove(); return; }
       const row = el('div', { class: 'hrow' });
       similar.forEach((a) => row.append(S.posterCard(a)));
-      container.append(el('div', { class: 'd-section' },
-        el('h3', null, simTitle),
-        row,
-      ));
-    } catch {}
+      section.innerHTML = '';
+      section.append(el('h3', null, simTitle), row);
+    } catch (e) {
+      section.remove();
+    }
   }
 
   // Static 5-star bar reflecting an average value (filled vs empty).
@@ -208,17 +219,11 @@
   }
 
   // ----- Install: persist "installed" apps locally so the state survives reloads.
-  const INSTALL_KEY = 'gs_installed';
-  function installedSet() {
-    try { return new Set(JSON.parse(localStorage.getItem(INSTALL_KEY) || '[]')); } catch { return new Set(); }
-  }
-  function isInstalled(slug) { return installedSet().has(slug); }
-  function markInstalledStored(slug) {
-    try { const s = installedSet(); s.add(slug); localStorage.setItem(INSTALL_KEY, JSON.stringify([...s])); } catch {}
-  }
-  function unmarkInstalledStored(slug) {
-    try { const s = installedSet(); s.delete(slug); localStorage.setItem(INSTALL_KEY, JSON.stringify([...s])); } catch {}
-  }
+  // (Registry helpers live in store.js now; the REAL source of truth is the
+  // device PackageManager via S.installedVersionOnDevice.)
+  const isInstalled = (slug) => S.isInstalledStored(slug);
+  const markInstalledStored = (slug) => S.markInstalledStored(slug);
+  const unmarkInstalledStored = (slug) => S.unmarkInstalledStored(slug);
   // Generic centered dialog (used by "request update" and "report").
   function openDialog({ icon, title, fields, submitLabel, onSubmit }) {
     const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
@@ -341,24 +346,54 @@
       fill.style.transition = 'none';
       fill.style.width = '0%';
     }
-    function showInstalled() {
+    function showInstalled(mode) {
       resetBar();
-      btn.classList.add('installed');
       btn.disabled = false;
       label.innerHTML = '';
-      label.append(ico('check', 'icon'), document.createTextNode(t('تم التثبيت')));
+      if (mode === 'update') {
+        // A newer store version is available: Google Play style "تحديث" button.
+        btn.classList.remove('installed');
+        btn.classList.add('has-update');
+        label.append(ico('refresh', 'icon'), document.createTextNode(t('تحديث')));
+      } else {
+        btn.classList.add('installed');
+        label.append(ico('check', 'icon'), document.createTextNode(t('تم التثبيت')));
+      }
     }
 
     // ---- Post-install actions: Open + Uninstall (native app only) ----
+    // CRITICAL: always open/uninstall by the REAL device package. The store
+    // metadata can be empty or wrong; S.resolvedPackageName returns the
+    // package learned from the device itself (native ground truth).
+    function realPackage(a) {
+      return (S.resolvedPackageName && S.resolvedPackageName(a.slug)) || a.package_name || '';
+    }
     function openInstalled(a) {
       if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.openInstalledApp === 'function') {
-        try { window.GSAndroid.openInstalledApp(a.package_name || '', a.slug || ''); return; } catch (e) {}
+        try { window.GSAndroid.openInstalledApp(realPackage(a), a.slug || ''); return; } catch (e) {}
       }
       toast(t('تعذّر فتح التطبيق'), 'error');
     }
     function uninstallInstalled(a) {
       if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.uninstallApp === 'function') {
-        try { window.GSAndroid.uninstallApp(a.package_name || ''); return; } catch (e) {}
+        try {
+          const pkg = realPackage(a);
+          window.GSAndroid.uninstallApp(pkg, a.slug || '');
+          let checks = 0;
+          const poll = setInterval(() => {
+            checks++;
+            if (checks > 60) { clearInterval(poll); return; }
+            const st = S.checkAppStatus ? S.checkAppStatus(a.slug, pkg) : null;
+            if (st && !st.installed) {
+              clearInterval(poll);
+              unmarkInstalledStored(a.slug);
+              removeInstalledActions();
+              showIdle();
+              toast(t('تم إلغاء تثبيت التطبيق'), 'info');
+            }
+          }, 500);
+          return;
+        } catch (e) {}
       }
       toast(t('غير متاح في هذا المتصفح'), 'info');
     }
@@ -379,17 +414,30 @@
         try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
       }
     }
-    function showInstalledActions(a) {
+    /**
+     * Post-install actions. Default (fully installed): the Open + Uninstall
+     * pair REPLACES the install button entirely — Google Play end state.
+     * With a newer store version available (opts.withOpen=false): keep the
+     * "تحديث" button visible and show only the Uninstall action below it.
+     */
+    function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
       removeInstalledActions();
-      const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
-        el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openInstalled(a) },
+      const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' });
+      bar.append(
+        el('button', { class: 'btn btn-primary btn-lg gs-action-open', type: 'button', onclick: () => openInstalled(a) },
           ico('play', 'icon'), t('فتح')),
-        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => uninstallInstalled(a) },
+        el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
           ico('trash', 'icon'), t('إلغاء التثبيت')),
       );
       const anchor = document.querySelector('.detail .d-actions');
-      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      if (anchor && anchor.parentNode) {
+        anchor.style.display = 'none';
+        anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      } else {
+        const det = document.querySelector('.detail');
+        if (det) det.prepend(bar);
+      }
     }
     // Show "open APK / delete file" actions after a download completes but
     // before the package is actually installed (e.g. user dismissed the
@@ -400,17 +448,25 @@
       const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
         el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openDownloadedApk(a, filename) },
           ico('download', 'icon'), t('تثبيت')),
-        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => { deleteDownloadedApk(a, filename); removeInstalledActions(); showIdle(); toast(t('تم حذف ملف التحميل'), 'info'); } },
+        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => { deleteDownloadedApk(a, filename); S.removeApkState(a.slug); S.removeActiveDownload(a.slug); removeInstalledActions(); showIdle(true); toast(t('تم حذف ملف التحميل'), 'info'); } },
           ico('trash', 'icon'), t('حذف الملف')),
       );
       const anchor = document.querySelector('.detail .d-actions');
-      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      if (anchor) {
+        anchor.style.display = 'none';
+        anchor.parentNode.insertBefore(bar, anchor);
+      } else {
+        document.querySelector('.detail').prepend(bar);
+      }
     }
     function removeInstalledActions() {
       const existing = document.getElementById('gs-installed-actions');
       if (existing) existing.remove();
+      // Restore the install button row (hidden while Open/Uninstall shown).
+      const anchor = document.querySelector('.detail .d-actions');
+      if (anchor) anchor.style.display = '';
     }
-    function showIdle() {
+    function showIdle(skipAnchorRestore) {
       resetBar();
       btn.classList.remove('installed');
       btn.disabled = false;
@@ -448,28 +504,53 @@
         return;
       }
       if (status === 'downloaded') {
+        // The APK is on the device. Never leave the button stuck in a
+        // disabled "installing…" state: if the system installer prompt was
+        // dismissed (or the user cancelled inside it), the button must
+        // become an active "جاهز للتثبيت" state with retry/delete actions —
+        // exactly like Google Play's "ready to install" row.
         setProgress(1);
-        btn.classList.add('installing');
-        btn.disabled = true;
-        label.textContent = t('تم التنزيل، جارٍ التثبيت…');
+        btn.classList.remove('installing');
+        btn.disabled = false;
+        label.textContent = t('جاهز للتثبيت');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
-        // Also show the post-download actions bar immediately so the user can
-        // retry the install or delete the file if the system installer prompt
-        // was dismissed.
-        showDownloadedActions(app, filename);
+        // Show the post-download actions bar immediately so the user can
+        // retry the install or delete the file. The native bridge reports
+        // the real filename.
+        showDownloadedActions(app, message || filename);
         return;
       }
       if (status === 'installing') {
         btn.classList.add('installing');
         btn.disabled = true;
+        setProgress(1);
         label.textContent = t('جارٍ التثبيت…');
+        S.setActiveDownload({ slug: app.slug, status: 'installing', progress: 1 });
         return;
       }
       if (status === 'installed') {
+        // Install finished — IMMEDIATELY swap to the Google Play end state:
+        // [فتح] + [إلغاء التثبيت] replacing the download button, and clean
+        // every pending state (the central hub already did the registry cleanup).
+        // NOTE: `message` carries the REAL resolved PACKAGE NAME (not the
+        // version) — wire it into the resolver cache for Open/Uninstall.
         markInstalledStored(app.slug);
-        showInstalled();
-        showInstalledActions(app);
+        S.removeActiveDownload(app.slug);
+        S.removeApkState(app.slug);
+        if (message && message !== 'installed') S.rememberResolvedPackage(app.slug, message);
+        const devVer = S.installedVersionOnDevice(realPackage(app)) || S.isSlugInstalled(app.slug);
+        const hasUpdate = S.versionIsNewer(app.version_name || '', devVer);
+        showInstalled(hasUpdate ? 'update' : 'open');
+        showInstalledActions(app, { withOpen: !hasUpdate });
+        toast(t('تم تثبيت التطبيق بنجاح'), 'success');
+        return;
+      }
+      if (status === 'cancelled') {
+        S.removeActiveDownload(app.slug);
+        removeInstalledActions();
+        showIdle();
+        toast(t('تم إلغاء التنزيل'), 'info');
         return;
       }
       if (status === 'uninstalled') {
@@ -497,9 +578,14 @@
     // Listen for native uninstall events: when THIS app's package is removed
     // from the device, drop the local installed state and restore the button.
     window.addEventListener('gs-package-uninstalled', (e) => {
-      const pkg = e && e.detail && e.detail.packageName;
-      if (!pkg || !app.package_name) return;
-      if (pkg === app.package_name) {
+      const d = (e && e.detail) || {};
+      const pkg = d.packageName;
+      const slug = d.slug;
+      const real = realPackage(app);
+      const resolved = (S.resolvedPackageName && S.resolvedPackageName(app.slug)) || '';
+      const matches = (slug && slug === app.slug)
+        || (pkg && (pkg === app.package_name || pkg === real || pkg === resolved));
+      if (matches) {
         unmarkInstalledStored(app.slug);
         removeInstalledActions();
         showIdle();
@@ -512,6 +598,14 @@
       if (btn.classList.contains('installing')) return;
       // Already installed: tapping the button opens the app directly.
       if (btn.classList.contains('installed')) { openInstalled(app); return; }
+
+      // APK already downloaded but not installed: open the system installer
+      // again instead of re-downloading the whole file.
+      const liveState = S.getApkState(app.slug);
+      if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveState.filename) {
+        openDownloadedApk(app, liveState.filename);
+        return;
+      }
 
       // Require login before downloading (skip in native wrapper where anonymous
       // downloads are allowed and the redirect sign-in flow interrupts the flow)
@@ -534,13 +628,14 @@
           icon_url: app.icon_url || null,
           developer: app.developer || '',
           size_bytes: app.size_bytes || 0,
+          package_name: app.package_name || '',
           progress: 0,
           status: 'downloading',
           started_at: Math.floor(Date.now() / 1000),
         });
         nativeActiveDownloadRegistered = true;
         try {
-          window.GSAndroid.downloadApk(dlUrl, filename, app.slug || '', app.package_name || '');
+          window.GSAndroid.downloadApk(dlUrl, filename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
         } catch (e) {
           delete apkStateHandlers[app.slug];
@@ -640,14 +735,86 @@
 
     btn.addEventListener('click', runInstall);
 
-    // Restore download state on page reload: if this app has an active download,
-    // show the progress bar continuing from where it was and simulate ongoing progress.
-    const activeDls = S.getActiveDownloads();
-    const activeDl = activeDls.find((d) => d.slug === app.slug);
-    if (activeDl && isNativeApp()) {
-      S.removeActiveDownload(app.slug);
+    // ----- Restore the REAL install/download state when the page (re)loads.
+    // Native: the DEVICE is the source of truth. checkAppStatus() resolves
+    // through every ground truth — store metadata package → native slug
+    // registry → REAL package read from the downloaded APK file — so the page
+    // shows "فتح / إلغاء التثبيت" immediately after an install, even when the
+    // store metadata is wrong or an event was lost. A heartbeat keeps this
+    // re-validated every 1.5s while the page is open.
+    function resolveInstallState() {
+      // Keep the global heartbeat watching this app (self-heals the UI).
+      if (S.registerInstallWatch) S.registerInstallWatch(app.slug, app.package_name || '');
+
+      // 1) Device truth first (covers metadata + registry + APK-file package).
+      const st = isNativeApp() && S.checkAppStatus ? S.checkAppStatus(app.slug, app.package_name || '') : null;
+      if (st && st.installed) {
+        markInstalledStored(app.slug);
+        if (st.package_name) S.rememberResolvedPackage(app.slug, st.package_name);
+        const hasUpdate = S.versionIsNewer(app.version_name || '', st.version || '');
+        showInstalled(hasUpdate ? 'update' : 'open');
+        // Installed → [فتح][إلغاء التثبيت] replacing the button; update
+        // available → keep the "تحديث" button and show uninstall only.
+        showInstalledActions(app, { withOpen: !hasUpdate });
+        return;
+      }
+      // Not installed on the device — never trust a stale local registry.
+      unmarkInstalledStored(app.slug);
+      removeInstalledActions();
+      const live = (st && st.status && st.status !== 'none')
+        ? { status: st.status, progress: st.progress, filename: st.filename }
+        : S.getApkState(app.slug);
+      if (live && live.status === 'downloading') {
+        btn.classList.add('installing');
+        btn.disabled = true;
+        if (live.progress >= 0) setProgress(live.progress);
+        else setIndeterminate();
+        return;
+      }
+      if (live && live.status === 'installing') {
+        btn.classList.add('installing');
+        btn.disabled = true;
+        setProgress(1);
+        label.textContent = t('جارٍ التثبيت…');
+        return;
+      }
+      if (live && live.status === 'downloaded') {
+        // APK downloaded but not installed yet (e.g. installer dismissed).
+        setProgress(1);
+        btn.classList.remove('installing');
+        btn.disabled = false;
+        label.textContent = t('جاهز للتثبيت');
+        showDownloadedActions(app, live.filename || filename);
+        return;
+      }
+      showIdle();
     }
-    if (activeDl && activeDl.status === 'downloading' && !isNativeApp()) {
+
+    // When the heartbeat (or a native event) resolves an install while this
+    // page is open, re-render the button so it flips to فتح/إلغاء التثبيت
+    // even if the original event was missed.
+    window.addEventListener('gs-install-resolved', (e) => {
+      const d = e && e.detail || {};
+      if (!d.slug || d.slug !== app.slug) return;
+      resolveInstallState();
+    });
+
+    const onAppRevisit = () => {
+      if (document.hidden) return;
+      if (isNativeApp()) resolveInstallState();
+    };
+    document.addEventListener('visibilitychange', onAppRevisit);
+    window.addEventListener('focus', onAppRevisit);
+    window.addEventListener('pageshow', onAppRevisit);
+
+    if (isNativeApp()) {
+      resolveInstallState();
+    } else {
+      // Browser fallback: restore download state on page reload by estimating
+      // progress (no native bridge to ask for the truth).
+      const activeDls = S.getActiveDownloads();
+      const activeDl = activeDls.find((d) => d.slug === app.slug);
+      if (activeDl && activeDl.status === 'downloading') {
       btn.classList.add('installing');
       btn.disabled = true;
 
@@ -695,9 +862,9 @@
           }
         }, stepInterval);
       }
-    } else if (isInstalled(app.slug)) {
-      showInstalled();
-      if (isNativeApp()) showInstalledActions(app);
+      } else if (isInstalled(app.slug)) {
+        showInstalled();
+      }
     }
 
     // Split dropdown attached to the install button: request-update / report.

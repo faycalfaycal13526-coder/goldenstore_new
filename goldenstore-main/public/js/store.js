@@ -221,11 +221,12 @@ function toast(msg, type = 'info', ms = 3000) {
 
 /* ----------------------------- Cards ----------------------------- */
 // Square poster card (horizontal rows)
+// <bdi> keeps Latin/mixed app names from breaking RTL punctuation order.
 function posterCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'poster' },
     el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
-    el('div', { class: 'nm' }, a.name),
+    el('div', { class: 'nm' }, el('bdi', null, a.name)),
     rt
       ? el('div', { class: 'rt' }, el('span', null, rt), ico('star', 'icon fill'))
       : el('div', { class: 'rt' }, el('span', null, t('جديد'))),
@@ -239,8 +240,8 @@ function listRow(a, opts = {}) {
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'approw' },
     el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'info' },
-      el('div', { class: 'nm' }, a.name),
-      el('div', { class: 'sub' }, a.developer || cat || STORE.name),
+      el('div', { class: 'nm' }, el('bdi', null, a.name)),
+      el('div', { class: 'sub' }, el('bdi', null, a.developer || cat || STORE.name)),
       el('div', { class: 'meta-line' },
         rt ? el('span', null, rt) : el('span', null, t('جديد')),
         rt ? ico('star', 'icon fill') : null,
@@ -260,7 +261,7 @@ function gridCard(a) {
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'grid-card' },
     el('div', { class: 'grid-art' }, a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'grid-info' },
-      el('div', { class: 'grid-name' }, a.name),
+      el('div', { class: 'grid-name' }, el('bdi', null, a.name)),
       el('div', { class: 'grid-meta' }, `${a.version_name ? 'v' + a.version_name : ''}${a.version_name ? ' • ' : ''}${formatBytes(a.size_bytes || 0)}`),
       el('div', { class: 'grid-rating' },
         rt ? el('span', null, rt) : el('span', null, t('جديد')),
@@ -500,6 +501,19 @@ function skeletonList() {
   }
   return wrap;
 }
+// Poster-row skeleton for the "similar apps" section of the detail page.
+function skeletonSimilar() {
+  const row = el('div', { class: 'sk-similar' });
+  for (let i = 0; i < 4; i++) {
+    const c = el('div', { class: 'sk-sim-card' });
+    c.append(el('div', { class: 'sk-card', style: { width: '104px', height: '104px', borderRadius: '20px' } }));
+    c.append(skEl('84px', '10px'));
+    row.append(c);
+  }
+  const wrap = el('div', { class: 'd-section' }, skEl('35%', '16px'), row);
+  wrap.style.padding = '16px';
+  return wrap;
+}
 function emptyState(title, hint, icon = 'package') {
   return el('div', { class: 'empty' }, ico(icon, 'icon'), el('h3', null, title), hint ? el('p', null, hint) : null);
 }
@@ -667,9 +681,15 @@ function topbarSearch(user) {
 }
 
 // Back/title top bar (detail)
+// Smart back: return to wherever the user came from (search, home, games…);
+// only fall back to the home page when this page was opened directly
+// (deep link / cold start), where history.back() has nowhere to go.
 function topbarNav(title = '', actions = []) {
   return el('div', { class: 'topbar-nav' },
-    el('button', { class: 'icon-btn', 'aria-label': t('رجوع'), onclick: () => history.length > 1 ? history.back() : (location.href = '/') }, ico('chevronEnd')),
+    el('button', { class: 'icon-btn', 'aria-label': t('رجوع'), onclick: () => {
+      if (document.referrer && history.length > 1) history.back();
+      else location.href = '/';
+    } }, ico('chevronEnd')),
     title ? el('div', { class: 'title' }, title) : el('div', { class: 'spacer' }),
     ...actions,
   );
@@ -1002,6 +1022,67 @@ function showUpdateDialog(update) {
 }
 
 window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
+  // --- Central live-state hub (page-independent, like Google Play) ---
+  // Every native download/install event flows through here so ANY screen
+  // (app page, library, home) can render the same live progress and status.
+  try {
+    if (slug && slug !== 'app-update') {
+      if (status === 'downloading') {
+        const prev = getApkState(slug) || {};
+        setApkState(slug, {
+          slug, status: 'downloading',
+          progress: progress >= 0 ? progress : (prev.progress || 0),
+          filename: message || prev.filename || '',
+          updated_at: Math.floor(Date.now() / 1000),
+        });
+        const dls = getActiveDownloadMap();
+        const entry = dls[slug] || {};
+        setActiveDownload({
+          slug,
+          name: entry.name || slug,
+          icon_url: entry.icon_url || null,
+          developer: entry.developer || '',
+          size_bytes: entry.size_bytes || 0,
+          progress: progress >= 0 ? progress : (entry.progress || 0),
+          status: 'downloading',
+          started_at: entry.started_at || Math.floor(Date.now() / 1000),
+        });
+      } else if (status === 'downloaded') {
+        setApkState(slug, { slug, status: 'downloaded', progress: 1, filename: message || (getApkState(slug) || {}).filename || '', updated_at: Math.floor(Date.now() / 1000) });
+        const dls = getActiveDownloadMap();
+        if (dls[slug]) setActiveDownload({ slug, status: 'downloaded', progress: 1 });
+      } else if (status === 'installing') {
+        setApkState(slug, { slug, status: 'installing', progress: 1, updated_at: Math.floor(Date.now() / 1000) });
+        const dls = getActiveDownloadMap();
+        if (dls[slug]) setActiveDownload({ slug, status: 'installing', progress: 1 });
+      } else if (status === 'installed') {
+        // Central pipeline: registry + state cleanup + UI events. `message`
+        // carries the REAL resolved package name (native ground truth).
+        applyInstalled(slug, message || '');
+      } else if (status === 'uninstalled') {
+        unmarkInstalledStored(slug);
+        removeApkState(slug);
+        removeActiveDownload(slug);
+        try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'uninstalled', progress: -1, message } })); } catch (e) {}
+        try { window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { slug, packageName: message } })); } catch (e) {}
+        return;
+      } else if (status === 'cancelled' || status === 'failed') {
+        const isInst = (typeof isSlugInstalled === 'function' && isSlugInstalled(slug)) || (typeof resolvedPackageName === 'function' && resolvedPackageName(slug) && typeof isPackageInstalled === 'function' && isPackageInstalled(resolvedPackageName(slug)));
+        if (isInst && status === 'failed') {
+          return;
+        }
+        removeApkState(slug);
+        removeActiveDownload(slug);
+      }
+      // NOTE: for "installed" applyInstalled() already dispatched the
+      // gs-apk-state event — don't fire it twice (double toasts/UI swaps).
+      if (status !== 'installed') {
+        try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status, progress, message } })); } catch (e) {}
+      }
+    }
+  } catch (e) { console.error('[apkStateHub]', e); }
+
+  // --- Self-update dialog (Golden Store app itself) ---
   if (slug !== 'app-update') return;
   if (status === 'failed') {
     const map = {
@@ -1020,6 +1101,50 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
   }
 };
 
+// Native pushes a full snapshot after reconciling states with the device
+// (fired on every onResume). Merges everything into the live hub.
+window.__gsDownloadStatesSnapshot = function (states) {
+  try {
+    if (!states || typeof states !== 'object') return;
+    Object.keys(states).forEach((slug) => {
+      const st = states[slug] || {};
+      const status = st.status || 'downloading';
+      const progress = typeof st.progress === 'number' ? st.progress : -1;
+      if (status === 'downloading') {
+        setApkState(slug, {
+          slug, status: 'downloading', progress: progress >= 0 ? progress : 0,
+          filename: st.filename || '', package_name: st.package_name || '',
+          updated_at: st.updated_at || 0,
+        });
+        const dls = getActiveDownloadMap();
+        const entry = dls[slug] || {};
+        setActiveDownload({
+          slug, name: entry.name || slug, icon_url: entry.icon_url || null,
+          developer: entry.developer || '', size_bytes: entry.size_bytes || st.total_bytes || 0,
+          progress: progress >= 0 ? progress : (entry.progress || 0),
+          status: 'downloading', started_at: entry.started_at || Math.floor(Date.now() / 1000),
+        });
+      } else if (status === 'downloaded' || status === 'installing') {
+        setApkState(slug, { slug, status, progress: 1, filename: st.filename || '', package_name: st.package_name || '', updated_at: st.updated_at || 0 });
+      } else {
+        removeApkState(slug);
+        removeActiveDownload(slug);
+      }
+      try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status, progress, message: st.filename || '' } })); } catch (e) {}
+    });
+    // Native is the SOURCE OF TRUTH: prune web-side entries it no longer
+    // tracks (installs completed / cancelled while this page was closed).
+    // Without this, the library keeps showing "جارٍ التثبيت" forever.
+    const valid = new Set(Object.keys(states));
+    const apkMap = getApkStateMap();
+    Object.keys(apkMap).forEach((slug) => {
+      if (slug === 'app-update') return; // self-update flow tracks itself
+      if (!valid.has(slug)) { removeApkState(slug); removeActiveDownload(slug); }
+    });
+    notifyActiveDownloads();
+  } catch (e) { console.error('[statesSnapshot]', e); }
+};
+
 // Native bridge notifies the web layer when any package is uninstalled.
 // Pages that care (app detail) listen for 'gs-package-uninstalled' and can
 // match the removed package name against the app they display.
@@ -1027,6 +1152,14 @@ window.__gsPackageUninstalled = function (packageName) {
   try {
     if (!packageName) return;
     window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { packageName: packageName } }));
+    watchedApps.forEach((pkg, slug) => {
+      if (pkg === packageName || resolvedPackageName(slug) === packageName) {
+        unmarkInstalledStored(slug);
+        removeApkState(slug);
+        removeActiveDownload(slug);
+        try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'uninstalled', progress: -1, message: packageName } })); } catch (e) {}
+      }
+    });
   } catch (e) {}
 };
 
@@ -1038,9 +1171,233 @@ async function checkAppUpdate() {
   } catch (e) { console.error('[appUpdate] check failed', e); }
 }
 
+/* ------------------- Live APK state registry (persistent) ------------------- */
+// Tracks downloading / downloaded / installing states across pages and app
+// restarts. The native bridge pushes snapshots; every page can subscribe.
+const APK_STATE_KEY = 'gs_apk_states';
+function getApkStateMap() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(APK_STATE_KEY) || '{}');
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  } catch { return {}; }
+}
+function getApkState(slug) {
+  if (!slug) return null;
+  return getApkStateMap()[slug] || null;
+}
+function setApkState(slug, patch) {
+  if (!slug || !patch) return;
+  const map = getApkStateMap();
+  map[slug] = { ...(map[slug] || {}), ...patch, slug };
+  try { localStorage.setItem(APK_STATE_KEY, JSON.stringify(map)); } catch {}
+}
+function removeApkState(slug) {
+  if (!slug) return;
+  const map = getApkStateMap();
+  if (!map[slug]) return;
+  delete map[slug];
+  try { localStorage.setItem(APK_STATE_KEY, JSON.stringify(map)); } catch {}
+}
+function onApkState(fn) {
+  const handler = (e) => { try { fn(e.detail || {}); } catch (err) { console.error(err); } };
+  window.addEventListener('gs-apk-state', handler);
+  return () => window.removeEventListener('gs-apk-state', handler);
+}
+
+// Pull the full download/install snapshot from the native bridge (called on
+// every page load). This is what makes progress/status live across restarts:
+// the native side persists its states and reconciles them with the device.
+function syncNativeStates() {
+  if (!isNativeApp()) return;
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.getDownloadStates === 'function') {
+      const raw = window.GSAndroid.getDownloadStates();
+      if (raw) window.__gsDownloadStatesSnapshot(JSON.parse(raw));
+    }
+  } catch (e) { console.error('[syncNativeStates]', e); }
+}
+
+/* ------------------- Device truth resolver + heartbeat (v1.9) -------------------
+ * The #1 reliability rule of Google Play: the DEVICE decides, always.
+ * Native checkAppStatus(slug, pkg) resolves an app through every ground truth
+ * (metadata package → slug registry → REAL package read from the APK file),
+ * so a missed broadcast, a stale snapshot or wrong store metadata can never
+ * leave a button stuck on "جارٍ التثبيت" or "تثبيت + حذف الملف" again:
+ * within a heartbeat the UI re-syncs itself to the real device state. */
+function isNativeBridge() {
+  return !!(window.GSAndroid && typeof window.GSAndroid.checkAppStatus === 'function');
+}
+// Ask the device for the REAL install status of an app. Returns
+// { installed, version, package_name, status, progress, filename } or null.
+function checkAppStatus(slug, packageName) {
+  if (!slug || !isNativeBridge()) return null;
+  try {
+    const raw = window.GSAndroid.checkAppStatus(String(slug), String(packageName || ''));
+    const obj = raw ? JSON.parse(raw) : null;
+    if (obj && obj.package_name) rememberResolvedPackage(slug, obj.package_name);
+    return obj;
+  } catch (e) { return null; }
+}
+// slug → REAL device package (learned from successful status checks / install
+// events). Open/Uninstall must always use THIS, never the possibly-wrong
+// store metadata.
+const RESOLVED_PKG_KEY = 'gs_resolved_pkgs';
+function rememberResolvedPackage(slug, pkg) {
+  if (!slug || !pkg) return;
+  try {
+    const map = JSON.parse(sessionStorage.getItem(RESOLVED_PKG_KEY) || '{}');
+    if (map[slug] === pkg) return;
+    map[slug] = pkg;
+    sessionStorage.setItem(RESOLVED_PKG_KEY, JSON.stringify(map));
+  } catch {}
+}
+function resolvedPackageName(slug) {
+  if (!slug) return '';
+  try {
+    const map = JSON.parse(sessionStorage.getItem(RESOLVED_PKG_KEY) || '{}');
+    return map[slug] || '';
+  } catch { return ''; }
+}
+// Central "install completed" pipeline — the ONLY place that flips states,
+// so events from the native push, the snapshot and the heartbeat all end up
+// in exactly the same clean state.
+const recentInstalledAt = Object.create(null);
+function applyInstalled(slug, resolvedPkg) {
+  if (!slug) return;
+  const now = Date.now();
+  if (now - (recentInstalledAt[slug] || 0) < 3000) return; // dedupe bursts
+  recentInstalledAt[slug] = now;
+  if (resolvedPkg) rememberResolvedPackage(slug, resolvedPkg);
+  markInstalledStored(slug);
+  removeApkState(slug);
+  removeActiveDownload(slug);
+  try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'installed', progress: 1, message: resolvedPkg || '' } })); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent('gs-install-resolved', { detail: { slug, packageName: resolvedPkg || '' } })); } catch (e) {}
+}
+// Apps the current page wants watched (detail page registers its app here;
+// the heartbeat keeps it synced even with zero live downloads).
+const watchedApps = new Map(); // slug → packageName
+let heartbeatTimer = null;
+function registerInstallWatch(slug, packageName) {
+  if (!slug) return;
+  watchedApps.set(slug, packageName || '');
+  startHeartbeat();
+}
+function startHeartbeat() {
+  if (heartbeatTimer || !isNativeBridge()) return;
+  heartbeatTimer = setInterval(heartbeatTick, 1500);
+  // Re-sync the moment the page becomes visible/focused again (returning
+  // from the system installer, app switch, lock screen…).
+  const onVisible = () => { if (!document.hidden) heartbeatTick(); };
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('focus', onVisible);
+  window.addEventListener('pageshow', onVisible);
+}
+function heartbeatTick() {
+  if (!isNativeBridge()) return;
+  try {
+    // 1) The app this page displays (even when no live download exists).
+    watchedApps.forEach((pkg, slug) => {
+      const targetPkg = pkg || resolvedPackageName(slug) || '';
+      const st = checkAppStatus(slug, targetPkg);
+      if (st && st.installed) {
+        applyInstalled(slug, st.package_name);
+      } else if (st && !st.installed && isInstalledStored(slug)) {
+        unmarkInstalledStored(slug);
+        removeApkState(slug);
+        removeActiveDownload(slug);
+        try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'uninstalled', progress: -1, message: targetPkg } })); } catch (e) {}
+        try { window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { slug, packageName: targetPkg } })); } catch (e) {}
+      }
+    });
+    // 2) Every non-idle live entry (self-heals the library & other pages).
+    const map = getApkStateMap();
+    Object.keys(map).forEach((slug) => {
+      const st = map[slug];
+      if (!st || st.status === 'none') return;
+      if (st.status === 'downloading') return;
+      const info = st.package_name || resolvedPackageName(slug) || '';
+      const res = checkAppStatus(slug, info);
+      if (res && res.installed) {
+        applyInstalled(slug, res.package_name);
+      } else if (res && !res.installed && isInstalledStored(slug)) {
+        unmarkInstalledStored(slug);
+        removeApkState(slug);
+        removeActiveDownload(slug);
+        try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'uninstalled', progress: -1, message: info } })); } catch (e) {}
+      }
+    });
+  } catch (e) { console.error('[heartbeat]', e); }
+}
+
+/* ------------------- Installed apps registry (device truth) ------------------- */
+const INSTALL_KEY = 'gs_installed';
+function installedSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(INSTALL_KEY) || '[]')); } catch { return new Set(); }
+}
+function isInstalledStored(slug) { return installedSet().has(slug); }
+function markInstalledStored(slug) {
+  try { const s = installedSet(); s.add(slug); localStorage.setItem(INSTALL_KEY, JSON.stringify([...s])); } catch {}
+}
+function unmarkInstalledStored(slug) {
+  try { const s = installedSet(); s.delete(slug); localStorage.setItem(INSTALL_KEY, JSON.stringify([...s])); } catch {}
+}
+// REAL device check: asks the native PackageManager. Returns the installed
+// versionName, or '' when not installed / not running natively.
+function installedVersionOnDevice(packageName) {
+  if (!isNativeApp() || !packageName) return '';
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.isPackageInstalled === 'function') {
+      return window.GSAndroid.isPackageInstalled(packageName) || '';
+    }
+  } catch (e) {}
+  return '';
+}
+// Slug-based installed check: the native registry remembers slug→package for
+// every real install, so this keeps فتح/إلغاء التثبيت correct even when the
+// store metadata package name is missing or wrong. Returns versionName or ''.
+function isSlugInstalled(slug) {
+  if (!isNativeApp() || !slug) return '';
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.isSlugInstalled === 'function') {
+      return window.GSAndroid.isSlugInstalled(slug) || '';
+    }
+  } catch (e) {}
+  return '';
+}
+// Compare dotted versions: true when `store` is strictly newer than `device`.
+function versionIsNewer(storeVersion, deviceVersion) {
+  if (!storeVersion || !deviceVersion) return false;
+  if (deviceVersion === 'installed') return false;
+  const norm = (v) => String(v).split(/[.\-_+]/).map((x) => parseInt(x, 10) || 0);
+  const a = norm(storeVersion), b = norm(deviceVersion);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+// Cancel a native download (Google Play style long-press/cancel affordance).
+function cancelDownload(slug) {
+  try {
+    if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.cancelDownload === 'function') {
+      window.GSAndroid.cancelDownload(slug);
+    }
+    removeActiveDownload(slug);
+    removeApkState(slug);
+  } catch (e) {}
+}
+
 /* ----------------------------- Boot ----------------------------- */
 function boot() {
   initAuth();
+  // Restore live download/install states from the native bridge right away so
+  // the app page and the library show real progress/status after a restart.
+  syncNativeStates();
+  // Device-truth heartbeat: continuously reconcile install states with the
+  // real PackageManager so no missed event can ever leave a button stuck.
+  startHeartbeat();
   // Check for a newer app version shortly after the store renders.
   if (isNativeApp()) setTimeout(checkAppUpdate, 2000);
 }
@@ -1061,6 +1418,7 @@ function addToDownloadHistory(app) {
       icon_url: app.icon_url || null,
       developer: app.developer || '',
       size_bytes: app.size_bytes || 0,
+      package_name: app.package_name || '',
       downloaded_at: Math.floor(Date.now() / 1000),
     });
     // Keep max 200 entries
@@ -1234,13 +1592,17 @@ window.Store = {
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
   publicOrigin,
   posterCard, listRow, gridCard, featureCarousel, categoryName,
-  spinner, skeletonHome, skeletonDetail, skeletonList, emptyState, errorState,
+  spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications,
   ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
+  getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
+  isInstalledStored, markInstalledStored, unmarkInstalledStored,
+  installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,
+  checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
   checkAppUpdate, showUpdateDialog,
 };
 

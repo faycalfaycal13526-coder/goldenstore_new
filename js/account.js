@@ -4,6 +4,13 @@
   const { el, ico, formatBytes, formatDate, toast, t, getQuery } = S;
   const root = document.getElementById('root');
 
+  const isNativeApp = () => !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
+
+  // Module-level refs so native package events can refresh library rows after
+  // renderLibraryPage runs (bound once per page load — no listener leaks).
+  let libListRef = null;
+  let libRefreshRowRef = null;
+
   // Determine which view to show based on URL param
   const tabParam = getQuery('tab');
   const isLibraryView = tabParam === 'library';
@@ -31,9 +38,15 @@
 
   // --- Library page (standalone, accessed from bottom nav) ---
   function renderLibraryPage(content) {
+    bindLibraryPackageEvents();
     content.append(el('div', { class: 'page-title', style: { padding: '16px' } }, t('مكتبتي')));
     const body = el('div', { class: 'acct-body' });
     content.append(body);
+
+    // --- Live downloads: in-flight downloads + ready-to-install packages ---
+    // Progress/status update in real time (Google Play style) via the central
+    // state hub; entries survive app restarts through the native bridge.
+    mountLiveDownloads(body);
 
     const history = S.getDownloadHistory();
 
@@ -65,6 +78,66 @@
     body.append(header);
 
     const list = el('div', { class: 'lib-list' });
+
+    // Device truth for one library item — full fallback chain (v1.9):
+    // metadata package → native slug registry → resolved package learned
+    // from real installs. Returns { installed, pkg }.
+    function deviceStateFor(item) {
+      const resolved = S.resolvedPackageName ? S.resolvedPackageName(item.slug) : '';
+      let deviceVer = S.installedVersionOnDevice(item.package_name || '');
+      if (!deviceVer && resolved) deviceVer = S.installedVersionOnDevice(resolved);
+      if (!deviceVer) deviceVer = S.isSlugInstalled(item.slug);
+      const pkg = resolved || item.package_name || '';
+      return { installed: !!deviceVer, pkg };
+    }
+
+    // Google Play style end state for installed apps: Open + Uninstall
+    // buttons directly in the library row (mirrors the app detail page).
+    function buildAction(item) {
+      const st = deviceStateFor(item);
+      if (st.installed && isNativeApp() && st.pkg) {
+        return el('div', { class: 'lib-installed-actions', 'data-pkg': st.pkg },
+          el('button', {
+            class: 'btn btn-primary btn-sm', type: 'button',
+            onclick: (e) => {
+              e.preventDefault(); e.stopPropagation();
+              try { window.GSAndroid.openInstalledApp(st.pkg, item.slug || ''); } catch (err) {}
+            },
+          }, ico('play', 'icon icon-sm'), t('فتح')),
+          el('button', {
+            class: 'btn btn-secondary btn-sm', type: 'button',
+            onclick: (e) => {
+              e.preventDefault(); e.stopPropagation();
+              try {
+                window.GSAndroid.uninstallApp(st.pkg, item.slug || '');
+                toast(t('جارٍ إلغاء التثبيت…'), 'info');
+              } catch (err) {}
+            },
+          }, ico('trash', 'icon icon-sm'), t('إلغاء التثبيت')),
+        );
+      }
+      if (st.installed) {
+        return el('span', { class: 'lib-installed-badge' }, ico('check', 'icon icon-sm'), t('مثبّت'));
+      }
+      return el('span', { class: 'lib-open-btn' }, ico('chevronStart', 'icon icon-sm'));
+    }
+
+    // Re-evaluate one row against the device (install state changed live).
+    function refreshRow(slug) {
+      const item = history.find((h) => h.slug === slug);
+      if (!item || !list.isConnected) return;
+      const rowEl = list.querySelector('.lib-row[data-slug="' + CSS.escape(slug) + '"]');
+      if (!rowEl) return;
+      const act = rowEl.querySelector('.lib-action');
+      if (!act) return;
+      act.innerHTML = '';
+      act.append(buildAction(item));
+      // Keep the local registry in sync with the device.
+      const st = deviceStateFor(item);
+      if (st.installed) S.markInstalledStored(item.slug);
+      else if (S.unmarkInstalledStored) S.unmarkInstalledStored(item.slug);
+    }
+
     history.forEach((item) => {
       const row = el('a', { href: `/app?slug=${encodeURIComponent(item.slug)}`, class: 'lib-row' },
         el('div', { class: 'art' },
@@ -81,13 +154,188 @@
             el('span', null, formatDate(item.downloaded_at)),
           ),
         ),
-        el('div', { class: 'lib-action' },
-          el('span', { class: 'lib-open-btn' }, ico('chevronStart', 'icon icon-sm')),
-        ),
+        el('div', { class: 'lib-action' }, buildAction(item)),
       );
+      row.setAttribute('data-slug', item.slug || '');
       list.append(row);
     });
     body.append(list);
+
+    // Expose refs for the native event listeners (bound once at module scope).
+    libListRef = list;
+    libRefreshRowRef = refreshRow;
+  }
+
+  // --- Native package events → live library row refresh ---
+  // When the user uninstalls (system dialog) or an install completes while
+  // the library is open, the affected rows flip between
+  // [فتح | إلغاء التثبيت] and the plain state WITHOUT a page reload.
+  let libEventsBound = false;
+  function bindLibraryPackageEvents() {
+    if (libEventsBound) return;
+    libEventsBound = true;
+    window.addEventListener('gs-package-uninstalled', (e) => {
+      const pkg = e && e.detail && e.detail.packageName;
+      if (!pkg || !libListRef || !libListRef.isConnected || !libRefreshRowRef) return;
+      libListRef.querySelectorAll('.lib-installed-actions').forEach((act) => {
+        if (act.getAttribute('data-pkg') !== pkg) return;
+        const rowEl = act.closest('.lib-row');
+        const slug = rowEl && rowEl.getAttribute('data-slug');
+        if (slug) libRefreshRowRef(slug);
+      });
+    });
+    if (S.onApkState) {
+      S.onApkState((evt) => {
+        const slug = evt && evt.slug;
+        const status = evt && evt.status;
+        if (!slug || !libListRef || !libListRef.isConnected || !libRefreshRowRef) return;
+        if (status === 'installed' || status === 'uninstalled') libRefreshRowRef(slug);
+      });
+    }
+  }
+
+  // --- Live downloads section (library) ---
+  // Renders downloading / downloaded / installing entries from the central
+  // hub, enriched with names/icons from the download history. Re-renders on
+  // every state event so progress and status stay live on this page.
+  function mountLiveDownloads(body) {
+    const section = el('div', { class: 'live-dls' });
+    let paintQueued = false;
+
+    function paint() {
+      paintQueued = false;
+      const map = S.getApkStateMap ? S.getApkStateMap() : {};
+      let entries = Object.values(map).filter((st) => st && st.slug);
+      section.innerHTML = '';
+      if (!entries.length) return;
+
+      const historyById = {};
+      S.getDownloadHistory().forEach((h) => { historyById[h.slug] = h; });
+
+      // Self-heal FIRST — the DEVICE decides (v1.9): any "installing" or
+      // "downloaded" entry whose app is REALLY installed (event lost while
+      // navigating, wrong metadata, missed broadcast…) is dropped right away
+      // instead of sticking on "جارٍ التثبيت…" forever. checkAppStatus also
+      // resolves the REAL package from the APK file when metadata is empty.
+      entries = entries.filter((st) => {
+        if (st.status !== 'installing' && st.status !== 'downloaded') return true;
+        const info = historyById[st.slug] || {};
+        const res = S.checkAppStatus ? S.checkAppStatus(st.slug, st.package_name || info.package_name || '') : null;
+        if (res && res.installed) {
+          S.removeApkState(st.slug);
+          S.removeActiveDownload(st.slug);
+          return false;
+        }
+        return true;
+      });
+      if (!entries.length) return;
+
+      section.append(el('div', { class: 'live-dls-title' },
+        ico('download', 'icon'),
+        el('span', null, t('جارٍ التنزيل الآن')),
+        el('span', { class: 'live-count' }, String(entries.length)),
+      ));
+
+      entries
+        .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+        .forEach((st) => {
+          const info = historyById[st.slug] || {};
+          const name = info.name || st.name || st.slug;
+          const pct = st.status === 'downloading' && typeof st.progress === 'number' && st.progress >= 0
+            ? Math.max(0, Math.min(100, Math.round(st.progress * 100))) : null;
+
+          const statusText = st.status === 'downloading'
+            ? (pct === null ? t('جارٍ التنزيل…') : `${t('جارٍ التنزيل…')} ${pct}%`)
+            : st.status === 'downloaded' ? t('تم التنزيل — جاهز للتثبيت')
+            : st.status === 'installing' ? t('جارٍ التثبيت…')
+            : t('قيد المعالجة…');
+
+          const barFill = el('span');
+          if (st.status === 'downloading') {
+            if (pct !== null) barFill.style.width = pct + '%';
+            else barFill.style.width = '100%';
+          } else if (st.status === 'installing') {
+            barFill.style.width = '100%';
+          } else {
+            barFill.style.width = '100%';
+          }
+          if (st.status !== 'downloading' || pct === null) barFill.classList.add('indeterminate');
+
+          const meta = el('div', { class: 'meta' },
+            el('span', null, statusText),
+            el('span', null, info.size_bytes ? formatBytes(info.size_bytes) : ''),
+          );
+
+          const infoCol = el('div', { class: 'info' },
+            el('div', { class: 'nm' }, name),
+            el('div', { class: 'bar' }, barFill),
+            meta,
+          );
+
+          const row = el('div', { class: `live-dl live-dl-${st.status}` },
+            el('div', { class: 'art' },
+              info.icon_url
+                ? el('img', { src: info.icon_url, alt: '', loading: 'lazy' })
+                : ico('package', 'icon icon-lg'),
+            ),
+            infoCol,
+          );
+
+          if (st.status === 'downloading') {
+            row.append(el('button', {
+              class: 'live-dl-cancel', type: 'button',
+              'aria-label': t('إلغاء'), title: t('إلغاء'),
+              onclick: (e) => {
+                e.preventDefault();
+                S.cancelDownload(st.slug);
+                toast(t('تم إلغاء التنزيل'), 'info');
+                paint();
+              },
+            }, ico('close', 'icon')));
+          } else if (st.status === 'downloaded') {
+            row.append(el('button', {
+              class: 'live-dl-install', type: 'button',
+              onclick: (e) => {
+                e.preventDefault();
+                if (window.GSAndroid && typeof window.GSAndroid.openDownloadedApk === 'function') {
+                  window.GSAndroid.openDownloadedApk(st.filename || '', st.slug, st.package_name || info.package_name || '');
+                  toast(t('جارٍ فتح مثبّت النظام…'), 'info');
+                } else {
+                  location.href = `/app?slug=${encodeURIComponent(st.slug)}`;
+                }
+              },
+            }, ico('download', 'icon'), t('تثبيت')));
+          }
+          section.append(row);
+        });
+    }
+
+    function queuePaint() {
+      if (paintQueued) return;
+      paintQueued = true;
+      requestAnimationFrame(paint);
+    }
+
+    const offState = S.onApkState ? S.onApkState(() => queuePaint()) : null;
+    const offDl = S.onActiveDownloadsChange ? S.onActiveDownloadsChange(() => queuePaint()) : null;
+    // Stop listening when navigating away (page unload clears everything).
+    window.addEventListener('pagehide', () => {
+      if (offState) offState();
+      if (offDl) offDl();
+    }, { once: true });
+
+    paint();
+    // Only mount when there is something live to show (or updates arrive).
+    if (section.childNodes.length) body.append(section);
+    else {
+      const earlyOff = S.onApkState(() => {
+        if (section.childNodes.length) return;
+        if (!Object.keys(S.getApkStateMap ? S.getApkStateMap() : {}).length) return;
+        earlyOff();
+        body.prepend(section);
+        queuePaint();
+      });
+    }
   }
 
   // --- Settings page (profile + settings) ---

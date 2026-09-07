@@ -312,8 +312,6 @@ input, select { font-family: inherit; }
 .poster .rt { font-size: 12px; color: var(--text-2); margin-top: 2px; display: flex; align-items: center; gap: 3px; }
 .poster .rt .icon { width: 12px; height: 12px; color: var(--star); }
 
-
-
 /* wrapping poster grid (featured page) */
 .poster-grid {
   display: grid; gap: 16px 12px; padding: 4px 16px 4px;
@@ -514,8 +512,8 @@ input, select { font-family: inherit; }
 .shots { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 4px 0; }
 .shots::-webkit-scrollbar { display: none; }
 .shots img {
-  height: 280px; border-radius: 14px; flex: 0 0 auto;
-  background: var(--surface-2); object-fit: cover; cursor: pointer; border: 1px solid var(--line);
+  height: 280px; max-width: min(62vw, 420px); border-radius: 14px; flex: 0 0 auto;
+  background: var(--surface-2); object-fit: cover; object-position: center; cursor: pointer; border: 1px solid var(--line);
 }
 
 .d-section { margin-top: 28px; }
@@ -787,8 +785,6 @@ input, select { font-family: inherit; }
 .lib-header-info { display: flex; align-items: center; gap: 8px; }
 .lib-header-ico { width: 20px; height: 20px; color: var(--primary); }
 .lib-count { font-size: 14px; color: var(--text-2); font-weight: 600; }
-
-
 
 .lib-list { display: flex; flex-direction: column; gap: 2px; }
 .lib-row {
@@ -1127,6 +1123,7 @@ input, select { font-family: inherit; }
   }
   .shots img {
     height: 340px;
+    max-width: 420px;
     border-radius: 18px;
   }
 
@@ -1165,61 +1162,6 @@ input, select { font-family: inherit; }
   .acct-info .nm {
     font-size: 24px;
   }
-
-  /* --- Points page desktop (wider) --- */
-  .points-page {
-    max-width: 800px;
-    padding: 16px 32px 40px;
-  }
-  .points-hero {
-    padding: 36px 32px 32px;
-    border-radius: 24px;
-  }
-  .points-hero-icon {
-    width: 120px;
-    height: 120px;
-  }
-  .points-balance {
-    font-size: 56px;
-  }
-  .points-balance-label {
-    font-size: 16px;
-  }
-  .points-dollar {
-    padding: 10px 28px;
-  }
-  .points-dollar-val {
-    font-size: 26px;
-  }
-  .points-stats {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
-    margin-top: 28px;
-  }
-  .points-stat {
-    padding: 20px 14px;
-    border-radius: 16px;
-  }
-  .points-stat-val {
-    font-size: 22px;
-  }
-  .points-stat-label {
-    font-size: 12px;
-    margin-top: 6px;
-  }
-  .points-invite {
-    border-radius: 16px;
-    padding: 24px;
-  }
-  .points-how {
-    border-radius: 16px;
-    padding: 24px;
-  }
-  .points-progress-card {
-    border-radius: 16px;
-    padding: 18px 24px;
-  }
-
   /* --- Dialog on desktop: centered card --- */
   .dialog-overlay {
     align-items: center;
@@ -1339,9 +1281,6 @@ input, select { font-family: inherit; }
   .fc-media {
     aspect-ratio: 2.8 / 1;
   }
-  .points-page {
-    max-width: 900px;
-  }
   .acct-page {
     max-width: 900px;
   }
@@ -1435,8 +1374,6 @@ input, select { font-family: inherit; }
 .modal { position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .modal img { max-width: 100%; max-height: 90vh; border-radius: 12px; }
 .modal .close { position: absolute; top: 16px; inset-inline-end: 16px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; color: #fff; }
-
-
 
 .hidden { display: none !important; }
 
@@ -1828,131 +1765,11 @@ input, select { font-family: inherit; }
   background: var(--surface-2); border-radius: 50%; width: 32px; height: 32px;
 }
 
-/* ---------- Points page (نقاط التشغيل) ---------- */
-.points-page {
-  padding: 8px 16px 32px; max-width: 640px; margin: 0 auto; width: 100%;
-  /* GPU-composited layer to prevent paint jank */
-  will-change: contents;
-  contain: layout style;
-}
-.points-loading { display: flex; justify-content: center; padding: 48px 0; }
-.points-error { text-align: center; padding: 40px 16px; color: var(--text-2); }
-.points-error p { margin-bottom: 16px; }
-
-/* Smooth fade-in for points content */
+/* Smooth fade-in for lazy content */
 @keyframes pts-fade {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.points-hero,
-.points-progress-card,
-.points-withdraw-btn,
-.points-stats,
-.points-invite,
-.points-how,
-.points-history {
-  animation: pts-fade .35s ease both;
-}
-.points-progress-card { animation-delay: .05s; }
-.points-stats { animation-delay: .1s; }
-.points-invite { animation-delay: .15s; }
-.points-how { animation-delay: .2s; }
-.points-history { animation-delay: .25s; }
-
-.points-hero {
-  text-align: center; padding: 28px 20px 24px; margin-top: 8px;
-  background: radial-gradient(120% 120% at 50% 0%, rgba(244,192,31,.18), transparent 60%), var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius);
-}
-.points-hero-icon {
-  width: 96px; height: 96px; object-fit: contain;
-  filter: drop-shadow(0 6px 16px rgba(244,192,31,.35));
-  margin: 0 auto;
-}
-.points-balance { font-size: 44px; font-weight: 800; line-height: 1.1; margin-top: 8px; color: var(--text);
-  background: linear-gradient(180deg, var(--gold-2), var(--gold)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.points-balance-label { font-size: 14px; color: var(--text-2); margin-top: 2px; }
-.points-dollar { margin-top: 14px; display: inline-flex; flex-direction: column; gap: 2px;
-  padding: 8px 20px; background: var(--surface-2); border-radius: 999px; }
-.points-dollar-val { font-size: 22px; font-weight: 800; color: var(--text); }
-.points-dollar-label { font-size: 12px; color: var(--text-2); }
-
-.points-progress-card { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; }
-.points-progress-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); margin-bottom: 8px; }
-.points-progress-goal { font-weight: 800; color: var(--gold); }
-.points-progress-bar { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
-.points-progress-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-2)); border-radius: 999px; transition: width .5s ease; }
-.points-progress-hint { font-size: 12px; color: var(--text-2); margin-top: 8px; text-align: center; }
-
-.points-withdraw-btn { margin-top: 16px; }
-.points-withdraw-note { font-size: 12px; color: var(--text-2); text-align: center; margin-top: 8px; }
-
-.points-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
-.points-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 8px; text-align: center; }
-.points-stat-val { font-size: 18px; font-weight: 800; color: var(--text); }
-.points-stat-label { font-size: 11px; color: var(--text-2); margin-top: 4px; line-height: 1.3; }
-
-.points-invite { margin-top: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; }
-.points-invite-head { display: flex; flex-direction: column; gap: 8px; }
-.points-invite-title { font-weight: 800; color: var(--text); font-size: 16px; }
-.points-invite-desc { color: var(--text-2); font-size: 13px; line-height: 1.7; }
-.points-invite-code-row { margin-top: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.points-code-pill { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--gold); font-size: 20px; font-weight: 800; letter-spacing: 0.14em; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; direction: ltr; }
-.points-invite-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.points-invite-btn { min-width: 90px; }
-.points-invite-stats { margin-top: 12px; color: var(--text-2); font-size: 13px; }
-.points-invite-redeem { margin-top: 14px; }
-.points-invite-redeem-row { display: flex; gap: 10px; }
-.points-invite-input { flex: 1; text-align: center; letter-spacing: 0.08em; direction: ltr; }
-.points-invite-apply { min-width: 100px; }
-.points-invite-done { padding: 12px 14px; border-radius: var(--radius-sm); background: rgba(244,192,31,.12); color: var(--gold); font-weight: 700; text-align: center; }
-
-.points-how { margin-top: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; }
-.points-how-title { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 10px; color: var(--text); }
-.points-how-list { margin: 0; padding-inline-start: 20px; color: var(--text-2); font-size: 13px; line-height: 1.9; }
-
-.points-history { margin-top: 20px; }
-.points-history-title { font-weight: 700; margin-bottom: 10px; color: var(--text); }
-.points-history-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 8px; }
-.points-history-amount { font-weight: 800; color: var(--text); }
-.points-history-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; }
-.points-status { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
-.points-status-pending { background: rgba(244,192,31,.15); color: var(--gold); }
-.points-status-approved { background: rgba(52,168,83,.15); color: #34a853; }
-.points-status-rejected { background: rgba(234,67,53,.15); color: #ea4335; }
-
-@media (max-width: 600px) {
-  .points-page { padding-inline: 12px; }
-  .points-hero { padding: 24px 16px 20px; }
-  .points-balance { font-size: 38px; }
-  .points-dollar { padding-inline: 16px; }
-  .points-stats { grid-template-columns: repeat(2, 1fr); }
-  .points-invite-redeem-row { flex-direction: column; }
-  .points-invite-apply { width: 100%; }
-  .points-history-row { flex-direction: column; align-items: flex-start; }
-  .points-history-row .points-status { align-self: flex-start; }
-}
-
-@media (max-width: 380px) {
-  .points-stats { grid-template-columns: 1fr; }
-}
-
-/* Withdraw modal form */
-.points-withdraw-form { display: flex; flex-direction: column; gap: 6px; }
-.points-label { font-size: 13px; font-weight: 600; color: var(--text-2); margin-top: 8px; }
-.points-input { width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
-  background: var(--surface-2); color: var(--text); font-size: 14px; font-family: inherit; }
-.points-input:focus { outline: none; border-color: var(--gold); }
-
-/* Account page points banner */
-.points-banner { display: flex; align-items: center; gap: 14px; margin: 16px; padding: 14px 16px;
-  background: radial-gradient(120% 140% at 0% 0%, rgba(244,192,31,.16), transparent 60%), var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; }
-.points-banner-icon { width: 48px; height: 48px; object-fit: contain; flex-shrink: 0; }
-.points-banner-info { flex: 1; min-width: 0; }
-.points-banner-title { font-weight: 800; color: var(--text); font-size: 15px; }
-.points-banner-sub { font-size: 12px; color: var(--text-2); margin-top: 2px; }
 
 /* ===== Library: installed-row Open/Uninstall actions (Google Play style) ===== */
 .lib-installed-actions {

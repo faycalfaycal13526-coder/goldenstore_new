@@ -57,7 +57,7 @@ function onAuthChange(fn) {
 }
 
 // Resolves once Firebase has determined the initial auth state. This lets
-// callers (e.g. points earning) wait for the real user object instead of
+// callers wait for the real user object instead of
 // racing the optimistic cached render.
 function ready() {
   return new Promise(function (resolve) {
@@ -74,7 +74,7 @@ function getUser() {
 }
 
 // Returns a fresh Firebase ID token for the signed-in user, or null. Used to
-// authenticate sensitive API calls (points earning/withdrawal) server-side.
+// authenticate sensitive API calls server-side.
 async function getIdToken(forceRefresh) {
   try {
     if (_currentUser && _currentUser.getIdToken) {

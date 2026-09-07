@@ -512,7 +512,26 @@
       async function refreshStatus() {
         try {
           const s = await api('/api/admin/push/status');
-          pushInfo.textContent = `الأجهزة المسجّلة حالياً: ${s.registered_tokens || 0}`;
+          let txt = `الأجهزة المسجّلة حالياً: ${s.registered_tokens || 0}`;
+          // Show the freshest registrations so the owner can verify a test
+          // device actually registered (open app → allow notifications → sign in).
+          const toks = s.tokens || [];
+          if (toks.length) {
+            const now = Math.floor(Date.now() / 1000);
+            const rel = (ts) => {
+              const m = Math.max(0, Math.round((now - ts) / 60));
+              if (m < 1) return 'الآن';
+              if (m < 60) return `قبل ${m} دقيقة`;
+              const h = Math.round(m / 60);
+              if (h < 24) return `قبل ${h} ساعة`;
+              return `قبل ${Math.round(h / 24)} يوم`;
+            };
+            txt += ' — آخر تسجيل جهاز: ' + rel(toks[0].updated_at);
+            if ((s.registered_tokens || 0) > 1) txt += ` (${toks.length} أجهزة)`;
+          } else {
+            txt += ' — لا يوجد أي جهاز مسجّل. افتح تطبيق الأندرويد، اسمح بالإشعارات، وسجّل الدخول.';
+          }
+          pushInfo.textContent = txt;
         } catch (e) {}
       }
 
@@ -521,7 +540,7 @@
         try {
           const res = await api('/api/admin/push/test', { method: 'POST', body: {} });
           showPush(res.push);
-          toast('تم إرسال إشعار تجريبي', 'success');
+          toast('تم إرسال إشعار تجريبي — لا يُحفظ في قائمة الإشعارات داخل التطبيق', 'success');
         } catch (e) {
           toast(e.message || 'تعذر الإرسال', 'error');
         } finally {

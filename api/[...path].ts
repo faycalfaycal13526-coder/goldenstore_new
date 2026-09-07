@@ -317,12 +317,10 @@ async function sendPushToRegistered(
   if (tokens.length === 0) return result;
 
   const msg = await messaging();
-  // Data-only payload: the Android client builds the notification natively in
-  // GoldenFirebaseMessagingService so it can show the real store/app logo as
-  // the large icon and a per-type label ("تطبيق جديد" / "تحديث" / "إشعار") in
-  // every app state (foreground, background, killed). Sending a `notification`
-  // block would make the system draw a plain notification (no large icon /
-  // custom styling) whenever the app is in the background.
+  // Data payload: when the app is in the FOREGROUND, the Android client
+  // receives this in GoldenFirebaseMessagingService and builds the
+  // notification natively so it can show the real store/app logo as the
+  // large icon and a per-type label ("تطبيق جديد" / "تحديث" / "إشعار").
   const dataPayload: Record<string, string> = {
     title: n.title,
     body: n.body || '',
@@ -336,7 +334,12 @@ async function sendPushToRegistered(
   if (n.data && typeof n.data === 'object') {
     try { dataPayload.extra = JSON.stringify(n.data); } catch {}
   }
-  // Send in batches of 500 (FCM multicast limit).
+  // Dual payload (notification + data): the system tray renders the
+  // `notification` block itself when the app is backgrounded/killed (works
+  // even on aggressive OEMs where background services never run), while the
+  // `data` block reaches GoldenFirebaseMessagingService in the foreground for
+  // the rich rendering (store/app logo as the large icon). This is the only
+  // fully reliable combination for user-visible announcements.
   const invalidTokens: string[] = [];
   for (let i = 0; i < tokens.length; i += 500) {
     const batch = tokens.slice(i, i + 500);
@@ -345,8 +348,16 @@ async function sendPushToRegistered(
       resp = await msg.sendEachForMulticast({
         tokens: batch,
         data: dataPayload,
+        notification: { title: n.title, body: n.body || '' },
         android: {
           priority: 'high',
+          notification: {
+            title: n.title,
+            body: n.body || '',
+            channel_id: 'goldenstore_notifications',
+            color: '#f4c01f',
+            visibility: 'PUBLIC',
+          },
         },
       });
     } catch (err: any) {
@@ -1206,22 +1217,34 @@ app.post('/admin/app-update', async (c) => {
   return c.json({ ok: true, update: updateDoc, push });
 });
 
-// Diagnostics: how many device tokens are registered right now.
+// Diagnostics: how many device tokens are registered right now, plus per-device
+// registration info (when it last registered, platform, masked uid/token) so
+// the dashboard can tell whether a test device actually registered.
 app.get('/admin/push/status', async (c) => {
   const db = await firestore();
   let count = 0;
   const platforms: Record<string, number> = {};
+  const tokens: any[] = [];
   try {
     const snap = await db.collection('fcm_tokens').get();
     count = snap.size;
     snap.forEach((d: any) => {
-      const p = String(d.data()?.platform || 'unknown');
+      const data = d.data() || {};
+      const p = String(data.platform || 'unknown');
       platforms[p] = (platforms[p] || 0) + 1;
+      const tok = String(data.token || '');
+      tokens.push({
+        platform: p,
+        uid_masked: String(data.uid || '').slice(0, 10),
+        updated_at: Number(data.updated_at || 0),
+        token_tail: tok.length > 6 ? tok.slice(-6) : '…',
+      });
     });
+    tokens.sort((a: any, b: any) => b.updated_at - a.updated_at);
   } catch (err: any) {
     return c.json({ error: 'read_failed', message: err?.message || String(err) }, 500);
   }
-  return c.json({ registered_tokens: count, platforms });
+  return c.json({ registered_tokens: count, platforms, tokens });
 });
 
 // Diagnostics: send a test push right now and return the detailed FCM result

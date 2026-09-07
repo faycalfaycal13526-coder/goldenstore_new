@@ -34,7 +34,7 @@
   function openModal(src) {
     const m = el('div', { class: 'modal', onclick: (e) => { if (e.target === m) m.remove(); } },
       el('button', { class: 'close', 'aria-label': t('إغلاق'), onclick: () => m.remove() }, ico('close')),
-      el('img', { src }),
+      el('img', { src, onclick: () => m.remove(), onerror: function () { this.style.display = 'none'; } }),
     );
     document.body.append(m);
     document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { m.remove(); document.removeEventListener('keydown', esc); } });

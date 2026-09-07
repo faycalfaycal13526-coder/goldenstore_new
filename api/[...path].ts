@@ -236,7 +236,7 @@ async function listNotifications(db: any, limit?: number) {
 // Public URL of the store logo, shown as the notification large icon for
 // announcements (and as a fallback for app-specific notifications).
 const STORE_LOGO_URL =
-  process.env.STORE_LOGO_URL || 'https://goldenstore.vercel.app/images/logo.png';
+  process.env.STORE_LOGO_URL || 'https://goldenstore-new.vercel.app/images/logo.png';
 
 // Resolve the real app icon URL for a notification tied to an app, so the
 // pushed notification shows the actual app's logo instead of a generic icon.

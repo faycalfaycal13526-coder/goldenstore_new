@@ -45,6 +45,10 @@
         {
             "source": "/api/:path*",
             "destination": "/api/[...path]"
+        },
+        {
+            "source": "/points",
+            "destination": "/index.html"
         }
     ],
     "headers": [

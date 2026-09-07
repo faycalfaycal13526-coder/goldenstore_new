@@ -57,7 +57,7 @@ function onAuthChange(fn) {
 }
 
 // Resolves once Firebase has determined the initial auth state. This lets
-// callers wait for the real user object instead of
+// callers (e.g. authenticated actions) wait for the real user object instead of
 // racing the optimistic cached render.
 function ready() {
   return new Promise(function (resolve) {

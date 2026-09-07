@@ -1123,7 +1123,7 @@ input, select { font-family: inherit; }
   }
   .shots img {
     height: 340px;
-    max-width: 420px;
+    max-width: min(46vw, 560px);
     border-radius: 18px;
   }
 
@@ -1372,7 +1372,11 @@ input, select { font-family: inherit; }
 
 /* image modal */
 .modal { position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; padding: 24px; }
-.modal img { max-width: 100%; max-height: 90vh; border-radius: 12px; }
+.modal img {
+  max-width: min(94vw, 860px); max-height: 80vh; width: auto; height: auto;
+  object-fit: contain; border-radius: 12px; background: var(--surface-2);
+  box-shadow: 0 12px 60px rgba(0,0,0,.55); cursor: zoom-out;
+}
 .modal .close { position: absolute; top: 16px; inset-inline-end: 16px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; color: #fff; }
 
 .hidden { display: none !important; }
@@ -1763,12 +1767,6 @@ input, select { font-family: inherit; }
 .login-avatar {
   display: flex; align-items: center; justify-content: center;
   background: var(--surface-2); border-radius: 50%; width: 32px; height: 32px;
-}
-
-/* Smooth fade-in for lazy content */
-@keyframes pts-fade {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ===== Library: installed-row Open/Uninstall actions (Google Play style) ===== */

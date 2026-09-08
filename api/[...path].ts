@@ -354,7 +354,7 @@ async function sendPushToRegistered(
           notification: {
             title: n.title,
             body: n.body || '',
-            channel_id: 'goldenstore_notifications',
+            channelId: 'goldenstore_notifications',
             color: '#f4c01f',
             visibility: 'public',
           },

@@ -356,7 +356,7 @@ async function sendPushToRegistered(
             body: n.body || '',
             channel_id: 'goldenstore_notifications',
             color: '#f4c01f',
-            visibility: 'PUBLIC',
+            visibility: 'public',
           },
         },
       });

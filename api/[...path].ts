@@ -379,30 +379,65 @@ async function sendPushToTokens(
 // Send an FCM push to every registered device token. Only logged-in users
 // register tokens (see /notifications/register-token), so this targets
 // registered users only. Invalid/expired tokens are pruned from Firestore.
+// DELIVERY: broadcasts go to the 'all' FCM topic — every app (v1.14+)
+// subscribes to it automatically on startup, so delivery no longer depends
+// on per-device token registration (stale tokens after reinstalls were the
+// main reason pushes silently never arrived). Token sends remain only for
+// the user-targeted self-test.
 async function sendPushToRegistered(
   db: any,
   n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
 ): Promise<PushResult> {
+  const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
+  let registered = 0;
   let tokensSnap: any;
   try {
     tokensSnap = await db.collection('fcm_tokens').get();
+    registered = (tokensSnap.docs || []).filter((d: any) => String(d.data()?.token || '').length > 0).length;
   } catch (err: any) {
     console.error('[fcm] failed to read tokens:', err?.message || err);
-    const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
-    result.errors.push('read_tokens_failed: ' + (err?.message || String(err)));
-    return result;
   }
-  const docs: any[] = tokensSnap.docs || [];
-  const tokens: string[] = docs
-    .map((d: any) => String(d.data()?.token || ''))
-    .filter((t: string) => t.length > 0);
-  const result = await sendPushToTokens(tokens, n);
-  // Prune dead tokens.
-  for (const t of result.invalid_tokens || []) {
-    const dead = docs.find((d: any) => String(d.data()?.token || '') === t);
-    if (dead) await dead.ref.delete().catch(() => {});
+  result.targeted = registered;
+
+  const msg = await messaging();
+  const dataPayload: Record<string, string> = {
+    title: n.title,
+    body: n.body || '',
+    type: n.type,
+    app_slug: n.app_slug || '',
+    notification_id: n.id,
+    image: n.image || '',
+    store_logo: STORE_LOGO_URL,
+  };
+  if (n.data && typeof n.data === 'object') {
+    try { dataPayload.extra = JSON.stringify(n.data); } catch {}
   }
-  delete result.invalid_tokens;
+  try {
+    // Dual payload to the topic: the system tray renders the `notification`
+    // block itself when the app is backgrounded/killed (and on aggressive
+    // OEMs), while the `data` block reaches GoldenFirebaseMessagingService in
+    // the foreground for the rich rendering (store/app logo as large icon).
+    await msg.send({
+      topic: 'all',
+      data: dataPayload,
+      notification: { title: n.title, body: n.body || '' },
+      android: {
+        priority: 'high',
+        notification: {
+          title: n.title,
+          body: n.body || '',
+          channelId: 'goldenstore_notifications',
+          color: '#f4c01f',
+          visibility: 'public',
+        },
+      },
+    });
+    result.success = Math.max(1, registered);
+  } catch (err: any) {
+    console.error('[fcm] topic send failed:', err?.message || err);
+    result.failure = Math.max(1, registered);
+    result.errors.push('topic_send_failed: ' + (err?.message || String(err)));
+  }
   return result;
 }
 

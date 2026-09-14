@@ -1587,6 +1587,29 @@ function onActiveDownloadsChange(fn) {
   } catch (e) {}
 })();
 
+/* ------------------- Push diagnostics & one-tap self-test ------------------- */
+// Full notification status: native bridge truth (token, permission, channel,
+// battery optimization, last received FCM message) merged with the server's
+// registration record for the signed-in user.
+async function pushDiagnostics() {
+  let native = null;
+  if (window.GSAndroid && typeof window.GSAndroid.getPushDiagnostics === 'function') {
+    try { native = JSON.parse(window.GSAndroid.getPushDiagnostics()); } catch (e) {}
+  }
+  let server = null;
+  try {
+    server = await authedApi('/api/notifications/my-tokens', { timeoutMs: 12000 });
+  } catch (e) {
+    server = { error: (e && e.message) || 'unavailable' };
+  }
+  return { native, server };
+}
+
+// Send a REAL push notification to the signed-in user's own devices.
+async function sendTestPush() {
+  return authedApi('/api/notifications/self-test', { method: 'POST', body: '{}', timeoutMs: 25000 });
+}
+
 window.Store = {
   STORE, api, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
@@ -1604,6 +1627,7 @@ window.Store = {
   installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
   checkAppUpdate, showUpdateDialog,
+  pushDiagnostics, sendTestPush,
 };
 
 document.addEventListener('DOMContentLoaded', boot);

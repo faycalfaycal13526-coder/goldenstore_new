@@ -378,12 +378,119 @@
           langSettingItem(),
           aboutDropdown(),
         ),
+        notificationsCard(),
         contactCard(),
         el('div', { style: { padding: '24px 0' } },
           el('button', { class: 'btn btn-outline btn-block', onclick: () => confirmSignOut() },
             ico('logout', 'icon icon-sm'), t('تسجيل الخروج')),
         ),
       );
+    }
+
+    // --- Notifications status card (native app only): live diagnostics +
+    // a one-tap REAL push self-test, so notification problems are visible
+    // and testable without the admin panel. ---
+    function notificationsCard() {
+      if (!isNativeApp()) return el('span');
+      const wrap = el('div', null,
+        el('div', { class: 'page-title', style: { padding: '8px 16px 0', fontSize: '15px' } }, t('حالة الإشعارات')));
+      const list = el('div', { class: 'acct-list' });
+      wrap.append(list);
+      const testBtn = el('button', { class: 'btn btn-primary btn-block', type: 'button', style: { margin: '12px 0 0' } },
+        ico('bell', 'icon icon-sm'), t('إرسال إشعار تجريبي'));
+      wrap.append(testBtn);
+
+      function relTime(ts) {
+        if (!ts) return t('لم يصل أي إشعار بعد');
+        const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+        if (s < 30) return t('قبل لحظات');
+        if (s < 3600) return t('قبل') + ' ' + Math.floor(s / 60) + ' ' + t('دقيقة');
+        if (s < 86400) return t('قبل') + ' ' + Math.floor(s / 3600) + ' ' + t('ساعة');
+        return t('قبل') + ' ' + Math.floor(s / 86400) + ' ' + t('يوم');
+      }
+
+      async function refresh() {
+        list.innerHTML = '';
+        list.append(el('div', { class: 'acct-setting' }, el('span', { class: 'label', style: { opacity: .6 } }, '…')));
+        const d = await S.pushDiagnostics();
+        const n = d.native || {};
+        const srv = d.server || {};
+        list.innerHTML = '';
+
+        // 1) Device FCM token
+        list.append(settingItem(
+          'bell',
+          t('رمز الإشعارات'),
+          n.has_token ? '✓ ' + t('موجود') + ' …' + (n.token_tail || '') : '✗ ' + t('غير موجود'),
+          null,
+        ));
+
+        // 2) Notification permission (tappable to re-request)
+        const permOk = n.notif_permission !== false;
+        list.append(settingItem(
+          'shield',
+          t('صلاحية الإشعارات'),
+          permOk ? '✓ ' + t('مفعّلة') : '✗ ' + t('معطّلة'),
+          permOk ? null : () => {
+            try { window.GSAndroid.requestNotificationsPermission(); } catch (e) {}
+            toast(t('اختر "السماح" في النافذة التي ستظهر'), 'info');
+          },
+        ));
+
+        // 3) Registered on the server for THIS account
+        const regOk = srv && srv.registered > 0;
+        let regVal = regOk
+          ? '✓ ' + t('هذا الجهاز مسجّل') + ' (' + relTime(((srv.tokens || [])[0] || {}).updated_at * 1000) + ')'
+          : '✗ ' + t('غير مسجّل في الخادم');
+        if (srv && srv.error) regVal = '؟ ' + t('تعذّر التحقق من الخادم');
+        list.append(settingItem('cloud', t('التسجيل في الخادم'), regVal, null));
+
+        // 4) Last FCM message that actually reached the device
+        list.append(settingItem(
+          'check',
+          t('آخر إشعار وصل الجهاز'),
+          n.last_msg_ts ? relTime(n.last_msg_ts) : t('لم يصل أي إشعار بعد'),
+          null,
+        ));
+
+        // 5) Battery optimization hint (aggressive OEMs drop background pushes)
+        if (n.battery_ignored === false) {
+          list.append(settingItem(
+            'info',
+            t('تحسين البطارية'),
+            t('قد يمنع الإشعارات — استثنِ التطبيق من إعدادات البطارية'),
+            null,
+          ));
+        }
+      }
+
+      testBtn.onclick = async () => {
+        testBtn.disabled = true;
+        try {
+          const res = await S.sendTestPush();
+          const p = (res && res.push) || {};
+          if ((p.success || 0) > 0) {
+            toast(t('أُرسل الإشعار إلى جهازك ✓ — يجب أن يظهر الآن. راجع حالته أعلاه بعد لحظات'), 'success', 5000);
+            setTimeout(refresh, 4000);
+          } else {
+            toast(t('لم يُرسل الإشعار') + ': ' + ((p.errors || [])[0] || t('سبب غير معروف')), 'error', 5000);
+          }
+        } catch (e) {
+          const err = e && e.data && e.data.error;
+          if (err === 'no_registered_devices') {
+            toast(t('هذا الجهاز غير مسجّل — سجّل الدخول وانتظر ثوانٍ ثم أعد المحاولة'), 'error', 5000);
+          } else if (err === 'rate_limit_exceeded') {
+            toast(t('محاولات كثيرة، انتظر قليلاً'), 'error');
+          } else {
+            toast(t('تعذّر الإرسال، حاول مجدداً'), 'error');
+          }
+        } finally {
+          testBtn.disabled = false;
+        }
+      };
+
+      refresh();
+      return wrap;
     }
 
     renderSettings();

@@ -294,25 +294,14 @@ async function addNotification(db: any, data: any) {
 // Send an FCM push to every registered device token. Only logged-in users
 // register tokens (see /notifications/register-token), so this targets
 // registered users only. Invalid/expired tokens are pruned from Firestore.
-type PushResult = { targeted: number; success: number; failure: number; errors: string[] };
+type PushResult = { targeted: number; success: number; failure: number; errors: string[]; invalid_tokens?: string[] };
 
-async function sendPushToRegistered(
-  db: any,
+// Send an FCM push (dual payload) to an explicit list of device tokens.
+async function sendPushToTokens(
+  tokens: string[],
   n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
 ): Promise<PushResult> {
   const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
-  let tokensSnap: any;
-  try {
-    tokensSnap = await db.collection('fcm_tokens').get();
-  } catch (err: any) {
-    console.error('[fcm] failed to read tokens:', err?.message || err);
-    result.errors.push('read_tokens_failed: ' + (err?.message || String(err)));
-    return result;
-  }
-  const docs: any[] = tokensSnap.docs || [];
-  const tokens: string[] = docs
-    .map((d: any) => String(d.data()?.token || ''))
-    .filter((t: string) => t.length > 0);
   result.targeted = tokens.length;
   if (tokens.length === 0) return result;
 
@@ -382,11 +371,38 @@ async function sendPushToRegistered(
       }
     });
   }
+  // Dead-token pruning is handled by the caller (it owns the Firestore docs).
+  result.invalid_tokens = invalidTokens;
+  return result;
+}
+
+// Send an FCM push to every registered device token. Only logged-in users
+// register tokens (see /notifications/register-token), so this targets
+// registered users only. Invalid/expired tokens are pruned from Firestore.
+async function sendPushToRegistered(
+  db: any,
+  n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
+): Promise<PushResult> {
+  let tokensSnap: any;
+  try {
+    tokensSnap = await db.collection('fcm_tokens').get();
+  } catch (err: any) {
+    console.error('[fcm] failed to read tokens:', err?.message || err);
+    const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
+    result.errors.push('read_tokens_failed: ' + (err?.message || String(err)));
+    return result;
+  }
+  const docs: any[] = tokensSnap.docs || [];
+  const tokens: string[] = docs
+    .map((d: any) => String(d.data()?.token || ''))
+    .filter((t: string) => t.length > 0);
+  const result = await sendPushToTokens(tokens, n);
   // Prune dead tokens.
-  for (const t of invalidTokens) {
+  for (const t of result.invalid_tokens || []) {
     const dead = docs.find((d: any) => String(d.data()?.token || '') === t);
     if (dead) await dead.ref.delete().catch(() => {});
   }
+  delete result.invalid_tokens;
   return result;
 }
 
@@ -491,6 +507,52 @@ app.post('/notifications/unregister-token', async (c) => {
   const docId = crypto.createHash('sha256').update(token).digest('hex');
   await db.collection('fcm_tokens').doc(docId).delete().catch(() => {});
   return c.json({ ok: true });
+});
+
+// The caller's own registered push tokens (diagnostics for the in-app
+// notification status card).
+app.get('/notifications/my-tokens', async (c) => {
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const db = await firestore();
+  const snap = await db.collection('fcm_tokens').where('uid', '==', user.uid).get();
+  const tokens = snap.docs.map((d: any) => {
+    const t = String(d.data()?.token || '');
+    return {
+      platform: String(d.data()?.platform || 'unknown'),
+      updated_at: Number(d.data()?.updated_at || 0),
+      token_tail: t.length > 6 ? t.slice(-6) : '…',
+    };
+  }).sort((a: any, b: any) => b.updated_at - a.updated_at);
+  return c.json({ registered: tokens.length, tokens });
+});
+
+// Self-test: send a REAL push to the caller's own registered devices only,
+// so any user can verify notification delivery with one tap. Never saved to
+// the notifications list.
+app.post('/notifications/self-test', async (c) => {
+  const ip = getClientIp(c);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  if (!rateLimit(`${user.uid}:${ip}`, 'self-test', 6, 600)) {
+    return c.json({ error: 'rate_limit_exceeded' }, 429);
+  }
+  const db = await firestore();
+  const snap = await db.collection('fcm_tokens').where('uid', '==', user.uid).get();
+  const docs: any[] = snap.docs;
+  const tokens: string[] = docs
+    .map((d: any) => String(d.data()?.token || ''))
+    .filter((t: string) => t.length > 0);
+  if (tokens.length === 0) return c.json({ error: 'no_registered_devices' }, 400);
+  const push = await sendPushToTokens(tokens, {
+    title: 'إشعار تجريبي من Golden Store',
+    body: 'إذا ظهر لك هذا الإشعار، فالإشعارات تعمل بشكل سليم ✓',
+    type: 'announcement',
+    app_slug: '',
+    id: 'self-test-' + nowSec(),
+  });
+  delete push.invalid_tokens;
+  return c.json({ ok: true, push });
 });
 
 // ---------------- i18n machine translation (free MT + Firestore cache) ----------------

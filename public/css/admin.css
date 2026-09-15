@@ -335,7 +335,7 @@
 
 /* ---------- Screenshots ---------- */
 .screenshots { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
-.screenshots img { height: 180px; width: auto; border-radius: 14px; border: 1px solid var(--line); }
+.screenshots img { width: auto; height: auto; max-height: 180px; max-width: 320px; min-width: 72px; min-height: 72px; object-fit: contain; background: var(--surface-2); border-radius: 14px; border: 1px solid var(--line); }
 
 /* ---------- Utilities ---------- */
 .muted { color: var(--text-3); }

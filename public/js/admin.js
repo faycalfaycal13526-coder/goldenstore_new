@@ -1085,7 +1085,7 @@
         const row = el('div', { class: 'screenshots' });
         screenshots.forEach((ss) => {
           const wrap = el('div', { style: 'position:relative; flex-shrink:0;' },
-            ss.url ? el('img', { src: ss.url, style: 'height:180px; width:auto; max-width:300px; object-fit:cover; border:1px solid var(--line); border-radius:8px;' }) : null,
+            ss.url ? el('img', { src: ss.url, style: 'max-height:180px; width:auto; max-width:320px; min-width:72px; object-fit:contain; background:var(--surface-2); border:1px solid var(--line); border-radius:8px;' }) : null,
             el('button', { class: 'btn btn-sm btn-danger', style: 'position:absolute; top:6px; inset-inline-end:6px;',
               onclick: async () => {
                 if (!confirm('حذف هذه اللقطة؟')) return;

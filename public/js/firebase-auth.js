@@ -139,6 +139,9 @@ function handleNativeGoogleSignIn(idToken, accessToken, email, displayName, phot
 }
 
 // Build the API URL for the current environment (web vs Capacitor app).
+// Same reasoning as store.js: getConfig() is unavailable inside the WebView,
+// and a relative URL in the native app would hit the local WebView origin.
+var GS_STORE_ORIGIN = 'https://goldenstore-new.vercel.app';
 function apiBaseUrl() {
   try {
     if (window.Capacitor && typeof window.Capacitor.getConfig === 'function') {
@@ -146,6 +149,7 @@ function apiBaseUrl() {
       if (cfg && cfg.apiBase) return cfg.apiBase.replace(/\/$/, '');
     }
   } catch (e) {}
+  if (typeof window.GSAndroid !== 'undefined' || isGoldenStoreApp()) return GS_STORE_ORIGIN;
   return '';
 }
 

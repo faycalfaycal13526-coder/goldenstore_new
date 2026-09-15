@@ -39,10 +39,20 @@ applyTheme(currentTheme());
 function isNativeApp() {
   return typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 }
+// The store's one and only API origin. IMPORTANT: window.Capacitor.getConfig()
+// is NOT available inside the WebView (it is not part of the injected native
+// bridge), so the old fallback silently sent every API call from the app to
+// the DEPRECATED goldenstore.vercel.app deployment — a different store with a
+// different database. This constant is the single source of truth now.
+const STORE_API_ORIGIN = 'https://goldenstore-new.vercel.app';
+
 function apiBaseUrl() {
   if (!isNativeApp()) return '';
-  const cfg = window.Capacitor.getConfig && window.Capacitor.getConfig();
-  return (cfg && cfg.apiBase) || 'https://goldenstore.vercel.app';
+  try {
+    const cfg = window.Capacitor.getConfig && window.Capacitor.getConfig();
+    if (cfg && cfg.apiBase) return cfg.apiBase;
+  } catch (e) {}
+  return STORE_API_ORIGIN;
 }
 
 function fullApiUrl(path) {
@@ -200,7 +210,7 @@ function publicOrigin() {
       const cfg = window.Capacitor && window.Capacitor.getConfig && window.Capacitor.getConfig();
       const base = (cfg && (cfg.apiBase || cfg.server && cfg.server.url)) || '';
       if (base) return base.replace(/\/+$/, '');
-      return 'https://goldenstore-new.vercel.app';
+      return STORE_API_ORIGIN;
     }
   } catch (e) {}
   return location.origin;
@@ -943,11 +953,28 @@ async function signOut() {
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
 
 function getCurrentAppVersion() {
+  // Native bridge first — getConfig() is unavailable inside the WebView.
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.getVersionName === 'function') {
+      const v = window.GSAndroid.getVersionName();
+      if (v) return String(v);
+    }
+  } catch (e) {}
   try {
     const cfg = window.Capacitor && window.Capacitor.getConfig && window.Capacitor.getConfig();
     if (cfg && cfg.appVersion) return String(cfg.appVersion);
   } catch (e) {}
   return '1.0';
+}
+
+function getCurrentVersionCode() {
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.getVersionCode === 'function') {
+      const c = parseInt(window.GSAndroid.getVersionCode(), 10);
+      if (c > 0) return c;
+    }
+  } catch (e) {}
+  return 0;
 }
 
 function shouldShowUpdate(update) {
@@ -956,6 +983,10 @@ function shouldShowUpdate(update) {
     const dismissed = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
     if (!update.force && dismissed[update.version_name]) return false;
   } catch (e) {}
+  // Numeric version-code comparison against the installed app (native truth).
+  const vc = Number(update.version_code || 0);
+  const nativeVc = getCurrentVersionCode();
+  if (vc && nativeVc && vc <= nativeVc) return false;
   return String(update.version_name) !== getCurrentAppVersion();
 }
 

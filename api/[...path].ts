@@ -451,23 +451,48 @@ app.get('/store', (c) => {
 });
 
 // Latest published app update (used by the download landing page and the Android app).
+//
+// Sanity guard: old/bogus records (e.g. version_code 999999999 pointing at a
+// stale February APK) used to trigger a fake "3.0.0" update dialog in every
+// app version that lacks the client-side cap. Real version codes are small,
+// so anything absurd — or a record with no working APK link — is replaced by
+// the actual current release below. Publishing a normal record from the
+// admin panel (version_code <= 100000) always passes through unchanged.
+const CURRENT_RELEASE = {
+  version_name: '1.17',
+  version_code: 18,
+  apk_url:
+    'https://github.com/faycalfaycal13526-coder/Golden-android/releases/download/v1.17/GoldenStore-v1.17.apk',
+  notes: 'نسخة أسرع بكثير: التطبيق الآن يفتح المتجر مباشرة بدون انتظار — حدّث الآن',
+};
+const MAX_PLAUSIBLE_VERSION_CODE = 100000;
+
 app.get('/app-update', async (c) => {
   try {
     const db = await firestore();
     const doc = await db.collection('app_updates').doc('current').get();
     if (!doc.exists) return c.json({});
     const d = doc.data() || {};
-    const version_code = safeInt(d.version_code, 0, 999999999);
-    const apk_url = sanitizeUrl(d.apk_url) || sanitizeUrl(d.url) || '';
-    const notes = sanitizeText(d.notes, 1000);
+    let version_code = safeInt(d.version_code, 0, 999999999);
+    let apk_url = sanitizeUrl(d.apk_url) || sanitizeUrl(d.url) || '';
+    let notes = sanitizeText(d.notes, 1000);
+    let version_name = sanitizeText(d.version_name, 60) || '';
+    let force = d.force === true;
+    if (version_code > MAX_PLAUSIBLE_VERSION_CODE || !apk_url) {
+      version_code = CURRENT_RELEASE.version_code;
+      apk_url = CURRENT_RELEASE.apk_url;
+      notes = CURRENT_RELEASE.notes;
+      version_name = CURRENT_RELEASE.version_name;
+      force = false;
+    }
     const out: Record<string, any> = {
-      version_name: sanitizeText(d.version_name, 60) || '',
+      version_name,
       version_code,
       apk_url,
       url: apk_url,
       notes,
       message: notes,
-      force: d.force === true,
+      force,
       created_at: Number(d.created_at || 0),
     };
     // Native update-check.js expects { update: {...} }

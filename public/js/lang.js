@@ -437,6 +437,23 @@
     'هذا الجهاز غير مسجّل — سجّل الدخول وانتظر ثوانٍ ثم أعد المحاولة': { en: 'This device is not registered — sign in, wait a few seconds, then retry', fr: 'Cet appareil n’est pas enregistré — connectez-vous, attendez quelques secondes puis réessayez', es: 'Este dispositivo no está registrado — inicia sesión, espera unos segundos y reintenta' },
     'قبل لحظات': { en: 'moments ago', fr: 'à l\u2019instant', es: 'hace un momento' },
     'سبب غير معروف': { en: 'unknown reason', fr: 'raison inconnue', es: 'razón desconocida' },
+    'افتح الصفحة في متصفّح مثل Chrome لإتمام تسجيل الدخول.': { en: 'Open the page in a browser like Chrome to finish signing in.', fr: 'Ouvrez la page dans un navigateur comme Chrome pour terminer la connexion.', es: 'Abre la página en un navegador como Chrome para terminar de iniciar sesión.' },
+    'المتصفّح حظر النافذة المنبثقة. اسمح بها ثم حاول مجدداً.': { en: 'The browser blocked the popup. Allow it and try again.', fr: 'Le navigateur a bloqué la fenêtre popup. Autorisez-la puis réessayez.', es: 'El navegador bloqueó la ventana emergente. Permítela e inténtalo de nuevo.' },
+    'تعذّر الاتصال بالشبكة. تحقّق من الإنترنت وحاول مجدداً.': { en: 'Network error. Check your internet and try again.', fr: 'Erreur réseau. Vérifiez votre connexion et réessayez.', es: 'Error de red. Comprueba tu internet e inténtalo de nuevo.' },
+    'تعذّر تسجيل الدخول. حاول مجدداً.': { en: 'Sign-in failed. Try again.', fr: 'Échec de connexion. Réessayez.', es: 'Error al iniciar sesión. Inténtalo de nuevo.' },
+    'تعذّر فتح الملف': { en: 'Could not open the file', fr: 'Impossible d’ouvrir le fichier', es: 'No se pudo abrir el archivo' },
+    'تم إلغاء التنزيل': { en: 'Download cancelled', fr: 'Téléchargement annulé', es: 'Descarga cancelada' },
+    'تم التنزيل — جاهز للتثبيت': { en: 'Downloaded — ready to install', fr: 'Téléchargé — prêt à installer', es: 'Descargado — listo para instalar' },
+    'تم تثبيت التطبيق بنجاح': { en: 'App installed successfully', fr: 'Application installée avec succès', es: 'Aplicación instalada correctamente' },
+    'تم حذف ملف التحميل': { en: 'Downloaded file deleted', fr: 'Fichier téléchargé supprimé', es: 'Archivo descargado eliminado' },
+    'جارٍ التنزيل الآن': { en: 'Downloading now', fr: 'Téléchargement en cours', es: 'Descargando ahora' },
+    'جارٍ فتح مثبّت النظام…': { en: 'Opening the system installer…', fr: 'Ouverture de l’installateur système…', es: 'Abriendo el instalador del sistema…' },
+    'جاهز للتثبيت': { en: 'Ready to install', fr: 'Prêt à installer', es: 'Listo para instalar' },
+    'حذف الملف': { en: 'Delete file', fr: 'Supprimer le fichier', es: 'Eliminar archivo' },
+    'سجّل الدخول بحساب Google للوصول إلى المتجر وتطبيقاته وإشعاراته.': { en: 'Sign in with a Google account to access the store, its apps and notifications.', fr: 'Connectez-vous avec un compte Google pour accéder au store, à ses applications et à ses notifications.', es: 'Inicia sesión con una cuenta de Google para acceder a la tienda, sus apps y notificaciones.' },
+    'قيد المعالجة…': { en: 'Processing…', fr: 'Traitement…', es: 'Procesando…' },
+    'مزوّد Google غير مُفعَّل في Firebase.': { en: 'Google provider is not enabled in Firebase.', fr: 'Le fournisseur Google n’est pas activé dans Firebase.', es: 'El proveedor de Google no está habilitado en Firebase.' },
+    'هذا النطاق غير مُصرَّح به في Firebase Authentication.': { en: 'This domain is not authorized in Firebase Authentication.', fr: 'Ce domaine n’est pas autorisé dans Firebase Authentication.', es: 'Este dominio no está autorizado en Firebase Authentication.' },
   };
 
   // Number/size unit labels per language.

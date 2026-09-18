@@ -984,8 +984,12 @@ function shouldShowUpdate(update) {
     if (!update.force && dismissed[update.version_name]) return false;
   } catch (e) {}
   // Numeric version-code comparison against the installed app (native truth).
+  // Sanity cap: reject absurd version codes (e.g. stale 999999999 records
+  // from old deployments) — they used to trigger a fake update dialog on
+  // every launch. Real version codes for this store are small integers.
   const vc = Number(update.version_code || 0);
   const nativeVc = getCurrentVersionCode();
+  if (vc && vc > 100000) return false;
   if (vc && nativeVc && vc <= nativeVc) return false;
   return String(update.version_name) !== getCurrentAppVersion();
 }

@@ -594,8 +594,13 @@
 
     const filename = `${app.slug || 'app'}-${app.version_name || ''}.apk`.replace(/-+/g, '-');
 
-    async function runInstall() {
+      async function runInstall() {
       if (btn.classList.contains('installing')) return;
+
+      try {
+        window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
+      } catch (e) {}
+
       // Already installed: tapping the button opens the app directly.
       if (btn.classList.contains('installed')) { openInstalled(app); return; }
 

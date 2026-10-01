@@ -173,7 +173,16 @@
       const row = el('div', { class: 'hrow' });
       similar.forEach((a) => row.append(S.posterCard(a)));
       section.innerHTML = '';
-      section.append(el('h3', null, simTitle), row);
+      // The whole header is a "see all" link: the chevron opens the full list of this category.
+      const href = `/more?section=similar&type=${app.type === 'game' ? 'game' : 'app'}`
+        + `${app.category ? `&category=${encodeURIComponent(app.category)}` : ''}&exclude=${encodeURIComponent(app.slug)}`;
+      section.append(
+        el('a', { class: 'd-section-head section-link', href, 'aria-label': `${simTitle} — ${t('عرض المزيد')}` },
+          el('h3', null, simTitle),
+          el('span', { class: 'more', 'aria-hidden': 'true' }, ico('chevronStart', 'icon')),
+        ),
+        row,
+      );
     } catch (e) {
       section.remove();
     }

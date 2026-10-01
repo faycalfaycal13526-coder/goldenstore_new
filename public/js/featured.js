@@ -58,15 +58,16 @@
       }
 
       // Top rated — meaningful curated list (only when there are real ratings).
+      // The chevron at the end of the header opens the full list (/more).
       if (rated.length) {
-        content.append(listSection(t('الأعلى تقييماً'), rated.slice(0, 10)));
+        content.append(listSection(t('الأعلى تقييماً'), rated.slice(0, 10), '/more?section=top&type=all'));
       }
 
       // If there are no editors' picks yet, offer the most popular as a grid
       // so the page is never just a single hero.
       if (!editors.length) {
         const pop = (popular.apps && popular.apps.length ? popular.apps : recent.apps) || [];
-        if (pop.length) content.append(gridSection(t('الأكثر رواجًا'), pop.slice(0, 18)));
+        if (pop.length) content.append(gridSection(t('الأكثر رواجًا'), pop.slice(0, 18), '/more?section=popular&type=all'));
       }
     } catch (err) {
       content.innerHTML = '';
@@ -74,22 +75,32 @@
     }
   }
 
-  function gridSection(title, apps) {
+  // Section header. With `moreHref` the whole row is a "see all" link and the
+  // chevron at its end opens the complete list of that section.
+  function sectionHead(title, moreHref) {
+    if (!moreHref) return el('div', { class: 'section-head' }, el('h2', null, title));
+    return el('a', { class: 'section-head section-link', href: moreHref, 'aria-label': `${title} — ${t('عرض المزيد')}` },
+      el('h2', null, title),
+      el('span', { class: 'more', 'aria-hidden': 'true' }, ico('chevronStart', 'icon')),
+    );
+  }
+
+  function gridSection(title, apps, moreHref) {
     if (!apps || !apps.length) return el('span');
     const grid = el('div', { class: 'poster-grid' });
     apps.forEach((a) => grid.append(S.posterCard(a)));
     return el('div', { class: 'section' },
-      el('div', { class: 'section-head' }, el('h2', null, title)),
+      sectionHead(title, moreHref),
       grid,
     );
   }
 
-  function listSection(title, apps) {
+  function listSection(title, apps, moreHref) {
     if (!apps || !apps.length) return el('span');
     const list = el('div', { class: 'applist' });
     apps.forEach((a) => list.append(S.listRow(a)));
     return el('div', { class: 'section' },
-      el('div', { class: 'section-head' }, el('h2', null, title)),
+      sectionHead(title, moreHref),
       list,
     );
   }

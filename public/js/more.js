@@ -1,29 +1,55 @@
 // "See all" page — the full list behind the chevron button at the end of a
 // section header (e.g. "موصى به لك" on the home page → /more?section=recommended&type=app).
 // Loads the section page by page and keeps loading as the user scrolls.
+//
+//   /more?section=recommended&type=app|game   home / games "recommended" row
+//   /more?section=top&type=all                featured page "highest rated" list
+//   /more?section=popular&type=all            featured page "most popular" grid
+//   /more?section=similar&type=app|game&category=<slug>&exclude=<slug>   app page "similar" row
 (function () {
   const S = window.Store;
   const { el, ico, api, getQuery, t } = S;
   const root = document.getElementById('root');
 
-  const type = getQuery('type') === 'game' ? 'game' : 'app';
+  // type: app | game | all (all = apps and games together, like the featured page)
+  const type = ['game', 'all'].includes(getQuery('type')) ? getQuery('type') : 'app';
 
-  // Sections that can be opened from a "see all" chevron.
+  // Sections that can be opened from a "see all" chevron. `title` is keyed by type ('_' = any type).
   const SECTIONS = {
-    recommended: { sort: 'popular', title: { app: 'موصى به لك', game: 'ألعاب موصى بها' } },
+    recommended: { sort: 'popular', title: { app: 'موصى به لك', game: 'ألعاب موصى بها', _: 'موصى به لك' } },
+    popular: { sort: 'popular', title: { _: 'الأكثر رواجًا' } },
+    // Sorted by rating, so everything after the first unrated app is unrated too → stop there.
+    top: { sort: 'rating', ratedOnly: true, title: { _: 'الأعلى تقييماً' } },
+    similar: { sort: 'popular', title: { game: 'ألعاب مماثلة', _: 'تطبيقات مماثلة' } },
   };
   const sectionKey = Object.prototype.hasOwnProperty.call(SECTIONS, getQuery('section')) ? getQuery('section') : 'recommended';
   const section = SECTIONS[sectionKey];
-  const title = t(section.title[type]);
+  const title = t(section.title[type] || section.title._);
+  // "similar": same category as the app being viewed, without that app itself.
+  const category = sectionKey === 'similar' ? getQuery('category').slice(0, 64) : '';
+  const exclude = sectionKey === 'similar' ? getQuery('exclude').slice(0, 200) : '';
 
   // 60 is the API's maximum page size (fewest requests — for type=app the API reads the
   // whole collection on every call) and a multiple of every grid column count (3 / 4 / 6),
   // so there is no ragged last row between pages.
   const PAGE_SIZE = 60;
+
+  function pageUrl(offset) {
+    const q = [];
+    if (type !== 'all') q.push(`type=${type}`);
+    if (category) q.push(`category=${encodeURIComponent(category)}`);
+    q.push(`sort=${section.sort}`, `limit=${PAGE_SIZE}`, `offset=${offset}`);
+    return `/api/apps?${q.join('&')}`;
+  }
+
   // Same grid/list preference as the home and games pages.
   const VIEW_KEY = type === 'game' ? 'gs_games_view' : 'gs_home_view';
 
-  S.bottomNav(type === 'game' ? 'games' : 'apps');
+  // Bottom bar highlight and the place "back" goes to when the page was opened directly.
+  S.bottomNav(sectionKey === 'recommended' ? (type === 'game' ? 'games' : 'apps') : '');
+  const fallbackHref = sectionKey === 'similar' && exclude ? `/app?slug=${encodeURIComponent(exclude)}`
+    : sectionKey === 'recommended' ? (type === 'game' ? '/games' : '/')
+    : '/featured';
   document.title = `${title} — Golden Store`;
   // We restore the scroll position ourselves (see the snapshot below).
   try { history.scrollRestoration = 'manual'; } catch (e) {}
@@ -32,7 +58,7 @@
     let sameOrigin = false;
     try { sameOrigin = !!document.referrer && new URL(document.referrer).origin === location.origin; } catch (e) {}
     if (sameOrigin && history.length > 1) history.back();
-    else location.href = type === 'game' ? '/games' : '/';
+    else location.href = fallbackHref;
   }
 
   S.ready(() => {
@@ -114,15 +140,21 @@
         list.append(S.skeletonList());
       }
       try {
-        const res = await api(`/api/apps?type=${type}&sort=${section.sort}&limit=${PAGE_SIZE}&offset=${offset}`);
-        const batch = (res && res.apps) || [];
+        const res = await api(pageUrl(offset));
+        const raw = (res && res.apps) || [];
         const total = res && typeof res.total === 'number' ? res.total : null;
-        offset += batch.length;
-        done = batch.length < PAGE_SIZE || (total !== null && offset >= total);
+        offset += raw.length;
+        done = raw.length < PAGE_SIZE || (total !== null && offset >= total);
+
+        let batch = raw;
+        if (section.ratedOnly) {                              // keep only apps that have ratings
+          const firstUnrated = raw.findIndex((a) => S.ratingCountOf(a) <= 0);
+          if (firstUnrated !== -1) { batch = raw.slice(0, firstUnrated); done = true; }
+        }
 
         const fresh = [];
         batch.forEach((a) => {
-          if (!a || !a.slug || seen.has(a.slug)) return;
+          if (!a || !a.slug || a.slug === exclude || seen.has(a.slug)) return;
           seen.add(a.slug);
           fresh.push(a);
         });
@@ -165,7 +197,7 @@
     /* ------------------ remember the list for the Back button ------------------ */
     // Opening an app and pressing Back reloads this page. Restore the apps that
     // were loaded and the scroll position instead of starting again from the top.
-    const SNAP_KEY = `gs_more_${type}_${sectionKey}`;
+    const SNAP_KEY = `gs_more_${[sectionKey, type, category, exclude].join('|')}`;
     const SNAP_TTL_MS = 30 * 60 * 1000;
     const slim = (a) => ({
       slug: a.slug, name: a.name, icon_url: a.icon_url || null, developer: a.developer || '', category: a.category || '',

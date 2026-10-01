@@ -399,6 +399,7 @@
     'سجّل الدخول بحساب Google لتتمكن من تنزيل التطبيقات والتقييم والمزيد.': { en: 'Sign in with your Google account to download apps, rate them and more.', fr: 'Connectez-vous avec votre compte Google pour télécharger des applications, les noter et plus.', es: 'Inicia sesión con tu cuenta de Google para descargar aplicaciones, valorarlas y más.' },
     'عرض أقل': { en: 'Show less', fr: 'Afficher moins', es: 'Mostrar menos' },
     'عرض المزيد': { en: 'Show more', fr: 'Afficher plus', es: 'Mostrar más' },
+    'تحميل المزيد': { en: 'Load more', fr: 'Charger plus', es: 'Cargar más' },
     'عن Golden Store': { en: 'About Golden Store', fr: 'À propos de Golden Store', es: 'Acerca de Golden Store' },
     'فشل التحميل': { en: 'Download failed', fr: 'Téléchargement échoué', es: 'Descarga fallida' },
     'فشل تفعيل الإشعارات: ': { en: 'Failed to enable notifications: ', fr: 'Échec de l’activation des notifications : ', es: 'Error al activar notificaciones: ' },

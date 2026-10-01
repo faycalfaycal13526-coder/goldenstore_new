@@ -91,10 +91,11 @@
       // Track which slugs are shown in browsable sections to avoid duplication
       const usedSlugs = new Set();
 
-      // "موصى به لك" — horizontal poster row
+      // "موصى به لك" — horizontal poster row. The chevron at the end of its
+      // header opens the full, endlessly scrolling list (/more).
       const recommended = (popularApps.length ? popularApps : recentApps).slice(0, 8);
       if (recommended.length) {
-        content.append(posterSection(t('موصى به لك'), recommended));
+        content.append(posterSection(t('موصى به لك'), recommended, '/more?section=recommended&type=app'));
         recommended.forEach((a) => usedSlugs.add(a.slug));
       }
 
@@ -170,13 +171,24 @@
     return [...withFeat, ...without].slice(0, 8);
   }
 
-  function posterSection(title, apps) {
+  function posterSection(title, apps, moreHref) {
     if (!apps || !apps.length) return el('span');
     const row = el('div', { class: 'hrow' });
     apps.forEach((a) => row.append(window.Store.posterCard(a)));
     return el('div', { class: 'section' },
-      el('div', { class: 'section-head' }, el('h2', null, title), ico('chevronStart', 'icon more')),
+      sectionHead(title, moreHref),
       row,
+    );
+  }
+
+  // Section header. With `moreHref` the whole row is a "see all" link and the
+  // chevron at its end (far left in Arabic) is the visible button that opens
+  // the complete list of that section.
+  function sectionHead(title, moreHref) {
+    if (!moreHref) return el('div', { class: 'section-head' }, el('h2', null, title));
+    return el('a', { class: 'section-head section-link', href: moreHref, 'aria-label': `${title} — ${t('عرض المزيد')}` },
+      el('h2', null, title),
+      el('span', { class: 'more', 'aria-hidden': 'true' }, ico('chevronStart', 'icon')),
     );
   }
 

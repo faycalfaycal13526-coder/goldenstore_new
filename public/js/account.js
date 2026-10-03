@@ -289,14 +289,14 @@
           if (st.status === 'downloading') {
             row.append(el('button', {
               class: 'live-dl-cancel', type: 'button',
-              'aria-label': t('إلغاء'), title: t('إلغاء'),
+              'aria-label': t('إلغاء التنزيل'), title: t('إلغاء التنزيل'),
               onclick: (e) => {
                 e.preventDefault();
                 S.cancelDownload(st.slug);
                 toast(t('تم إلغاء التنزيل'), 'info');
                 paint();
               },
-            }, ico('close', 'icon')));
+            }, ico('close', 'icon'), t('إلغاء التنزيل')));
           } else if (st.status === 'downloaded') {
             row.append(el('button', {
               class: 'live-dl-install', type: 'button',
@@ -378,9 +378,12 @@
           langSettingItem(),
           aboutDropdown(),
         ),
+        subscriptionCard(user),
         contactCard(),
-        el('div', { style: { padding: '24px 0' } },
-          el('button', { class: 'btn btn-outline btn-block', onclick: () => confirmSignOut() },
+        el('div', { class: 'account-actions' },
+          el('button', { class: 'btn btn-secondary btn-block', type: 'button', onclick: () => confirmSwitchAccount() },
+            ico('users', 'icon icon-sm'), t('تبديل الحساب')),
+          el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
             ico('logout', 'icon icon-sm'), t('تسجيل الخروج')),
         ),
       );
@@ -390,12 +393,58 @@
     renderSettings();
   }
 
+  function subscriptionCard(user) {
+    const phone = '213551304168';
+    const lang = (window.GSI18N && window.GSI18N.lang) || 'ar';
+    const greetings = {
+      ar: 'السلام عليكم، أود الاستفسار عن الاشتراك في Golden Store.',
+      en: 'Hello, I would like to ask about Golden Store subscription plans.',
+      fr: 'Bonjour, je souhaite me renseigner sur les offres d’abonnement Golden Store.',
+      es: 'Hola, quisiera consultar los planes de suscripción de Golden Store.',
+      de: 'Hallo, ich möchte mich nach den Golden-Store-Abonnements erkundigen.',
+      it: 'Ciao, vorrei informazioni sui piani di abbonamento di Golden Store.',
+      pt: 'Olá, gostaria de saber mais sobre os planos de assinatura da Golden Store.',
+      tr: 'Merhaba, Golden Store abonelik planları hakkında bilgi almak istiyorum.',
+    };
+    const accountLabels = {
+      ar: 'الحساب', en: 'Account', fr: 'Compte', es: 'Cuenta',
+      de: 'Konto', it: 'Account', pt: 'Conta', tr: 'Hesap',
+    };
+    const email = (user && user.email) || '';
+    const message = (greetings[lang] || greetings.ar) + (email ? `\n${accountLabels[lang] || accountLabels.ar}: ${email}` : '');
+    const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+
+    return el('section', { class: 'subscription-card', 'aria-label': t('الاشتراك عبر واتساب') },
+      el('div', { class: 'subscription-card-head' },
+        el('span', { class: 'subscription-card-icon' }, ico('message', 'icon')),
+        el('h3', null, t('الاشتراك عبر واتساب')),
+      ),
+      el('p', { class: 'subscription-card-text' },
+        t('استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر واتساب.')),
+      el('a', {
+        class: 'subscription-whatsapp',
+        href,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        'aria-label': `${t('راسلنا على واتساب')} +213 551 30 41 68`,
+      },
+        ico('message', 'icon'),
+        el('span', { class: 'subscription-whatsapp-label' }, t('راسلنا على واتساب')),
+        el('bdi', { class: 'subscription-phone', dir: 'ltr' }, '+213 551 30 41 68'),
+      ),
+    );
+  }
+
   function langSettingItem() {
     const langs = [
       { code: 'ar', label: 'العربية' },
       { code: 'en', label: 'English' },
       { code: 'fr', label: 'Français' },
       { code: 'es', label: 'Español' },
+      { code: 'de', label: 'Deutsch' },
+      { code: 'it', label: 'Italiano' },
+      { code: 'pt', label: 'Português' },
+      { code: 'tr', label: 'Türkçe' },
     ];
     const currentLang = (window.GSI18N && window.GSI18N.lang) || 'ar';
     const current = langs.find((l) => l.code === currentLang) || langs[0];
@@ -430,6 +479,32 @@
 
     dropdown.append(trigger, menu);
     return dropdown;
+  }
+
+  function confirmSwitchAccount() {
+    const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
+    function close() { overlay.remove(); document.removeEventListener('keydown', esc); }
+    function esc(e) { if (e.key === 'Escape') close(); }
+    const card = el('div', { class: 'dialog-card', dir: document.documentElement.dir || 'rtl' },
+      el('div', { class: 'dialog-head' },
+        el('div', { class: 'dialog-title' }, ico('users', 'icon'), t('تبديل حساب Google')),
+        el('button', { class: 'dialog-close', 'aria-label': t('إغلاق'), onclick: () => close() }, ico('close')),
+      ),
+      el('div', { class: 'dialog-body' },
+        el('p', { class: 'store-card-text' },
+          t('سيتم تسجيل خروجك ثم فتح تسجيل الدخول لاختيار حساب Google آخر.')),
+      ),
+      el('div', { class: 'dialog-actions' },
+        el('button', { class: 'btn btn-secondary', type: 'button', onclick: () => close() }, t('إلغاء')),
+        el('button', { class: 'btn btn-primary', type: 'button', onclick: () => {
+          close();
+          if (S.switchAccount) S.switchAccount(); else S.signOut();
+        } }, ico('users', 'icon icon-sm'), t('متابعة لتبديل الحساب')),
+      ),
+    );
+    overlay.append(card);
+    document.addEventListener('keydown', esc);
+    document.body.append(overlay);
   }
 
   function confirmSignOut() {
@@ -505,7 +580,7 @@
 
   function langLabel() {
     const lang = (window.GSI18N && window.GSI18N.lang) || 'ar';
-    const map = { ar: 'العربية', en: 'English', fr: 'Français', es: 'Español' };
+    const map = { ar: 'العربية', en: 'English', fr: 'Français', es: 'Español', de: 'Deutsch', it: 'Italiano', pt: 'Português', tr: 'Türkçe' };
     return map[lang] || lang;
   }
 })();

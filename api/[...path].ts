@@ -233,6 +233,14 @@ async function listNotifications(db: any, limit?: number) {
   return docs.map((d: any) => notificationPublic(d));
 }
 
+// New app/game publication notifications stay enabled until the owner opts out,
+// preserving the existing behaviour for stores that have not saved settings.
+async function getStoreSettings(db: any): Promise<{ notify_new_publications: boolean }> {
+  const snap = await db.collection('store_settings').doc('general').get();
+  const data = snap.exists ? (snap.data() || {}) : {};
+  return { notify_new_publications: data.notify_new_publications !== false };
+}
+
 // Public URL of the store logo, shown as the notification large icon for
 // announcements (and as a fallback for app-specific notifications).
 const STORE_LOGO_URL =
@@ -494,6 +502,7 @@ app.get('/app-update', async (c) => {
       message: notes,
       force,
       created_at: Number(d.created_at || 0),
+      downloads: safeInt(d.downloads, 0, Number.MAX_SAFE_INTEGER),
     };
     // Native update-check.js expects { update: {...} }
     out.update = { ...out };
@@ -502,6 +511,38 @@ app.get('/app-update', async (c) => {
     console.error('[app-update] get failed:', err?.message || err);
     return c.json({});
   }
+});
+
+// Count downloads of the store's own Android APK, then redirect to the actual
+// release URL. The counter is rate-limited per IP to reduce accidental refresh
+// inflation while keeping the download itself available on every request.
+app.get('/app-update/download', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'app-update-download', 30, 60)) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
+  const db = await firestore();
+  const ref = db.collection('app_updates').doc('current');
+  const doc = await ref.get();
+  if (!doc.exists) return c.json({ error: 'not_found' }, 404);
+
+  const data = doc.data() || {};
+  let apkUrl = sanitizeUrl(data.apk_url) || sanitizeUrl(data.url) || '';
+  const versionCode = safeInt(data.version_code, 0, 999999999);
+  if (versionCode > MAX_PLAUSIBLE_VERSION_CODE || !apkUrl) apkUrl = CURRENT_RELEASE.apk_url;
+  if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
+
+  if (rateLimit(ip, 'dl-count:store-app-update', 1, 600)) {
+    try {
+      const FV = await getFieldValue();
+      await ref.set({ downloads: FV.increment(1) }, { merge: true });
+    } catch (err: any) {
+      // A metrics write must never prevent the user from receiving the APK.
+      console.error('[app-update/download] counter update failed:', err?.message || err);
+    }
+  }
+
+  return c.redirect(apkUrl, 302);
 });
 
 // Issue a Firebase custom auth token for an anonymous guest session.
@@ -616,7 +657,7 @@ app.post('/notifications/self-test', async (c) => {
 });
 
 // ---------------- i18n machine translation (free MT + Firestore cache) ----------------
-const SUPPORTED_TL = new Set(['en', 'fr', 'es']);
+const SUPPORTED_TL = new Set(['en', 'fr', 'es', 'de', 'it', 'pt', 'tr']);
 const memTranslate = new Map<string, string>();
 
 async function mtOne(text: string, target: string): Promise<string> {
@@ -1179,6 +1220,25 @@ app.get('/me', (c) => {
 
 app.use('/admin/*', requireAdmin);
 
+app.get('/admin/settings', async (c) => {
+  const db = await firestore();
+  return c.json({ settings: await getStoreSettings(db) });
+});
+
+app.patch('/admin/settings', async (c) => {
+  const body = await c.req.json().catch(() => ({} as any));
+  if (typeof body.notify_new_publications !== 'boolean') {
+    return c.json({ error: 'notify_new_publications_must_be_boolean' }, 400);
+  }
+  const db = await firestore();
+  const settings = {
+    notify_new_publications: body.notify_new_publications,
+    updated_at: nowSec(),
+  };
+  await db.collection('store_settings').doc('general').set(settings, { merge: true });
+  return c.json({ settings: { notify_new_publications: settings.notify_new_publications } });
+});
+
 app.get('/admin/stats', async (c) => {
   const db = await firestore();
   const snap = await db.collection('apps').get();
@@ -1310,7 +1370,9 @@ app.post('/admin/app-update', async (c) => {
     size_bytes,
     created_at: nowSec(),
   };
-  await db.collection('app_updates').doc('current').set(updateDoc);
+  // Merge the published release fields so the download counter survives each
+  // APK/version update.
+  await db.collection('app_updates').doc('current').set(updateDoc, { merge: true });
 
   let push: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   if (body.send_notification) {
@@ -1584,14 +1646,21 @@ app.post('/admin/apps', async (c) => {
   const ref = await db.collection('apps').add(docData);
 
   try {
-    await addNotification(db, {
-      type: 'new_app',
-      title: name,
-      body: '',
-      app_slug: slug,
-      created_at: now,
-    });
-  } catch {}
+    const settings = await getStoreSettings(db);
+    if (settings.notify_new_publications) {
+      await addNotification(db, {
+        type: 'new_app',
+        title: name,
+        body: '',
+        app_slug: slug,
+        created_at: now,
+      });
+    }
+  } catch (err: any) {
+    // A settings-read failure should not block publishing an app. Fail closed
+    // for automatic pushes so an opt-out is never accidentally ignored.
+    console.error('[admin/apps] publication notification skipped:', err?.message || err);
+  }
 
   // Add screenshots if provided
   const screenshotKeys: string[] = Array.isArray(body.screenshot_keys) ? body.screenshot_keys.slice(0, 20) : [];

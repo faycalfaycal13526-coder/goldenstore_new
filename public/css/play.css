@@ -547,8 +547,15 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .d-stat .v .icon { width: 15px; height: 15px; color: var(--star); }
 .d-stat .l { font-size: 11px; color: var(--text-2); margin-top: 4px; }
 
-.d-actions { margin-top: 18px; display: flex; gap: 12px; }
+.d-actions { margin-top: 18px; display: flex; align-items: stretch; gap: 12px; }
 .d-actions .btn { flex: 1; }
+.download-cancel-btn.btn {
+  flex: 0 0 auto; padding-inline: 12px; white-space: nowrap;
+  color: #e57373; background: rgba(211,47,47,.1);
+  border: 1px solid rgba(229,115,115,.38); box-shadow: none;
+}
+.download-cancel-btn.btn:hover { background: rgba(211,47,47,.16); }
+.download-cancel-btn.btn .icon { flex: 0 0 auto; }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
@@ -1360,6 +1367,28 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 /* Settings */
 .acct-list { display: flex; flex-direction: column; gap: 2px; }
+.account-actions { display: flex; flex-direction: column; gap: 10px; padding: 24px 0; }
+.account-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.subscription-card {
+  margin: 16px 0 10px; padding: 18px; border-radius: 18px;
+  border: 1px solid rgba(37,211,102,.27);
+  background: linear-gradient(135deg, rgba(37,211,102,.09), var(--surface) 72%);
+}
+.subscription-card-head { display: flex; align-items: center; gap: 10px; }
+.subscription-card-head h3 { color: var(--text); font-size: 16px; font-weight: 700; }
+.subscription-card-icon { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: rgba(37,211,102,.15); color: #1da851; flex: 0 0 auto; }
+.subscription-card-icon .icon { width: 21px; height: 21px; }
+.subscription-card-text { margin: 10px 0 16px; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+.subscription-whatsapp {
+  display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 46px;
+  padding: 10px 14px; border-radius: 13px; color: #062d16; background: #25d366;
+  font-size: 14px; font-weight: 800; transition: filter .15s, transform .12s;
+}
+.subscription-whatsapp:hover { filter: brightness(1.06); }
+.subscription-whatsapp:active { transform: scale(.99); }
+.subscription-whatsapp .icon { width: 19px; height: 19px; }
+.subscription-whatsapp-label { flex: 0 1 auto; }
+.subscription-phone { direction: ltr; unicode-bidi: isolate; white-space: nowrap; font-size: 12px; font-weight: 700; opacity: .86; }
 .acct-setting { display: flex; align-items: center; gap: 14px; padding: 14px 8px; border-radius: 10px; cursor: pointer; transition: background .12s; }
 .acct-setting:hover { background: var(--surface-2); }
 .acct-setting .icon { width: 22px; height: 22px; color: var(--text-2); flex-shrink: 0; }
@@ -1489,13 +1518,14 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   font-size: 11px; color: var(--text-2); margin-top: 6px;
 }
 .live-dl-cancel, .live-dl-install {
-  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
-  border-radius: 12px; padding: 8px 12px; font-size: 13px; font-weight: 600;
-  cursor: pointer;
+  border-radius: 12px; padding: 7px 9px; font-size: 11px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
 }
 .live-dl-install { background: var(--nav); color: #fff; border-color: transparent; }
-.live-dl-cancel .icon { width: 16px; height: 16px; }
+.live-dl-cancel { color: #e57373; border-color: rgba(229,115,115,.38); }
+.live-dl-cancel .icon { width: 15px; height: 15px; }
 .lib-installed-badge {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11px; font-weight: 700; color: #2fbf71;

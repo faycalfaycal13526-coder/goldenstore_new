@@ -949,6 +949,30 @@ async function signOut() {
   location.href = '/';
 }
 
+// Explicit account switching: end the current Firebase session, then open the
+// dedicated sign-in screen. The web provider requests Google’s account chooser;
+// native wrappers may additionally expose a Google-session sign-out bridge.
+async function switchAccount() {
+  cacheUser(null);
+  try {
+    const nativeSignOut = window.GSAndroid &&
+      (window.GSAndroid.signOutFromGoogle || window.GSAndroid.signOutGoogle);
+    if (typeof nativeSignOut === 'function') await nativeSignOut.call(window.GSAndroid);
+  } catch (e) {
+    console.warn('Native Google account sign-out was unavailable', e);
+  }
+  try {
+    if (!window.GAuth || !window.GAuth.signOut) throw new Error('auth_not_available');
+    await window.GAuth.signOut();
+  } catch (e) {
+    console.warn('Firebase sign-out failed during account switch', e);
+    toast(t('تعذّر تسجيل الخروج، حاول مرة أخرى'), 'error');
+    return;
+  }
+  const next = '/account';
+  location.replace('/login?next=' + encodeURIComponent(next) + '&switch=1');
+}
+
 /* ----------------------------- App update popup ----------------------------- */
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
 
@@ -1630,7 +1654,7 @@ window.Store = {
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications,
-  ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
+  ready, signOut, switchAccount, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,

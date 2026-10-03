@@ -337,7 +337,41 @@
     const label = el('span', { class: 'install-label', 'data-noi18n': '' }, t('تثبيت'));
     const fill = el('span', { class: 'install-fill' });
     const btn = el('button', { class: 'btn btn-primary btn-lg install-btn', type: 'button' }, fill, label);
+    const cancelBtn = el('button', {
+      class: 'btn btn-secondary btn-lg download-cancel-btn hidden',
+      type: 'button',
+      'aria-label': t('إلغاء التنزيل'),
+      title: t('إلغاء التنزيل'),
+      onclick: handleCancelDownload,
+    }, ico('close', 'icon icon-sm'), t('إلغاء التنزيل'));
     let nativeActiveDownloadRegistered = false;
+    let activeDownloadController = null;
+    let activeStreamReader = null;
+    let cancelRequested = false;
+
+    function setCancelVisible(visible) {
+      cancelBtn.classList.toggle('hidden', !visible);
+      if (visible) cancelBtn.disabled = false;
+    }
+
+    function handleCancelDownload() {
+      if (cancelBtn.disabled || cancelBtn.classList.contains('hidden')) return;
+      cancelBtn.disabled = true;
+      cancelRequested = true;
+      cancelBtn.classList.add('hidden');
+      if (activeDownloadController) {
+        try { activeDownloadController.abort(); } catch (e) {}
+      }
+      if (activeStreamReader) {
+        try { activeStreamReader.cancel().catch(() => {}); } catch (e) {}
+      }
+      try { S.cancelDownload(app.slug); } catch (e) {}
+      S.removeActiveDownload(app.slug);
+      S.removeApkState(app.slug);
+      removeInstalledActions();
+      showIdle();
+      toast(t('تم إلغاء التنزيل'), 'info');
+    }
 
     function setProgress(ratio) {
       const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
@@ -356,6 +390,7 @@
       fill.style.width = '0%';
     }
     function showInstalled(mode) {
+      setCancelVisible(false);
       resetBar();
       btn.disabled = false;
       label.innerHTML = '';
@@ -452,6 +487,7 @@
     // before the package is actually installed (e.g. user dismissed the
     // installer or installation is still pending).
     function showDownloadedActions(a, filename) {
+      setCancelVisible(false);
       if (!isNativeApp()) return;
       removeInstalledActions();
       const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
@@ -471,11 +507,13 @@
     function removeInstalledActions() {
       const existing = document.getElementById('gs-installed-actions');
       if (existing) existing.remove();
+      setCancelVisible(false);
       // Restore the install button row (hidden while Open/Uninstall shown).
       const anchor = document.querySelector('.detail .d-actions');
       if (anchor) anchor.style.display = '';
     }
     function showIdle(skipAnchorRestore) {
+      setCancelVisible(false);
       resetBar();
       btn.classList.remove('installed');
       btn.disabled = false;
@@ -491,6 +529,8 @@
         file_missing: t('ملف التحميل مفقود.'),
       };
       if (status === 'downloading') {
+        if (cancelRequested) return;
+        setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
         if (!nativeActiveDownloadRegistered) {
@@ -513,6 +553,8 @@
         return;
       }
       if (status === 'downloaded') {
+        setCancelVisible(false);
+        cancelRequested = false;
         // The APK is on the device. Never leave the button stuck in a
         // disabled "installing…" state: if the system installer prompt was
         // dismissed (or the user cancelled inside it), the button must
@@ -531,6 +573,8 @@
         return;
       }
       if (status === 'installing') {
+        setCancelVisible(false);
+        cancelRequested = false;
         btn.classList.add('installing');
         btn.disabled = true;
         setProgress(1);
@@ -556,10 +600,12 @@
         return;
       }
       if (status === 'cancelled') {
+        const alreadyNotified = cancelRequested;
+        cancelRequested = false;
         S.removeActiveDownload(app.slug);
         removeInstalledActions();
         showIdle();
-        toast(t('تم إلغاء التنزيل'), 'info');
+        if (!alreadyNotified) toast(t('تم إلغاء التنزيل'), 'info');
         return;
       }
       if (status === 'uninstalled') {
@@ -605,6 +651,7 @@
 
       async function runInstall() {
       if (btn.classList.contains('installing')) return;
+      cancelRequested = false;
 
       try {
         window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
@@ -633,6 +680,7 @@
       if (isNativeApp()) {
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
         const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
+        setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
         setIndeterminate();
@@ -660,6 +708,8 @@
         return;
       }
 
+      setCancelVisible(true);
+      activeDownloadController = new AbortController();
       btn.classList.add('installing');
       btn.disabled = true;
       fill.style.transition = 'none';
@@ -692,11 +742,15 @@
       window.addEventListener('beforeunload', onHandoff);
 
       try {
-        const res = await fetch(`/api/apps/${encodeURIComponent(app.slug)}/download?stream=1`, { credentials: 'include' });
+        const res = await fetch(`/api/apps/${encodeURIComponent(app.slug)}/download?stream=1`, {
+          credentials: 'include',
+          signal: activeDownloadController.signal,
+        });
         if (!res.ok || !res.body) throw new Error('http_' + res.status);
 
         const total = Number(res.headers.get('Content-Length') || 0);
         const reader = res.body.getReader();
+        activeStreamReader = reader;
         const chunks = [];
         let received = 0;
         let lastProgressWrite = 0;
@@ -729,16 +783,30 @@
         saveBlob(blob, filename);
         finished = true;
         cleanupHandoffListeners();
+        activeStreamReader = null;
+        activeDownloadController = null;
+        cancelRequested = false;
         S.removeActiveDownload(app.slug);
         markInstalledStored(app.slug);
         S.addToDownloadHistory(app);
         showInstalled();
         toast(t('اكتمل التحميل وحفظ الملف في جهازك'), 'success');
       } catch (e) {
-        // Streaming failed (network/limits) — fall back to a normal download so
-        // the user still gets the file, and don't fake an "installed" state.
         finished = true;
         cleanupHandoffListeners();
+        activeStreamReader = null;
+        activeDownloadController = null;
+        if (cancelRequested) {
+          // A user-requested cancellation must never fall through to the
+          // ordinary browser download, which would silently restart the APK.
+          cancelRequested = false;
+          S.removeActiveDownload(app.slug);
+          S.removeApkState(app.slug);
+          showIdle();
+          return;
+        }
+        // Streaming failed (network/limits) — fall back to a normal download so
+        // the user still gets the file, and don't fake an "installed" state.
         fallbackDownload(app.slug);
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
@@ -779,6 +847,7 @@
         ? { status: st.status, progress: st.progress, filename: st.filename }
         : S.getApkState(app.slug);
       if (live && live.status === 'downloading') {
+        setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
         if (live.progress >= 0) setProgress(live.progress);
@@ -898,7 +967,7 @@
     caret.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
     document.addEventListener('click', (e) => { if (!group.contains(e.target)) toggleMenu(false); });
 
-    return el('div', { class: 'd-actions' }, group);
+    return el('div', { class: 'd-actions' }, group, cancelBtn);
   }
 
   function ratingSection(app) {

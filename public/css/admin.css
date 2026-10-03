@@ -181,6 +181,39 @@
 }
 .panel-head .icon { width: 22px; height: 22px; color: var(--primary); }
 .panel p, .panel pre { color: var(--text-2); line-height: 1.85; }
+.store-settings-intro { margin: -4px 0 18px; font-size: 14px; }
+.admin-setting-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 16px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface-2);
+}
+.admin-setting-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.admin-setting-copy strong { font-size: 15px; color: var(--text); }
+.admin-setting-copy > span { max-width: 620px; color: var(--text-2); font-size: 13px; line-height: 1.65; }
+.admin-setting-control { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 0 0 auto; }
+.admin-setting-state { color: var(--text-2); font-size: 12px; font-weight: 700; }
+.admin-switch { display: inline-flex; position: relative; cursor: pointer; }
+.admin-switch-input { position: absolute; inset: 0; width: 48px; height: 28px; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.admin-switch-track {
+  display: inline-flex; align-items: center; width: 48px; height: 28px; padding: 3px;
+  border-radius: 999px; background: var(--surface-3); border: 1px solid var(--line);
+  transition: background .18s ease, border-color .18s ease;
+}
+.admin-switch-thumb {
+  display: block; width: 20px; height: 20px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.25); transition: transform .18s ease;
+}
+.admin-switch-input:checked + .admin-switch-track { background: var(--primary); border-color: var(--primary); }
+.admin-switch-input:checked + .admin-switch-track .admin-switch-thumb { transform: translateX(20px); }
+.admin-switch-input:focus-visible + .admin-switch-track { outline: 3px solid color-mix(in srgb, var(--primary) 40%, transparent); outline-offset: 2px; }
+.admin-switch-input:disabled + .admin-switch-track { opacity: .6; cursor: wait; }
+
+@media (max-width: 560px) {
+  .admin-setting-row { align-items: flex-start; gap: 14px; padding: 14px; }
+  .admin-setting-copy strong { font-size: 14px; }
+  .admin-setting-copy > span { font-size: 12px; }
+  .admin-setting-control { padding-top: 2px; }
+}
 
 /* ---------- Buttons row ---------- */
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

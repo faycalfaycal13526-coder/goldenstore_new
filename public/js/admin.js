@@ -369,6 +369,7 @@
       tabBtn('requests', 'flag', 'الطلبات والبلاغات'),
       tabBtn('notifications', 'bell', 'الإشعارات'),
       tabBtn('app-update', 'download', 'رابط تحميل التطبيق'),
+      tabBtn('settings', 'settings', 'إعدادات المتجر'),
       el('span', { class: 'tab-spacer' }),
       logoutTab,
     );
@@ -384,6 +385,7 @@
     else if (activeTab === 'requests') await renderRequests(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
     else if (activeTab === 'app-update') await renderAppUpdate(body);
+    else if (activeTab === 'settings') await renderStoreSettings(body);
     else if (activeTab.startsWith('edit:')) await renderEditApp(body, activeTab.slice(5));
   }
 
@@ -451,6 +453,70 @@
       el('div', { class: 'l' }, ico(icon), label),
       el('div', { class: 'v' }, value),
     );
+  }
+
+  // -------- store settings --------
+  async function renderStoreSettings(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    try {
+      const res = await api('/api/admin/settings');
+      let enabled = !res.settings || res.settings.notify_new_publications !== false;
+      body.innerHTML = '';
+
+      const toggle = el('input', {
+        type: 'checkbox',
+        class: 'admin-switch-input',
+        'aria-label': t('إشعار المستخدمين عند نشر تطبيق أو لعبة'),
+      });
+      toggle.checked = enabled;
+      const state = el('span', { class: 'admin-setting-state' }, enabled ? t('مفعّلة') : t('معطّلة'));
+
+      toggle.addEventListener('change', async () => {
+        const next = toggle.checked;
+        toggle.disabled = true;
+        state.textContent = t('جارٍ الحفظ…');
+        try {
+          await api('/api/admin/settings', {
+            method: 'PATCH',
+            body: { notify_new_publications: next },
+          });
+          enabled = next;
+          state.textContent = enabled ? t('مفعّلة') : t('معطّلة');
+          toast(t(enabled ? 'تم تفعيل الإشعارات التلقائية' : 'تم تعطيل الإشعارات التلقائية'), 'success');
+        } catch (e) {
+          toggle.checked = enabled;
+          state.textContent = enabled ? t('مفعّلة') : t('معطّلة');
+          toast(t('تعذّر حفظ الإعداد'), 'error');
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+
+      body.append(
+        el('div', { class: 'panel' },
+          el('div', { class: 'panel-head' }, ico('settings'), t('إعدادات الإشعارات التلقائية')),
+          el('p', { class: 'store-settings-intro' },
+            t('تحكّم في الإشعارات التي تُرسل تلقائياً عند نشر تطبيق أو لعبة جديدة.')),
+          el('div', { class: 'admin-setting-row' },
+            el('div', { class: 'admin-setting-copy' },
+              el('strong', null, t('إشعار المستخدمين عند نشر تطبيق أو لعبة')),
+              el('span', null,
+                t('عند التعطيل، لن يُحفظ إشعار جديد ولن يصل إشعار فوري للمستخدمين. الإعلانات اليدوية وإشعارات تحديث المتجر لا تتأثر.')),
+            ),
+            el('div', { class: 'admin-setting-control' },
+              el('label', { class: 'admin-switch' },
+                toggle,
+                el('span', { class: 'admin-switch-track', 'aria-hidden': 'true' }, el('span', { class: 'admin-switch-thumb' })),
+              ),
+              state,
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      body.innerHTML = '';
+      body.append(emptyMsg(t('تعذّر تحميل البيانات'), e.message));
+    }
   }
 
   // -------- requests & reports --------

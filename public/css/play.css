@@ -1876,3 +1876,62 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   .lib-installed-actions { min-width: 92px; }
   .lib-installed-actions .btn { padding: 6px 9px; font-size: 11px; }
 }
+
+
+
+
+
+
+
+
+
+
+/* Split install button (during download) */
+.install-group.split-active {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+}
+
+.install-group.split-active .install-btn {
+  flex: 1 1 75%;
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.install-group.split-active .install-cancel-btn {
+  flex: 0 0 25%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(211, 47, 47, 0.15);
+  color: #e57373;
+  border: 1px solid rgba(229, 115, 115, 0.4);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s;
+  padding: 0;
+  border-inline-start: 1px solid rgba(255,255,255,0.15);
+}
+
+.install-group.split-active .install-cancel-btn:hover {
+  background: rgba(211, 47, 47, 0.25);
+}
+
+.install-group.split-active .install-cancel-btn .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.install-group.split-active .install-caret,
+.install-group.split-active .install-menu {
+  display: none !important;
+}
+
+.install-group:not(.split-active) .install-cancel-btn {
+  display: none;
+}

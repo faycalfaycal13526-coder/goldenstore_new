@@ -1882,3 +1882,77 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 
 
+
+
+
+
+
+
+/* ===== Split install button (during download) ===== */
+.install-group.split-active {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
+  background: var(--primary) !important;
+  position: relative !important;
+}
+
+.install-group.split-active .install-btn {
+  flex: 1 1 75% !important;
+  border-radius: 0 !important;
+  border-start-start-radius: 999px !important;
+  border-end-start-radius: 999px !important;
+  background: var(--primary) !important;
+  border: none !important;
+}
+
+.install-group.split-active .install-cancel-btn {
+  flex: 0 0 25% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 0 !important;
+  border-start-end-radius: 999px !important;
+  border-end-end-radius: 999px !important;
+  border-inline-start: 2px solid #ffffff !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: background .15s !important;
+  padding: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  box-shadow: none !important;
+}
+
+.install-group.split-active .install-cancel-btn:hover {
+  background: var(--primary-2) !important;
+}
+
+.install-group.split-active .install-cancel-btn .icon {
+  width: 22px !important;
+  height: 22px !important;
+  color: #ffffff !important;
+  stroke-width: 3 !important;
+}
+
+/* Hide the caret and menu during download */
+.install-group.split-active .install-caret,
+.install-group.split-active .install-menu {
+  display: none !important;
+}
+
+/* Hide cancel button when not in split mode */
+.install-group:not(.split-active) .install-cancel-btn {
+  display: none !important;
+}
+
+
+

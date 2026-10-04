@@ -2001,3 +2001,53 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .install-group:not(.split-active) .install-cancel-btn {
   display: none !important;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* إصلاح: إظهار الأقسام السفلية دائماً */
+.detail .d-section,
+.detail .d-note,
+.detail .chip-row {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.detail .shots {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.detail .d-actions {
+  margin-bottom: 18px !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+.installed-actions {
+  margin-bottom: 18px !important;
+}

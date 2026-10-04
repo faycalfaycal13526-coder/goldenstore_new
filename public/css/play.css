@@ -1958,7 +1958,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   border-end-start-radius: 0 !important;
   border-start-end-radius: 999px !important;
   border-end-end-radius: 999px !important;
- margin-inline-start: 4px !important;
+border-inline-start: 3px solid rgba(255, 255, 255, 0.1) !important;
   cursor: pointer !important;
   padding: 0 !important;
   box-shadow: none !important;

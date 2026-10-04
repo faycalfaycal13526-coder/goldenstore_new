@@ -305,6 +305,9 @@
     const label = el('span', { class: 'install-label', 'data-noi18n': '' }, t('تثبيت'));
     const fill = el('span', { class: 'install-fill' });
     const btn = el('button', { class: 'btn btn-primary btn-lg install-btn', type: 'button' }, fill, label);
+
+    // تعريف group و cancelBtn أولاً لتجنب الخطأ
+    const group = el('div', { class: 'install-group' }, btn);
     const cancelBtn = el('button', {
       class: 'btn btn-secondary btn-lg download-cancel-btn hidden',
       type: 'button',
@@ -312,6 +315,8 @@
       title: t('إلغاء التنزيل'),
       onclick: handleCancelDownload,
     }, ico('close', 'icon icon-sm'));
+    group.append(cancelBtn);
+
     let nativeActiveDownloadRegistered = false;
     let activeDownloadController = null;
     let activeStreamReader = null;
@@ -420,8 +425,6 @@
         try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
       }
     }
-
-    // ✅ الإصلاح: إظهار الزر الجديد + إعادة إظهار جميع الأقسام السفلية
     function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
       removeInstalledActions();
@@ -440,21 +443,7 @@
         const det = document.querySelector('.detail');
         if (det) det.prepend(bar);
       }
-      // ✅ إجبار جميع الأقسام السفلية على الظهور
-      setTimeout(() => {
-        const detail = document.querySelector('.detail');
-        if (!detail) return;
-        detail.querySelectorAll('.d-section, .d-note, .chip-row, .shots, .d-head, .d-stats, .rate-summary, .rate-collapse-header').forEach((el) => {
-          el.style.display = '';
-          el.style.visibility = 'visible';
-          el.style.opacity = '1';
-          el.style.maxHeight = 'none';
-          el.style.overflow = 'visible';
-          el.style.height = '';
-        });
-      }, 100);
     }
-
     function showDownloadedActions(a, filename) {
       setCancelVisible(false);
       if (!isNativeApp()) return;
@@ -552,16 +541,6 @@
         showInstalled(hasUpdate ? 'update' : 'open');
         showInstalledActions(app, { withOpen: !hasUpdate });
         toast(t('تم تثبيت التطبيق بنجاح'), 'success');
-        // ✅ إصلاح إضافي: إعادة إظهار الأقسام السفلية
-        setTimeout(() => {
-          const detail = document.querySelector('.detail');
-          if (!detail) return;
-          detail.querySelectorAll('.d-section, .d-note, .chip-row, .shots, .d-head, .d-stats').forEach((el) => {
-            el.style.display = '';
-            el.style.visibility = 'visible';
-            el.style.opacity = '1';
-          });
-        }, 150);
         return;
       }
       if (status === 'cancelled') {
@@ -884,7 +863,9 @@
         ico('flag', 'icon'), t('إبلاغ عن مشكلة')),
     );
     const caret = el('button', { class: 'btn btn-primary btn-lg install-caret', type: 'button', 'aria-label': t('خيارات إضافية') }, ico('chevronDown', 'icon'));
-    const group = el('div', { class: 'install-group' }, btn, cancelBtn, caret, menu);
+
+    // إضافة caret و menu إلى group بعد تعريفهما
+    group.append(caret, menu);
 
     function toggleMenu(force) {
       const open = typeof force === 'boolean' ? force : !group.classList.contains('menu-open');

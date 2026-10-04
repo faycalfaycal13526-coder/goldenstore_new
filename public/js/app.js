@@ -420,6 +420,8 @@
         try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
       }
     }
+
+    // ✅ الإصلاح: إظهار الزر الجديد + إعادة إظهار جميع الأقسام السفلية
     function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
       removeInstalledActions();
@@ -438,7 +440,21 @@
         const det = document.querySelector('.detail');
         if (det) det.prepend(bar);
       }
+      // ✅ إجبار جميع الأقسام السفلية على الظهور
+      setTimeout(() => {
+        const detail = document.querySelector('.detail');
+        if (!detail) return;
+        detail.querySelectorAll('.d-section, .d-note, .chip-row, .shots, .d-head, .d-stats, .rate-summary, .rate-collapse-header').forEach((el) => {
+          el.style.display = '';
+          el.style.visibility = 'visible';
+          el.style.opacity = '1';
+          el.style.maxHeight = 'none';
+          el.style.overflow = 'visible';
+          el.style.height = '';
+        });
+      }, 100);
     }
+
     function showDownloadedActions(a, filename) {
       setCancelVisible(false);
       if (!isNativeApp()) return;
@@ -536,6 +552,16 @@
         showInstalled(hasUpdate ? 'update' : 'open');
         showInstalledActions(app, { withOpen: !hasUpdate });
         toast(t('تم تثبيت التطبيق بنجاح'), 'success');
+        // ✅ إصلاح إضافي: إعادة إظهار الأقسام السفلية
+        setTimeout(() => {
+          const detail = document.querySelector('.detail');
+          if (!detail) return;
+          detail.querySelectorAll('.d-section, .d-note, .chip-row, .shots, .d-head, .d-stats').forEach((el) => {
+            el.style.display = '';
+            el.style.visibility = 'visible';
+            el.style.opacity = '1';
+          });
+        }, 150);
         return;
       }
       if (status === 'cancelled') {

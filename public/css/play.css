@@ -1888,60 +1888,120 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   gap: 0 !important;
   border-radius: 999px !important;
   overflow: hidden !important;
-  background: var(--primary) !important;
+  background: #2b7de9 !important;
+  border: none !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  max-height: 48px !important;
+  box-shadow: none !important;
   position: relative !important;
 }
 
 .install-group.split-active .install-btn {
-  flex: 1 1 75% !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 100% !important;
   border-radius: 0 !important;
-  border-start-start-radius: 999px !important;
-  border-end-start-radius: 999px !important;
-  background: var(--primary) !important;
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
+  border-start-end-radius: 0 !important;
+  border-end-end-radius: 0 !important;
+  background: transparent !important;
   border: none !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  padding: 0 15px !important;
+  position: relative !important;
+  z-index: 1 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+.install-group.split-active .install-btn .install-label {
+  color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  z-index: 5 !important;
+  position: relative !important;
+}
+
+.install-group.split-active .install-fill {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100% !important;
+  background: rgba(255, 255, 255, 0.25) !important;
+  border-radius: 0 !important;
+  z-index: 0 !important;
 }
 
 .install-group.split-active .download-cancel-btn,
 .install-group.split-active .install-cancel-btn {
-  flex: 0 0 25% !important;
+  flex: 0 0 60px !important;
+  width: 60px !important;
+  min-width: 60px !important;
+  max-width: 60px !important;
+  height: 100% !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  background: var(--primary) !important;
+  background: transparent !important;
   color: #ffffff !important;
   border: none !important;
   border-radius: 0 !important;
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
   border-start-end-radius: 999px !important;
   border-end-end-radius: 999px !important;
-  border-inline-start: 0 !important;
-  font-size: 24px !important;
-  font-weight: 700 !important;
+  border-inline-start: 3px solid rgba(255, 255, 255, 0.1) !important;
   cursor: pointer !important;
-  transition: background .15s !important;
   padding: 0 !important;
-  width: auto !important;
-  height: auto !important;
-  min-width: 0 !important;
   box-shadow: none !important;
-  /* الفجوة: هامش داخلي من الجهة اليمنى يظهر خلاله لون الصفحة */
-  margin-inline-start: 4px !important;
+  position: relative !important;
+  z-index: 2 !important;
+  font-size: 0 !important;
+  line-height: 1 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  overflow: hidden !important;
 }
 
-.install-group.split-active .download-cancel-btn:hover,
-.install-group.split-active .install-cancel-btn:hover {
-  background: var(--primary-2) !important;
-}
-
-.install-group.split-active .download-cancel-btn .icon,
-.install-group.split-active .install-cancel-btn .icon {
-  width: 22px !important;
-  height: 22px !important;
+.install-group.split-active .download-cancel-btn::before,
+.install-group.split-active .install-cancel-btn::before {
+  content: '✕' !important;
+  display: block !important;
+  font-size: 22px !important;
+  font-weight: 400 !important;
   color: #ffffff !important;
-  stroke-width: 3 !important;
+  line-height: 1 !important;
+  font-family: Arial, sans-serif !important;
+}
+
+.install-group.split-active .download-cancel-btn svg,
+.install-group.split-active .download-cancel-btn .icon,
+.install-group.split-active .install-cancel-btn svg,
+.install-group.split-active .install-cancel-btn .icon {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
 }
 
 .install-group.split-active .install-caret,
 .install-group.split-active .install-menu {
+  display: none !important;
+}
+
+.install-group:not(.split-active) .download-cancel-btn,
+.install-group:not(.split-active) .install-cancel-btn {
   display: none !important;
 }
 

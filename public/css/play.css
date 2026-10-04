@@ -1937,6 +1937,89 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   display: none !important;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.install-group.split-active {
+  display: block !important;
+  position: relative !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
+  background: #2b7de9 !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.install-group.split-active .install-btn {
+  width: 100% !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 12px 50px 12px 20px !important;
+  color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.install-group.split-active .install-fill {
+  z-index: 0 !important;
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-radius: 999px !important;
+}
+
+.install-group.split-active .install-cancel-btn {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 50px !important;
+  height: 100% !important;
+  opacity: 0 !important;
+  cursor: pointer !important;
+  z-index: 20 !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.install-group.split-active .install-btn::before {
+  content: '✕';
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 17px;
+  font-weight: 900;
+  color: #ff7b7b;
+  z-index: 10;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.install-group.split-active:hover .install-btn::before {
+  color: #ff4d4d;
+  transform: translateY(-50%) scale(1.15);
+}
+
+.install-group.split-active .install-caret,
+.install-group.split-active .install-menu {
+  display: none !important;
+}
 .install-group:not(.split-active) .install-cancel-btn {
   display: none !important;
 }

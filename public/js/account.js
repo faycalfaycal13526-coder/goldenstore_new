@@ -498,7 +498,31 @@
         el('button', { class: 'btn btn-secondary', type: 'button', onclick: () => close() }, t('إلغاء')),
         el('button', { class: 'btn btn-primary', type: 'button', onclick: () => {
           close();
-          if (S.switchAccount) S.switchAccount(); else S.signOut();
+
+
+
+
+
+const provider = new firebase.auth.GoogleAuthProvider();
+provider.setCustomParameters({ prompt: 'select_account' });
+firebase.auth().signOut().then(() => {
+  firebase.auth().signInWithRedirect(provider);
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+          
         } }, ico('users', 'icon icon-sm'), t('متابعة لتبديل الحساب')),
       ),
     );

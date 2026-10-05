@@ -185,19 +185,23 @@ function appPublic(doc: any, includeInternalKeys = false): App & { id: string } 
   return result;
 }
 
-function feature_url(feature_key: string | undefined, env: Env): string | null {
+function feature_url(feature_key: string | undefined, env: Env, width: number = 800): string | null {
   if (!feature_key) return null;
   try {
-    return r2PublicUrl(feature_key, env);
+    const baseUrl = r2PublicUrl(feature_key, env);
+    // Optimize via Cloudflare Image Transformations for smaller, faster features.
+    return `https://goldenstore.online/cdn-cgi/image/width=${width},format=auto,quality=80/${baseUrl}`;
   } catch {
     return null;
   }
 }
 
-function icon_url(icon_key: string | undefined, env: Env): string | null {
+function icon_url(icon_key: string | undefined, env: Env, width: number = 200): string | null {
   if (!icon_key) return null;
   try {
-    return r2PublicUrl(icon_key, env);
+    const baseUrl = r2PublicUrl(icon_key, env);
+    // Optimize via Cloudflare Image Transformations for smaller, faster icons.
+    return `https://goldenstore.online/cdn-cgi/image/width=${width},format=auto,quality=80/${baseUrl}`;
   } catch {
     return null;
   }
@@ -1798,5 +1802,3 @@ app.onError((err, c) => {
 });
 
 export default app;
-
-

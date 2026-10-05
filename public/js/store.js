@@ -954,11 +954,6 @@ async function signOut() {
 // native wrappers may additionally expose a Google-session sign-out bridge.
 
 
-
-
-
-
-
 async function switchAccount() {
   cacheUser(null);
   try {
@@ -976,23 +971,24 @@ async function switchAccount() {
     toast(t('تعذّر تسجيل الخروج، حاول مرة أخرى'), 'error');
     return;
   }
-  // ✅ بعد تسجيل الخروج: افتح قائمة إيميلات Google مباشرة (بدون صفحة /login)
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
   try {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
     await firebase.auth().signInWithPopup(provider);
   } catch (e) {
-    // إذا فشل الـ popup (مثلاً في جوال)، استخدم redirect
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
+    if (e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')) {
+      return;
+    }
     try {
       await firebase.auth().signInWithRedirect(provider);
     } catch (e2) {
-      const next = '/account';
-      location.replace('/login?next=' + encodeURIComponent(next) + '&switch=1');
+      location.replace('/login?next=' + encodeURIComponent('/account') + '&switch=1');
     }
   }
 }
+
+
+
 
 
 

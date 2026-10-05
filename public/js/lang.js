@@ -1,6 +1,6 @@
-// Goldenstore i18n — Arabic source plus English, French, Spanish, German,
-// Italian, Portuguese, and Turkish. Curated UI strings are instant; other
-// content is translated via /api/translate and cached per language.
+// Goldenstore i18n — Arabic source plus English, French, and Spanish.
+// Curated UI strings are instant; other content is translated via /api/translate
+// and cached per language.
 (function () {
   'use strict';
 
@@ -9,15 +9,13 @@
     { code: 'en', label: 'English', dir: 'ltr' },
     { code: 'fr', label: 'Français', dir: 'ltr' },
     { code: 'es', label: 'Español', dir: 'ltr' },
-    { code: 'de', label: 'Deutsch', dir: 'ltr' },
-    { code: 'it', label: 'Italiano', dir: 'ltr' },
-    { code: 'pt', label: 'Português', dir: 'ltr' },
-    { code: 'tr', label: 'Türkçe', dir: 'ltr' },
   ];
 
   function readLang() {
     try { var l = localStorage.getItem('gs_lang'); } catch (e) { l = null; }
-    return LANGS.some(function (x) { return x.code === l; }) ? l : 'ar';
+    if (LANGS.some(function (x) { return x.code === l; })) return l;
+    try { if (l) localStorage.setItem('gs_lang', 'ar'); } catch (e) {}
+    return 'ar';
   }
   var lang = readLang();
   var dir = lang === 'ar' ? 'rtl' : 'ltr';
@@ -282,7 +280,7 @@
     'كلمة المرور': { en: 'Password', fr: 'Mot de passe', es: 'Contraseña' },
     'كلمة المرور غير صحيحة': { en: 'Incorrect password', fr: 'Mot de passe incorrect', es: 'Contraseña incorrecta' },
     'إجمالي التطبيقات': { en: 'Total apps', fr: 'Total apps', es: 'Total apps' },
-    'إجمالي التنزيلات': { en: 'Total downloads', fr: 'Total des téléchargements', es: 'Descargas totales', de: 'Downloads insgesamt', it: 'Download totali', pt: 'Total de downloads', tr: 'Toplam indirme' },
+    'إجمالي التنزيلات': { en: 'Total downloads', fr: 'Total des téléchargements', es: 'Descargas totales' },
     'حجم التخزين': { en: 'Storage size', fr: 'Espace stockage', es: 'Tamaño de almacenamiento' },
     'الأكثر تنزيلاً': { en: 'Most downloaded', fr: 'Les plus téléchargés', es: 'Más descargados' },
     'صيانة': { en: 'Maintenance', fr: 'Maintenance', es: 'Mantenimiento' },
@@ -460,47 +458,40 @@
     'هذا النطاق غير مُصرَّح به في Firebase Authentication.': { en: 'This domain is not authorized in Firebase Authentication.', fr: 'Ce domaine n’est pas autorisé dans Firebase Authentication.', es: 'Este dominio no está autorizado en Firebase Authentication.' },
 
     // Download flow, publication settings, account switching, and subscription.
-    'تحميل': { en: 'Download', fr: 'Télécharger', es: 'Descargar', de: 'Herunterladen', it: 'Scarica', pt: 'Baixar', tr: 'İndir' },
-    'عدد التنزيلات': { en: 'Download count', fr: 'Nombre de téléchargements', es: 'Número de descargas', de: 'Anzahl der Downloads', it: 'Numero di download', pt: 'Número de downloads', tr: 'İndirme sayısı' },
-    'تنزيلات هذا الإصدار': { en: 'Downloads of this version', fr: 'Téléchargements de cette version', es: 'Descargas de esta versión', de: 'Downloads dieser Version', it: 'Download di questa versione', pt: 'Downloads desta versão', tr: 'Bu sürümün indirilme sayısı' },
-    'إلغاء التنزيل': { en: 'Cancel download', fr: 'Annuler le téléchargement', es: 'Cancelar descarga', de: 'Download abbrechen', it: 'Annulla download', pt: 'Cancelar download', tr: 'İndirmeyi iptal et' },
-    'إعدادات المتجر': { en: 'Store settings', fr: 'Paramètres du store', es: 'Configuración de la tienda', de: 'Store-Einstellungen', it: 'Impostazioni dello store', pt: 'Configurações da loja', tr: 'Mağaza ayarları' },
-    'إعدادات الإشعارات التلقائية': { en: 'Automatic notification settings', fr: 'Paramètres des notifications automatiques', es: 'Configuración de notificaciones automáticas', de: 'Einstellungen für automatische Benachrichtigungen', it: 'Impostazioni delle notifiche automatiche', pt: 'Configurações de notificações automáticas', tr: 'Otomatik bildirim ayarları' },
-    'تحكّم في الإشعارات التي تُرسل تلقائياً عند نشر تطبيق أو لعبة جديدة.': { en: 'Control notifications sent automatically when a new app or game is published.', fr: 'Gérez les notifications envoyées automatiquement lors de la publication d’une application ou d’un jeu.', es: 'Controla las notificaciones que se envían automáticamente al publicar una nueva aplicación o juego.', de: 'Steuere Benachrichtigungen, die beim Veröffentlichen einer neuen App oder eines neuen Spiels automatisch gesendet werden.', it: 'Gestisci le notifiche inviate automaticamente quando viene pubblicata una nuova app o un nuovo gioco.', pt: 'Controle as notificações enviadas automaticamente quando um novo aplicativo ou jogo é publicado.', tr: 'Yeni bir uygulama veya oyun yayınlandığında otomatik gönderilen bildirimleri yönetin.' },
-    'إشعار المستخدمين عند نشر تطبيق أو لعبة': { en: 'Notify users when an app or game is published', fr: 'Notifier les utilisateurs lors de la publication d’une application ou d’un jeu', es: 'Notificar a los usuarios cuando se publique una aplicación o un juego', de: 'Nutzer benachrichtigen, wenn eine App oder ein Spiel veröffentlicht wird', it: 'Notifica gli utenti quando viene pubblicata un’app o un gioco', pt: 'Notificar usuários quando um aplicativo ou jogo for publicado', tr: 'Bir uygulama veya oyun yayınlandığında kullanıcılara bildirim gönder' },
-    'عند التعطيل، لن يُحفظ إشعار جديد ولن يصل إشعار فوري للمستخدمين. الإعلانات اليدوية وإشعارات تحديث المتجر لا تتأثر.': { en: 'When disabled, no new in-app notification or push alert is sent. Manual announcements and store-update notifications are unaffected.', fr: 'Si cette option est désactivée, aucune notification dans l’application ni notification push ne sera envoyée. Les annonces manuelles et les mises à jour du store ne sont pas concernées.', es: 'Al desactivarlo, no se guardará una notificación ni se enviará una alerta push. Los anuncios manuales y las actualizaciones de la tienda no se ven afectados.', de: 'Wenn deaktiviert, werden weder eine neue In-App-Benachrichtigung gespeichert noch eine Push-Mitteilung gesendet. Manuelle Ankündigungen und Store-Updates bleiben davon unberührt.', it: 'Se disattivata, non verrà salvata alcuna notifica nell’app né inviato un avviso push. Gli annunci manuali e gli aggiornamenti dello store non sono interessati.', pt: 'Quando desativado, nenhuma notificação no app será salva nem um alerta push será enviado. Anúncios manuais e atualizações da loja não são afetados.', tr: 'Devre dışı bırakıldığında yeni uygulama içi bildirim kaydedilmez ve anlık bildirim gönderilmez. Manuel duyurular ve mağaza güncellemeleri etkilenmez.' },
-    'مفعّلة': { en: 'Enabled', fr: 'Activées', es: 'Activadas', de: 'Aktiviert', it: 'Attive', pt: 'Ativadas', tr: 'Etkin' },
-    'معطّلة': { en: 'Disabled', fr: 'Désactivées', es: 'Desactivadas', de: 'Deaktiviert', it: 'Disattivate', pt: 'Desativadas', tr: 'Devre dışı' },
-    'جارٍ الحفظ…': { en: 'Saving…', fr: 'Enregistrement…', es: 'Guardando…', de: 'Wird gespeichert…', it: 'Salvataggio…', pt: 'Salvando…', tr: 'Kaydediliyor…' },
-    'تم تفعيل الإشعارات التلقائية': { en: 'Automatic notifications enabled', fr: 'Notifications automatiques activées', es: 'Notificaciones automáticas activadas', de: 'Automatische Benachrichtigungen aktiviert', it: 'Notifiche automatiche attivate', pt: 'Notificações automáticas ativadas', tr: 'Otomatik bildirimler etkinleştirildi' },
-    'تم تعطيل الإشعارات التلقائية': { en: 'Automatic notifications disabled', fr: 'Notifications automatiques désactivées', es: 'Notificaciones automáticas desactivadas', de: 'Automatische Benachrichtigungen deaktiviert', it: 'Notifiche automatiche disattivate', pt: 'Notificações automáticas desativadas', tr: 'Otomatik bildirimler devre dışı bırakıldı' },
-    'تعذّر حفظ الإعداد': { en: 'Could not save setting', fr: 'Impossible d’enregistrer le paramètre', es: 'No se pudo guardar la configuración', de: 'Einstellung konnte nicht gespeichert werden', it: 'Impossibile salvare l’impostazione', pt: 'Não foi possível salvar a configuração', tr: 'Ayar kaydedilemedi' },
-    'تعذّر تسجيل الخروج، حاول مرة أخرى': { en: 'Could not sign out. Please try again.', fr: 'Impossible de vous déconnecter. Veuillez réessayer.', es: 'No se pudo cerrar la sesión. Inténtalo de nuevo.', de: 'Abmeldung fehlgeschlagen. Bitte versuche es erneut.', it: 'Impossibile uscire. Riprova.', pt: 'Não foi possível sair. Tente novamente.', tr: 'Oturum kapatılamadı. Lütfen tekrar deneyin.' },
-    'الاشتراك عبر واتساب': { en: 'Subscribe via WhatsApp', fr: 'S’abonner via WhatsApp', es: 'Suscribirse por WhatsApp', de: 'Über WhatsApp abonnieren', it: 'Abbonati tramite WhatsApp', pt: 'Assinar pelo WhatsApp', tr: 'WhatsApp üzerinden abone ol' },
-    'استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر واتساب.': { en: 'Ask about available plans and confirm your subscription with the store team on WhatsApp.', fr: 'Renseignez-vous sur les offres et confirmez votre abonnement auprès de l’équipe via WhatsApp.', es: 'Consulta los planes disponibles y confirma tu suscripción con el equipo de la tienda por WhatsApp.', de: 'Frage nach verfügbaren Tarifen und bestätige dein Abonnement über WhatsApp beim Store-Team.', it: 'Chiedi informazioni sui piani disponibili e conferma l’abbonamento con il team tramite WhatsApp.', pt: 'Consulte os planos disponíveis e confirme sua assinatura com a equipe da loja pelo WhatsApp.', tr: 'Mevcut planları öğrenin ve aboneliğinizi mağaza ekibiyle WhatsApp üzerinden onaylayın.' },
-    'راسلنا على واتساب': { en: 'Message us on WhatsApp', fr: 'Écrivez-nous sur WhatsApp', es: 'Escríbenos por WhatsApp', de: 'Schreib uns auf WhatsApp', it: 'Scrivici su WhatsApp', pt: 'Fale conosco pelo WhatsApp', tr: 'WhatsApp üzerinden bize yazın' },
-    'تبديل الحساب': { en: 'Switch account', fr: 'Changer de compte', es: 'Cambiar de cuenta', de: 'Konto wechseln', it: 'Cambia account', pt: 'Trocar de conta', tr: 'Hesap değiştir' },
-    'تبديل حساب Google': { en: 'Switch Google account', fr: 'Changer de compte Google', es: 'Cambiar cuenta de Google', de: 'Google-Konto wechseln', it: 'Cambia account Google', pt: 'Trocar de conta do Google', tr: 'Google hesabını değiştir' },
-    'سيتم تسجيل خروجك ثم فتح تسجيل الدخول لاختيار حساب Google آخر.': { en: 'You’ll be signed out, then sign-in will open so you can choose another Google account.', fr: 'Vous serez déconnecté, puis la connexion s’ouvrira pour choisir un autre compte Google.', es: 'Se cerrará tu sesión y se abrirá el inicio de sesión para que elijas otra cuenta de Google.', de: 'Du wirst abgemeldet. Anschließend kannst du dich anmelden und ein anderes Google-Konto auswählen.', it: 'Verrai disconnesso; si aprirà la schermata di accesso per scegliere un altro account Google.', pt: 'Você será desconectado e a tela de login abrirá para escolher outra conta do Google.', tr: 'Oturumunuz kapatılır ve başka bir Google hesabı seçebilmeniz için giriş ekranı açılır.' },
-    'تأكيد تبديل الحساب': { en: 'Confirm account switch', fr: 'Confirmer le changement de compte', es: 'Confirmar cambio de cuenta', de: 'Kontowechsel bestätigen', it: 'Conferma cambio account', pt: 'Confirmar troca de conta', tr: 'Hesap değişikliğini onayla' },
-    'متابعة لتبديل الحساب': { en: 'Continue to switch account', fr: 'Continuer pour changer de compte', es: 'Continuar para cambiar de cuenta', de: 'Weiter zum Kontowechsel', it: 'Continua per cambiare account', pt: 'Continuar para trocar de conta', tr: 'Hesabı değiştirmeye devam et' },
-    'الرابط غير متاح حالياً': { en: 'Download link is currently unavailable', fr: 'Le lien de téléchargement est momentanément indisponible', es: 'El enlace de descarga no está disponible en este momento', de: 'Der Download-Link ist derzeit nicht verfügbar', it: 'Il link per il download non è al momento disponibile', pt: 'O link de download está indisponível no momento', tr: 'İndirme bağlantısı şu anda kullanılamıyor' },
+    'تحميل': { en: 'Download', fr: 'Télécharger', es: 'Descargar' },
+    'عدد التنزيلات': { en: 'Download count', fr: 'Nombre de téléchargements', es: 'Número de descargas' },
+    'تنزيلات هذا الإصدار': { en: 'Downloads of this version', fr: 'Téléchargements de cette version', es: 'Descargas de esta versión' },
+    'إلغاء التنزيل': { en: 'Cancel download', fr: 'Annuler le téléchargement', es: 'Cancelar descarga' },
+    'إعدادات المتجر': { en: 'Store settings', fr: 'Paramètres du store', es: 'Configuración de la tienda' },
+    'إعدادات الإشعارات التلقائية': { en: 'Automatic notification settings', fr: 'Paramètres des notifications automatiques', es: 'Configuración de notificaciones automáticas' },
+    'تحكّم في الإشعارات التي تُرسل تلقائياً عند نشر تطبيق أو لعبة جديدة.': { en: 'Control notifications sent automatically when a new app or game is published.', fr: 'Gérez les notifications envoyées automatiquement lors de la publication d’une application ou d’un jeu.', es: 'Controla las notificaciones que se envían automáticamente al publicar una nueva aplicación o juego.' },
+    'إشعار المستخدمين عند نشر تطبيق أو لعبة': { en: 'Notify users when an app or game is published', fr: 'Notifier les utilisateurs lors de la publication d’une application ou d’un jeu', es: 'Notificar a los usuarios cuando se publique una aplicación o un juego' },
+    'عند التعطيل، لن يُحفظ إشعار جديد ولن يصل إشعار فوري للمستخدمين. الإعلانات اليدوية وإشعارات تحديث المتجر لا تتأثر.': { en: 'When disabled, no new in-app notification or push alert is sent. Manual announcements and store-update notifications are unaffected.', fr: 'Si cette option est désactivée, aucune notification dans l’application ni notification push ne sera envoyée. Les annonces manuelles et les mises à jour du store ne sont pas concernées.', es: 'Al desactivarlo, no se guardará una notificación ni se enviará una alerta push. Los anuncios manuales y las actualizaciones de la tienda no se ven afectados.' },
+    'مفعّلة': { en: 'Enabled', fr: 'Activées', es: 'Activadas' },
+    'معطّلة': { en: 'Disabled', fr: 'Désactivées', es: 'Desactivadas' },
+    'جارٍ الحفظ…': { en: 'Saving…', fr: 'Enregistrement…', es: 'Guardando…' },
+    'تم تفعيل الإشعارات التلقائية': { en: 'Automatic notifications enabled', fr: 'Notifications automatiques activées', es: 'Notificaciones automáticas activadas' },
+    'تم تعطيل الإشعارات التلقائية': { en: 'Automatic notifications disabled', fr: 'Notifications automatiques désactivées', es: 'Notificaciones automáticas desactivadas' },
+    'تعذّر حفظ الإعداد': { en: 'Could not save setting', fr: 'Impossible d’enregistrer le paramètre', es: 'No se pudo guardar la configuración' },
+    'تعذّر تسجيل الخروج، حاول مرة أخرى': { en: 'Could not sign out. Please try again.', fr: 'Impossible de vous déconnecter. Veuillez réessayer.', es: 'No se pudo cerrar la sesión. Inténtalo de nuevo.' },
+    'الاشتراك عبر واتساب': { en: 'Subscribe via WhatsApp', fr: 'S’abonner via WhatsApp', es: 'Suscribirse por WhatsApp' },
+    'استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر واتساب.': { en: 'Ask about available plans and confirm your subscription with the store team on WhatsApp.', fr: 'Renseignez-vous sur les offres et confirmez votre abonnement auprès de l’équipe via WhatsApp.', es: 'Consulta los planes disponibles y confirma tu suscripción con el equipo de la tienda por WhatsApp.' },
+    'راسلنا على واتساب': { en: 'Message us on WhatsApp', fr: 'Écrivez-nous sur WhatsApp', es: 'Escríbenos por WhatsApp' },
+    'الحسابات المحفوظة': { en: 'Saved accounts', fr: 'Comptes enregistrés', es: 'Cuentas guardadas' },
+    'حسابات Google التي استُخدمت سابقاً على هذا الجهاز.': { en: 'Google accounts previously used on this device.', fr: 'Comptes Google déjà utilisés sur cet appareil.', es: 'Cuentas de Google usadas anteriormente en este dispositivo.' },
+    'لا توجد حسابات أخرى محفوظة بعد.': { en: 'No other accounts are saved yet.', fr: 'Aucun autre compte n’est encore enregistré.', es: 'Aún no hay otras cuentas guardadas.' },
+    'مستخدم الآن': { en: 'Current account', fr: 'Compte actuel', es: 'Cuenta actual' },
+    'إزالة الحساب المحفوظ': { en: 'Remove saved account', fr: 'Supprimer le compte enregistré', es: 'Eliminar cuenta guardada' },
+    'البريد تلميح لاختيار الحساب فقط؛ وقد يطلب Google تأكيد هويتك.': { en: 'The email is only an account hint; Google may still ask you to verify your identity.', fr: 'L’adresse e-mail sert uniquement d’indice ; Google peut vous demander de vérifier votre identité.', es: 'El correo solo sirve como sugerencia; Google puede pedirte que verifiques tu identidad.' },
+    'استخدام حساب Google آخر': { en: 'Use another Google account', fr: 'Utiliser un autre compte Google', es: 'Usar otra cuenta de Google' },
+    'تبديل الحساب': { en: 'Switch account', fr: 'Changer de compte', es: 'Cambiar de cuenta' },
+    'الرابط غير متاح حالياً': { en: 'Download link is currently unavailable', fr: 'Le lien de téléchargement est momentanément indisponible', es: 'El enlace de descarga no está disponible en este momento' },
   };
 
   // Number/size unit labels per language.
   var UNITS = {
-    bytes: {
-      ar: ['ب', 'ك.ب', 'م.ب', 'ج.ب'], en: ['B', 'KB', 'MB', 'GB'],
-      fr: ['o', 'Ko', 'Mo', 'Go'], es: ['B', 'KB', 'MB', 'GB'],
-      de: ['B', 'KB', 'MB', 'GB'], it: ['B', 'KB', 'MB', 'GB'],
-      pt: ['B', 'KB', 'MB', 'GB'], tr: ['B', 'KB', 'MB', 'GB'],
-    },
-    count: {
-      ar: ['', 'ألف', 'مليون', 'مليار'], en: ['', 'K', 'M', 'B'],
-      fr: ['', 'K', 'M', 'Md'], es: ['', 'K', 'M', 'MM'],
-      de: ['', 'Tsd.', 'Mio.', 'Mrd.'], it: ['', 'mila', 'mln', 'mld'],
-      pt: ['', 'mil', 'mi', 'bi'], tr: ['', 'bin', 'Mn', 'Mr'],
-    },
+    bytes: { ar: ['ب', 'ك.ب', 'م.ب', 'ج.ب'], en: ['B', 'KB', 'MB', 'GB'], fr: ['o', 'Ko', 'Mo', 'Go'], es: ['B', 'KB', 'MB', 'GB'] },
+    count: { ar: ['', 'ألف', 'مليون', 'مليار'], en: ['', 'K', 'M', 'B'], fr: ['', 'K', 'M', 'Md'], es: ['', 'K', 'M', 'MM'] },
   };
   function units(kind) { var u = UNITS[kind]; return (u && (u[lang] || u.ar)) || []; }
 
@@ -530,7 +521,7 @@
     // can be mapped back to the Arabic source key and then translated.
     var vals = O[k];
     if (vals) {
-      ['ar', 'en', 'fr', 'es', 'de', 'it', 'pt', 'tr'].forEach(function (l) {
+      ['ar', 'en', 'fr', 'es'].forEach(function (l) {
         var v = vals[l] || (l === 'ar' ? k : '');
         if (!v) return;
         var key = v.toLowerCase().trim();

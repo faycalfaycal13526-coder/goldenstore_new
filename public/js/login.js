@@ -10,6 +10,22 @@
   var errBox = document.getElementById('error');
   var label = btn ? btn.querySelector('.gbtn-label') : null;
   var navigated = false;
+  var params = new URLSearchParams(location.search);
+  var isAccountSwitch = params.get('switch') === '1';
+  var switchEmail = '';
+  var switchAutoKey = 'gs_account_switch_started';
+  var switchEmailKey = 'gs_account_switch_email';
+  var switchIntentKey = 'gs_account_switch_intent';
+  try {
+    isAccountSwitch = isAccountSwitch && sessionStorage.getItem(switchIntentKey) === '1';
+    var savedHint = sessionStorage.getItem(switchEmailKey) || '';
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(savedHint) && savedHint.length <= 254) switchEmail = savedHint;
+    if (!isAccountSwitch) {
+      sessionStorage.removeItem(switchAutoKey);
+      sessionStorage.removeItem(switchEmailKey);
+      sessionStorage.removeItem(switchIntentKey);
+    }
+  } catch (e) { isAccountSwitch = false; }
 
   // Where to go after a successful sign-in. Only same-origin paths are allowed,
   // and never back to the login page itself.
@@ -80,10 +96,38 @@
 
   try { window.GAuth.init(); } catch (e) {}
 
-  // If a session is (or becomes) available, leave immediately. Otherwise reveal
-  // the button so the user can start the flow.
+  function clearSwitchState() {
+    try {
+      sessionStorage.removeItem(switchAutoKey);
+      sessionStorage.removeItem(switchEmailKey);
+      sessionStorage.removeItem(switchIntentKey);
+    } catch (e) {}
+  }
+
+  function startAccountSwitch() {
+    var alreadyStarted = false;
+    try { alreadyStarted = sessionStorage.getItem(switchAutoKey) === '1'; } catch (e) {}
+    if (alreadyStarted) { showButton(); return; }
+    try { sessionStorage.setItem(switchAutoKey, '1'); } catch (e) {}
+    showButton();
+    setLoading(true);
+    Promise.resolve()
+      .then(function () {
+        return window.GAuth.signInWithGoogle({ loginHint: switchEmail, forceRedirect: true });
+      })
+      .then(function (user) {
+        if (user) { clearSwitchState(); go(); }
+        else setLoading(false); // redirect or native account chooser is in progress
+      })
+      .catch(function (e) { showError(errorMessage(e)); });
+  }
+
+  // If this is a switch request, begin Google sign-in immediately. A saved
+  // email is only a login hint; Google still controls authentication/consent.
+  // The session flag prevents a redirect return from starting a second flow.
   window.GAuth.onAuthChange(function (user) {
-    if (user) { go(); return; }
+    if (user) { clearSwitchState(); go(); return; }
+    if (isAccountSwitch) { startAccountSwitch(); return; }
     showButton();
   });
 
@@ -96,10 +140,14 @@
       setLoading(true);
       var timeout = setTimeout(function () { setLoading(false); }, 15000);
       Promise.resolve()
-        .then(function () { return window.GAuth.signInWithGoogle(); })
+        .then(function () {
+          return window.GAuth.signInWithGoogle(isAccountSwitch
+            ? { loginHint: switchEmail, forceRedirect: true }
+            : undefined);
+        })
         .then(function (user) {
           clearTimeout(timeout);
-          if (user) go();
+          if (user) { clearSwitchState(); go(); }
           else setLoading(false); // popup dismissed / redirect in progress
         })
         .catch(function (e) {

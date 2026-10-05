@@ -30,6 +30,9 @@
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', url, true);
       if (contentType) xhr.setRequestHeader('Content-Type', contentType);
+      // Default timeout: 5 min for small files, 30 min for large parts.
+      // 0 means no timeout (default for XHR). We set it to ensure uploads
+      // don't hang silently forever on flaky mobile networks.
       xhr.timeout = timeoutMs > 0 ? timeoutMs : (5 * 60 * 1000);
       if (onProgress) {
         xhr.upload.onprogress = (e) => {
@@ -57,8 +60,11 @@
         return await xhrPut(url, data, contentType, onProgress, timeoutMs);
       } catch (err) {
         lastErr = err;
+        // Don't retry on 4xx (the presigned URL or its content-type is wrong,
+        // retrying won't fix that). Retry on network errors and 5xx.
         if (err && err.message && /_4\d\d$/.test(err.message)) throw err;
         if (attempt < maxRetries) {
+          // Exponential backoff: 1s, 2s, 4s, 8s…
           await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
         }
       }
@@ -73,6 +79,9 @@
       return await r2MultipartUpload(file, kind, slugHint, contentType, onProgress);
     }
 
+    // Small file: single presigned PUT (with retry). The presign request
+    // itself is retried too — transient 4xx/5xx/timeouts here used to abort
+    // the whole upload.
     let presign = null;
     for (let attempt = 0; attempt <= 2; attempt++) {
       try {
@@ -96,11 +105,12 @@
 
     await retryXhrPut(url, file, contentType, (loaded, total) => {
       if (onProgress) onProgress(loaded / total);
-    }, 2, 30 * 60 * 1000);
+    }, 2, 30 * 60 * 1000);  // 30-min timeout for single PUT (large APKs)
     return key;
   }
 
   async function r2MultipartUpload(file, kind, slugHint, contentType, onProgress) {
+    // 1. Create multipart upload and get presigned part URLs
     const mp = await api('/api/admin/multipart/create', {
       method: 'POST',
       timeoutMs: 60000,
@@ -118,6 +128,7 @@
     let totalUploaded = 0;
 
     try {
+      // 2. Upload each part with retry
       for (let i = 0; i < partUrls.length; i++) {
         const start = i * partSize;
         const end = Math.min(start + partSize, file.size);
@@ -127,7 +138,7 @@
 
         const etag = await retryXhrPut(partUrl, chunk, null, (loaded) => {
           if (onProgress) onProgress((totalUploaded + loaded) / file.size);
-        }, 3, 10 * 60 * 1000);
+        }, 3, 10 * 60 * 1000);  // 10-min timeout per 10MB part
 
         if (!etag) {
           throw new Error('upload_etag_missing');
@@ -139,6 +150,8 @@
         completedParts.push({ PartNumber: partNum, ETag: etag });
       }
 
+      // 3. Complete multipart upload (with retry — transient failures here
+      // used to leave fully-uploaded files dangling as aborted uploads).
       let completed = false;
       for (let attempt = 0; attempt <= 2 && !completed; attempt++) {
         try {
@@ -156,6 +169,7 @@
 
       return key;
     } catch (err) {
+      // Abort multipart upload on failure (cleanup)
       api('/api/admin/multipart/abort', {
         method: 'POST',
         body: { key, uploadId },
@@ -255,6 +269,7 @@
       setBusy(true);
       try {
         await api('/api/login', { method: 'POST', body: { password } });
+        // Direct in — no extra round trip; render the admin app immediately.
         activeTab = 'dashboard';
         await renderApp();
       } catch (err) {
@@ -280,6 +295,7 @@
       ),
       submitBtn,
     );
+    // Hidden username field for password-manager UX (kept off-screen).
     form.prepend(el('input', {
       type: 'text', name: 'username', value: 'admin', autocomplete: 'username',
       tabindex: '-1', 'aria-hidden': 'true',
@@ -563,6 +579,8 @@
         try {
           const s = await api('/api/admin/push/status');
           let txt = `الأجهزة المسجّلة حالياً: ${s.registered_tokens || 0}`;
+          // Show the freshest registrations so the owner can verify a test
+          // device actually registered (open app → allow notifications → sign in).
           const toks = s.tokens || [];
           if (toks.length) {
             const now = Math.floor(Date.now() / 1000);
@@ -689,16 +707,7 @@
         const files = apkDz.getFiles();
         if (!files.length) { toast(t('اختر ملف APK أولاً'), 'error'); return; }
         const version_name = versionInput.value.trim() || undefined;
-        // FIX: version_code MUST be a small integer (≤ 100000), otherwise the
-        // server treats the record as bogus and falls back to the legacy
-        // hardcoded GitHub release URL. Derive it from the semantic version
-        // string (e.g. "1.17" → 117, "2.0.3" → 20003).
-        let version_code = 0;
-        if (version_name) {
-          const parts = String(version_name).split('.').map((n) => parseInt(n, 10) || 0);
-          version_code = (parts[0] || 0) * 10000 + (parts[1] || 0) * 100 + (parts[2] || 0);
-          if (version_code <= 0 || version_code > 100000) version_code = 1;
-        }
+        const version_code = version_name ? Math.floor(Date.now() / 1000) : 0;
         const notes = notesInput.value.trim();
         saveBtn.disabled = true;
         try {
@@ -710,13 +719,6 @@
           });
           resultInfo.textContent = t('تم حفظ الرابط') + (res && res.push ? ` — ${res.push.success || 0}/${res.push.targeted || 0} ` + t('إشعار') : '');
           toast(t('تم نشر التحديث'), 'success');
-          // Refresh the "current link" info so the new R2 URL shows immediately.
-          try {
-            const fresh = await api('/api/app-update');
-            if (fresh && fresh.apk_url) {
-              resultInfo.textContent += ' — ' + fresh.apk_url;
-            }
-          } catch {}
         } catch (e) {
           toast(t('فشل نشر التحديث'), 'error');
         } finally {
@@ -912,6 +914,7 @@
       try {
         const slugHint = (data.name || 'app').slice(0, 60);
 
+        // Upload APK first
         toast('بدء رفع الملفات…');
         const apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
         let icon_key = null;
@@ -1004,6 +1007,7 @@
       const { app, screenshots } = await api(`/api/admin/apps/${id}`);
       body.innerHTML = '';
 
+      // Header
       body.append(
         el('div', { class: 'flex gap-md mt-md', style: 'align-items:center;' },
           el('button', { class: 'btn btn-secondary btn-sm', onclick: () => { activeTab = 'apps'; renderApp(); } },
@@ -1015,6 +1019,7 @@
         ),
       );
 
+      // Metadata form
       const form = el('form', { class: 'form', onsubmit: async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(form).entries());
@@ -1049,6 +1054,7 @@
       );
       body.append(form);
 
+      // APK replace
       const apkDz = dropzone({ accept: '.apk', label: 'استبدل ملف APK' });
       const apkForm = el('form', { class: 'form', onsubmit: async (e) => {
         e.preventDefault();
@@ -1080,6 +1086,7 @@
         apkForm,
       ));
 
+      // Icon replace
       const iconDz = dropzone({ accept: 'image/*', label: 'اختر أيقونة جديدة' });
       const iconForm = el('form', { class: 'form', onsubmit: async (e) => {
         e.preventDefault();
@@ -1099,6 +1106,7 @@
         iconForm,
       ));
 
+      // Feature graphic (wide image used in the home editors-choice carousel)
       const featDz = dropzone({ accept: 'image/*', label: 'اختر صورة عرضية (يفضّل 1024×500)' });
       const featForm = el('form', { class: 'form', onsubmit: async (e) => {
         e.preventDefault();
@@ -1118,6 +1126,7 @@
         featForm,
       ));
 
+      // Screenshots
       const ssDz = dropzone({ accept: 'image/*', multiple: true, label: 'أضف لقطات جديدة' });
       const ssForm = el('form', { class: 'form', onsubmit: async (e) => {
         e.preventDefault();
@@ -1160,6 +1169,7 @@
       ssPanel.append(el('div', { class: 'mt-md' }, ssForm));
       body.append(ssPanel);
 
+      // Danger zone
       body.append(el('div', { class: 'panel' },
         el('div', { class: 'panel-head', style: 'border-color: var(--danger);' }, ico('trash'), 'منطقة الخطر'),
         el('p', { class: 'muted', style: 'font-size:13px;' }, 'حذف التطبيق يحذف ملف APK والأيقونة وجميع اللقطات نهائياً.'),
@@ -1210,6 +1220,7 @@
       const selected = sel.value || value || 'other';
       sel.innerHTML = '';
       cats.forEach((c) => {
+        // Show app categories for apps, game categories for games
         const isGameCat = c.slug.startsWith('game_');
         if (currentType === 'game' && !isGameCat && c.slug !== 'other') return;
         if (currentType !== 'game' && isGameCat) return;
@@ -1218,6 +1229,7 @@
         sel.append(opt);
       });
     }
+    // Defer linking to type select to allow DOM construction
     setTimeout(() => {
       const typeEl = typeSelectName && sel.closest('form')?.querySelector(`[name="${typeSelectName}"]`);
       if (typeEl) {

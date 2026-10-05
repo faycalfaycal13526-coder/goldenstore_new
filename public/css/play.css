@@ -823,8 +823,74 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .acct-head { display: flex; align-items: center; gap: 16px; padding: 12px 0 20px; }
 .acct-head .avatar-lg { width: 72px; height: 72px; font-size: 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text); font-weight: 700; }
 .acct-head .avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
+.acct-info { flex: 1; min-width: 0; position: relative; }
 .acct-info .nm { font-size: 20px; font-weight: 700; }
 .acct-info .em { color: var(--text-2); font-size: 14px; margin-top: 2px; }
+.acct-email-row { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 2px; }
+.acct-email-row .acct-email { min-width: 0; margin-top: 0; overflow-wrap: anywhere; direction: ltr; text-align: start; }
+.account-switcher { position: relative; z-index: 20; flex: 0 0 auto; line-height: 1; }
+.account-switcher-trigger {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  border: 1px solid var(--line); border-radius: 11px; color: var(--text-2);
+  background: var(--surface-2); cursor: pointer; transition: color .15s, background .15s, border-color .15s, transform .12s;
+}
+.account-switcher-trigger:hover, .account-switcher.open .account-switcher-trigger {
+  color: var(--primary); background: var(--surface); border-color: color-mix(in srgb, var(--primary) 48%, var(--line));
+}
+.account-switcher-trigger:active { transform: scale(.96); }
+.account-switcher-trigger:focus-visible, .account-switcher-account:focus-visible,
+.account-switcher-remove:focus-visible, .account-switcher-other:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px;
+}
+.account-switcher-trigger .icon { width: 18px; height: 18px; }
+.account-switcher-popover {
+  display: none; position: absolute; top: calc(100% + 9px); z-index: 45;
+  width: min(360px, calc(100vw - 36px)); max-height: min(460px, calc(100vh - 150px));
+  overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 18px;
+  color: var(--text); background: var(--surface); box-shadow: 0 18px 54px rgba(0,0,0,.28);
+}
+[dir="rtl"] .account-switcher-popover { inset-inline-start: 0; }
+[dir="ltr"] .account-switcher-popover { inset-inline-end: 0; }
+.account-switcher.open .account-switcher-popover { display: block; }
+.account-switcher-heading { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.account-switcher-heading .icon { width: 18px; height: 18px; color: var(--primary); }
+.account-switcher-heading strong { font-size: 14px; }
+.account-switcher-intro, .account-switcher-security {
+  margin: 7px 0 11px; color: var(--text-3); font-size: 11px; line-height: 1.6;
+}
+.account-switcher-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.account-switcher-account {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 9px;
+  border: 1px solid var(--line); border-radius: 13px; color: var(--text); background: var(--surface-2);
+  text-align: start; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.account-switcher-account:hover:not(:disabled) { border-color: var(--primary); background: var(--surface); }
+.account-switcher-account:disabled { cursor: default; opacity: .86; }
+.account-switcher-avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: 0 0 34px;
+  border-radius: 50%; color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, var(--surface));
+  font-size: 14px; font-weight: 800;
+}
+.account-switcher-address { display: flex; flex: 1; flex-direction: column; min-width: 0; text-align: start; }
+.account-switcher-address strong { overflow-wrap: anywhere; color: var(--text); font-size: 12px; font-weight: 700; }
+.account-switcher-address small { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.account-switcher-current { flex: 0 0 auto; color: var(--success, #36b37e); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.account-switcher-remove {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 32px;
+  border: 0; border-radius: 9px; color: var(--text-3); background: transparent; cursor: pointer;
+}
+.account-switcher-remove:hover { color: #e57373; background: rgba(211,47,47,.1); }
+.account-switcher-remove .icon { width: 15px; height: 15px; }
+.account-switcher-empty { margin: 10px 0; padding: 12px; border-radius: 12px; color: var(--text-3); background: var(--surface-2); font-size: 12px; text-align: center; }
+.account-switcher-security { margin: 12px 2px; }
+.account-switcher-other {
+  display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 40px;
+  padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--line));
+  border-radius: 12px; color: var(--primary); background: transparent; font: inherit; font-size: 12px;
+  font-weight: 700; cursor: pointer; transition: background .15s;
+}
+.account-switcher-other:hover { background: color-mix(in srgb, var(--primary) 9%, transparent); }
+.account-switcher-other .icon { width: 16px; height: 16px; }
 
 /* Tabs */
 .acct-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
@@ -1875,132 +1941,4 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 @media (max-width: 360px) {
   .lib-installed-actions { min-width: 92px; }
   .lib-installed-actions .btn { padding: 6px 9px; font-size: 11px; }
-}
-
-
-
-
-/* ===== Split Install Button (during download) ===== */
-.install-group.split-active {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: stretch !important;
-  gap: 0 !important;
-  border-radius: 999px !important;
-  overflow: hidden !important;
-  background: #2b7de9 !important;
-  border: none !important;
-  padding: 0 !important;
-  width: 100% !important;
-  height: 48px !important;
-  min-height: 48px !important;
-  max-height: 48px !important;
-  box-shadow: none !important;
-  position: relative !important;
-}
-
-.install-group.split-active .install-btn {
-  flex: 1 1 auto !important;
-  width: auto !important;
-  min-width: 0 !important;
-  height: 100% !important;
-  border-radius: 0 !important;
-  border-start-start-radius: 0 !important;
-  border-end-start-radius: 0 !important;
-  border-start-end-radius: 0 !important;
-  border-end-end-radius: 0 !important;
-  background: transparent !important;
-  border: none !important;
-  display: flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  color: #ffffff !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  padding: 0 15px !important;
-  position: relative !important;
-  z-index: 1 !important;
-  box-shadow: none !important;
-  overflow: hidden !important;
-}
-
-.install-group.split-active .install-btn .install-label {
-  color: #ffffff !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  z-index: 5 !important;
-  position: relative !important;
-}
-
-.install-group.split-active .install-fill {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  bottom: 0 !important;
-  height: 100% !important;
-  background: rgba(255, 255, 255, 0.25) !important;
-  border-radius: 0 !important;
-  z-index: 0 !important;
-}
-
-.install-group.split-active .download-cancel-btn,
-.install-group.split-active .install-cancel-btn {
-  flex: 0 0 60px !important;
-  width: 60px !important;
-  min-width: 60px !important;
-  max-width: 60px !important;
-  height: 100% !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: transparent !important;
-  color: #ffffff !important;
-  border: none !important;
-  border-radius: 0 !important;
-  border-start-start-radius: 0 !important;
-  border-end-start-radius: 0 !important;
-  border-start-end-radius: 999px !important;
-  border-end-end-radius: 999px !important;
-  border-inline-start: 3px solid rgba(255, 255, 255, 0.1) !important;
-  cursor: pointer !important;
-  padding: 0 !important;
-  box-shadow: none !important;
-  position: relative !important;
-  z-index: 2 !important;
-  font-size: 0 !important;
-  line-height: 1 !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  overflow: hidden !important;
-}
-
-.install-group.split-active .download-cancel-btn::before,
-.install-group.split-active .install-cancel-btn::before {
-  content: '✕' !important;
-  display: block !important;
-  font-size: 22px !important;
-  font-weight: 400 !important;
-  color: #ffffff !important;
-  line-height: 1 !important;
-  font-family: Arial, sans-serif !important;
-}
-
-.install-group.split-active .download-cancel-btn svg,
-.install-group.split-active .download-cancel-btn .icon,
-.install-group.split-active .install-cancel-btn svg,
-.install-group.split-active .install-cancel-btn .icon {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-  opacity: 0 !important;
-}
-
-.install-group.split-active .install-caret,
-.install-group.split-active .install-menu {
-  display: none !important;
-}
-
-.install-group:not(.split-active) .download-cancel-btn,
-.install-group:not(.split-active) .install-cancel-btn {
-  display: none !important;
 }

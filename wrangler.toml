@@ -1,0 +1,26 @@
+name = "goldenstore-api"
+main = "api/[[...path]].ts"
+compatibility_date = "2026-10-05"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# The website routes keep same-origin /api/* calls working on the custom domain.
+# api.goldenstore.online is a Worker Custom Domain used by the Pages/Vercel proxies.
+# The goldenstore.online zone must be active in this Cloudflare account.
+routes = [
+  { pattern = "goldenstore.online/api/*", zone_name = "goldenstore.online" },
+  { pattern = "www.goldenstore.online/api/*", zone_name = "goldenstore.online" },
+  { pattern = "api.goldenstore.online", custom_domain = true }
+]
+
+[vars]
+ADMIN_USERNAME = "admin"
+ALLOWED_ORIGINS = "https://goldenstore.online,https://www.goldenstore.online,https://goldenstore-new.pages.dev"
+STORE_NAME = "Goldenstore"
+STORE_DOMAIN = "goldenstore.online"
+STORE_LOGO_URL = "https://goldenstore.online/images/logo.png"
+R2_BUCKET = "goldenstore-apks"
+# Replace these non-secret placeholders before deploying.
+R2_ACCOUNT_ID = "replace-with-cloudflare-account-id"
+R2_PUBLIC_URL = "https://replace-with-public-r2-domain"
+FIREBASE_PROJECT_ID = "replace-with-firebase-project-id"

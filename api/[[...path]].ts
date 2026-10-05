@@ -1,8 +1,5 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { getCookie, setCookie } from 'hono/cookie';
-import { getRequestListener } from '@hono/node-server';
-import crypto from 'node:crypto';
 import { firestore, getFieldValue, verifyFirebaseToken, messaging, getAuthAdmin } from '../lib/firebase.js';
 import {
   r2PresignPut,
@@ -14,6 +11,7 @@ import {
   r2PresignUploadPart,
   r2CompleteMultipartUpload,
   r2AbortMultipartUpload,
+  r2ConfigureCors,
 } from '../lib/r2.js';
 import {
   COOKIE_NAME,
@@ -21,50 +19,60 @@ import {
   signJwt,
   verifyJwt,
 } from '../lib/auth.js';
-import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt } from '../lib/utils.js';
+import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt, sha1Hex, sha256Hex } from '../lib/utils.js';
 import { DEFAULT_CATEGORIES, APP_CATEGORIES, GAME_CATEGORIES, type App, type Category, type Screenshot } from '../lib/types.js';
+import type { Env } from '../lib/env.js';
 
-export const config = { runtime: 'nodejs' };
+const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
-const app = new Hono().basePath('/api');
+// --- Security: CORS is read from the Worker binding for each request. ---
+app.use('*', async (c, next) => {
+  const origin = c.req.header('origin') || '';
+  const allowedOrigins = (c.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const allowed = !!origin && allowedOrigins.includes(origin);
 
-// --- Security: restrict CORS to same origin only ---
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-app.use('*', cors({
-  origin: (origin) => {
-    if (!origin) return '';
-    if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) return origin;
-    // Allow same-origin requests from the Vercel deployment
-    if (origin.endsWith('.vercel.app') || origin === 'https://goldenstore.me' || origin === 'https://www.goldenstore.me') return origin;
-    return '';
-  },
-  credentials: true,
-}));
+  if (allowed) {
+    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Access-Control-Allow-Credentials', 'true');
+    c.header('Vary', 'Origin');
+  }
+  if (c.req.method === 'OPTIONS') {
+    if (allowed) {
+      c.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      c.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Admin-Password');
+      c.header('Access-Control-Max-Age', '600');
+    }
+    return c.body(null, 204);
+  }
+  await next();
+});
 
 // --- Security: rate limiter (in-memory, per IP) ---
 const rateLimits = new Map<string, { count: number; reset: number }>();
+let rateLimitCalls = 0;
 function rateLimit(ip: string, key: string, maxRequests: number, windowSec: number): boolean {
   const k = `${key}:${ip}`;
   const now = Date.now();
+  if (++rateLimitCalls % 256 === 0 || rateLimits.size > 2000) {
+    for (const [staleKey, stale] of rateLimits) {
+      if (now > stale.reset) rateLimits.delete(staleKey);
+    }
+  }
   const entry = rateLimits.get(k);
   if (!entry || now > entry.reset) {
     rateLimits.set(k, { count: 1, reset: now + windowSec * 1000 });
     return true;
   }
   entry.count++;
-  if (entry.count > maxRequests) return false;
-  return true;
+  return entry.count <= maxRequests;
 }
-// Cleanup stale entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of rateLimits) {
-    if (now > v.reset) rateLimits.delete(k);
-  }
-}, 5 * 60 * 1000);
 
 function getClientIp(c: any): string {
-  return c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+  return c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
     c.req.header('x-real-ip') || 'unknown';
 }
 
@@ -119,19 +127,19 @@ async function requireAdmin(c: any, next: any) {
   if (!token && authHeader.toLowerCase().startsWith('bearer ')) {
     token = authHeader.slice(7).trim();
   }
-  const secret = process.env.JWT_SECRET || '';
+  const secret = c.env.JWT_SECRET || '';
   if (!token || !secret) return c.json({ error: 'unauthorized' }, 401);
-  const payload = verifyJwt(token, secret);
+  const payload = await verifyJwt(token, secret);
   if (!payload || payload.role !== 'admin') return c.json({ error: 'unauthorized' }, 401);
   c.set('user', { sub: String(payload.sub) });
   await next();
 }
 
-async function ensureUniqueSlug(base: string): Promise<string> {
+async function ensureUniqueSlug(base: string, env: Env): Promise<string> {
   let slug = base;
   let i = 1;
   while (true) {
-    const db = await firestore();
+    const db = await firestore(env);
     const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
     if (snap.empty) return slug;
     i++;
@@ -182,19 +190,19 @@ function appPublic(doc: any, includeInternalKeys = false): App & { id: string } 
 }
 
 // Public URL for the wide feature graphic (same R2 public bucket as icons).
-function feature_url(feature_key?: string): string | null {
+function feature_url(feature_key: string | undefined, env: Env): string | null {
   if (!feature_key) return null;
   try {
-    return r2PublicUrl(feature_key);
+    return r2PublicUrl(feature_key, env);
   } catch {
     return null;
   }
 }
 
-function icon_url(icon_key?: string): string | null {
+function icon_url(icon_key: string | undefined, env: Env): string | null {
   if (!icon_key) return null;
   try {
-    return r2PublicUrl(icon_key);
+    return r2PublicUrl(icon_key, env);
   } catch {
     return null;
   }
@@ -243,8 +251,9 @@ async function getStoreSettings(db: any): Promise<{ notify_new_publications: boo
 
 // Public URL of the store logo, shown as the notification large icon for
 // announcements (and as a fallback for app-specific notifications).
-const STORE_LOGO_URL =
-  process.env.STORE_LOGO_URL || 'https://goldenstore-new.vercel.app/images/logo.png';
+function storeLogoUrl(env: Env): string {
+  return env.STORE_LOGO_URL || 'https://goldenstore.online/images/logo.png';
+}
 
 // Resolve the real app icon URL for a notification tied to an app, so the
 // pushed notification shows the actual app's logo instead of a generic icon.
@@ -253,14 +262,14 @@ async function resolveNotificationImage(db: any, app_slug: string): Promise<stri
   try {
     const snap = await db.collection('apps').where('slug', '==', app_slug).limit(1).get();
     if (snap.empty) return '';
-    const url = icon_url((snap.docs[0].data() as any).icon_key);
+    const url = icon_url((snap.docs[0].data() as any).icon_key, db.env);
     return url || '';
   } catch {
     return '';
   }
 }
 
-async function addNotification(db: any, data: any) {
+async function addNotification(db: any, data: any, env: Env) {
   const title = sanitizeText(data.title, 200);
   if (!title) throw new Error('notification_title_required');
   const body = sanitizeText(data.body, 1000);
@@ -276,10 +285,8 @@ async function addNotification(db: any, data: any) {
     data: payloadData,
     created_at,
   });
-  // Push to all registered (logged-in) devices. This MUST be awaited: on
-  // serverless (Vercel) the function is frozen/killed once the response is
-  // returned, so a fire-and-forget push would be cut off before it reaches
-  // FCM and notifications would never arrive on closed devices.
+  // Await the push before responding so the Worker invocation stays active
+  // until FCM has accepted the message.
   let push: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   try {
     const image = await resolveNotificationImage(db, app_slug);
@@ -291,7 +298,7 @@ async function addNotification(db: any, data: any) {
       id: ref.id,
       image,
       data: payloadData,
-    });
+    }, env);
   } catch (err: any) {
     console.error('[fcm] push failed:', err?.message || err);
     push.errors.push('exception: ' + (err?.message || String(err)));
@@ -308,12 +315,13 @@ type PushResult = { targeted: number; success: number; failure: number; errors: 
 async function sendPushToTokens(
   tokens: string[],
   n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
+  env: Env,
 ): Promise<PushResult> {
   const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   result.targeted = tokens.length;
   if (tokens.length === 0) return result;
 
-  const msg = await messaging();
+  const msg = await messaging(env);
   // Data payload: when the app is in the FOREGROUND, the Android client
   // receives this in GoldenFirebaseMessagingService and builds the
   // notification natively so it can show the real store/app logo as the
@@ -325,7 +333,7 @@ async function sendPushToTokens(
     app_slug: n.app_slug || '',
     notification_id: n.id,
     image: n.image || '',
-    store_logo: STORE_LOGO_URL,
+    store_logo: storeLogoUrl(env),
   };
   // Include extra payload data (e.g. app update link) as a JSON string.
   if (n.data && typeof n.data === 'object') {
@@ -395,6 +403,7 @@ async function sendPushToTokens(
 async function sendPushToRegistered(
   db: any,
   n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
+  env: Env,
 ): Promise<PushResult> {
   const result: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   let registered = 0;
@@ -407,7 +416,7 @@ async function sendPushToRegistered(
   }
   result.targeted = registered;
 
-  const msg = await messaging();
+  const msg = await messaging(env);
   const dataPayload: Record<string, string> = {
     title: n.title,
     body: n.body || '',
@@ -415,7 +424,7 @@ async function sendPushToRegistered(
     app_slug: n.app_slug || '',
     notification_id: n.id,
     image: n.image || '',
-    store_logo: STORE_LOGO_URL,
+    store_logo: storeLogoUrl(env),
   };
   if (n.data && typeof n.data === 'object') {
     try { dataPayload.extra = JSON.stringify(n.data); } catch {}
@@ -453,8 +462,8 @@ async function sendPushToRegistered(
 
 app.get('/store', (c) => {
   return c.json({
-    name: process.env.STORE_NAME || 'Goldenstore',
-    domain: process.env.STORE_DOMAIN || 'goldenstore.me',
+    name: c.env.STORE_NAME || 'Goldenstore',
+    domain: c.env.STORE_DOMAIN || 'goldenstore.online',
   });
 });
 
@@ -477,7 +486,7 @@ const MAX_PLAUSIBLE_VERSION_CODE = 100000;
 
 app.get('/app-update', async (c) => {
   try {
-    const db = await firestore();
+    const db = await firestore(c.env);
     const doc = await db.collection('app_updates').doc('current').get();
     if (!doc.exists) return c.json({});
     const d = doc.data() || {};
@@ -521,7 +530,7 @@ app.get('/app-update/download', async (c) => {
   if (!rateLimit(ip, 'app-update-download', 30, 60)) {
     return c.json({ error: 'rate_limited' }, 429);
   }
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('app_updates').doc('current');
   const doc = await ref.get();
   if (!doc.exists) return c.json({ error: 'not_found' }, 404);
@@ -555,7 +564,7 @@ app.get('/auth/token', async (c) => {
   }
   try {
     const uid = 'gs_' + randomId();
-    const auth = await getAuthAdmin();
+    const auth = await getAuthAdmin(c.env);
     const token = await auth.createCustomToken(uid);
     return c.json({ token, uid });
   } catch (err: any) {
@@ -566,7 +575,7 @@ app.get('/auth/token', async (c) => {
 
 app.get('/notifications', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') || '30') || 30, 50);
-  const db = await firestore();
+  const db = await firestore(c.env);
   const notifications = await listNotifications(db, limit);
   return c.json({ notifications });
 });
@@ -575,7 +584,7 @@ async function requireFirebaseUser(c: any) {
   const authHeader = c.req.header('authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   if (!token) return null;
-  return verifyFirebaseToken(token);
+  return verifyFirebaseToken(token, c.env);
 }
 
 // Register an FCM device token for the logged-in user. Only authenticated
@@ -588,8 +597,8 @@ app.post('/notifications/register-token', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const token = String(body.token || '').trim();
   if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
-  const db = await firestore();
-  const docId = crypto.createHash('sha256').update(token).digest('hex');
+  const db = await firestore(c.env);
+  const docId = await sha256Hex(token);
   await db.collection('fcm_tokens').doc(docId).set({
     token,
     uid: user.uid,
@@ -604,8 +613,8 @@ app.post('/notifications/unregister-token', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const token = String(body.token || '').trim();
   if (!token) return c.json({ error: 'invalid_token' }, 400);
-  const db = await firestore();
-  const docId = crypto.createHash('sha256').update(token).digest('hex');
+  const db = await firestore(c.env);
+  const docId = await sha256Hex(token);
   await db.collection('fcm_tokens').doc(docId).delete().catch(() => {});
   return c.json({ ok: true });
 });
@@ -615,7 +624,7 @@ app.post('/notifications/unregister-token', async (c) => {
 app.get('/notifications/my-tokens', async (c) => {
   const user = await requireFirebaseUser(c);
   if (!user) return c.json({ error: 'unauthorized' }, 401);
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('fcm_tokens').where('uid', '==', user.uid).get();
   const tokens = snap.docs.map((d: any) => {
     const t = String(d.data()?.token || '');
@@ -638,7 +647,7 @@ app.post('/notifications/self-test', async (c) => {
   if (!rateLimit(`${user.uid}:${ip}`, 'self-test', 6, 600)) {
     return c.json({ error: 'rate_limit_exceeded' }, 429);
   }
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('fcm_tokens').where('uid', '==', user.uid).get();
   const docs: any[] = snap.docs;
   const tokens: string[] = docs
@@ -651,13 +660,13 @@ app.post('/notifications/self-test', async (c) => {
     type: 'announcement',
     app_slug: '',
     id: 'self-test-' + nowSec(),
-  });
+  }, c.env);
   delete push.invalid_tokens;
   return c.json({ ok: true, push });
 });
 
 // ---------------- i18n machine translation (free MT + Firestore cache) ----------------
-const SUPPORTED_TL = new Set(['en', 'fr', 'es', 'de', 'it', 'pt', 'tr']);
+const SUPPORTED_TL = new Set(['en', 'fr', 'es']);
 const memTranslate = new Map<string, string>();
 
 async function mtOne(text: string, target: string): Promise<string> {
@@ -680,14 +689,14 @@ app.post('/translate', async (c) => {
   if (!SUPPORTED_TL.has(target)) return c.json({ t: q });
   if (!q.length) return c.json({ t: [] });
 
-  const db = await firestore().catch(() => null);
+  const db = await firestore(c.env).catch(() => null);
   const out: (string | null)[] = new Array(q.length).fill(null);
   const toFetch: { i: number; text: string; id: string }[] = [];
 
   for (let i = 0; i < q.length; i++) {
     const text = q[i];
     if (!text || text.length > 5000) { out[i] = text; continue; }
-    const id = crypto.createHash('sha1').update(target + '::' + text).digest('hex');
+    const id = await sha1Hex(target + '::' + text);
     const mem = memTranslate.get(id);
     if (mem != null) { out[i] = mem; continue; }
     toFetch.push({ i, text, id });
@@ -729,7 +738,7 @@ app.get('/categories', async (c) => {
   // type=app → app categories only, type=game → game categories only,
   // anything else → the combined list (legacy compatibility).
   const type = (c.req.query('type') || '').trim();
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').select('category').get();
   const counts: Record<string, number> = {};
   snap.forEach((d: any) => {
@@ -758,7 +767,7 @@ app.get('/apps', async (c) => {
   const gameOnly = type === 'game';
   const excludeGames = type === 'app';
 
-  const db = await firestore();
+  const db = await firestore(c.env);
 
   const sortDocs = (docs: any[]) => {
     if (sort === 'popular') docs.sort((a: any, b: any) =>
@@ -786,7 +795,7 @@ app.get('/apps', async (c) => {
     docs = docs.slice(offset, offset + limit);
     const apps = docs.map((d: any) => {
       const a = appPublic(d);
-      return { ...a, icon_url: icon_url((d.data() as App).icon_key), feature_url: feature_url((d.data() as App).feature_key) };
+      return { ...a, icon_url: icon_url((d.data() as App).icon_key, c.env), feature_url: feature_url((d.data() as App).feature_key, c.env) };
     });
     return c.json({ apps, total });
   }
@@ -832,14 +841,14 @@ app.get('/apps', async (c) => {
   }
   const apps = snap.docs.map((d: any) => {
     const a = appPublic(d);
-    return { ...a, icon_url: icon_url((d.data() as App).icon_key), feature_url: feature_url((d.data() as App).feature_key) };
+    return { ...a, icon_url: icon_url((d.data() as App).icon_key, c.env), feature_url: feature_url((d.data() as App).feature_key, c.env) };
   });
   return c.json({ apps, total });
 });
 
 app.get('/apps/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
@@ -853,10 +862,10 @@ app.get('/apps/:slug', async (c) => {
     .get();
   const screenshots = ssSnap.docs.map((s: any) => {
     const sd = s.data() as Screenshot;
-    return { id: s.id, position: sd.position, url: icon_url(sd.r2_key) };
+    return { id: s.id, position: sd.position, url: icon_url(sd.r2_key, c.env) };
   });
   return c.json({
-    app: { ...ap, icon_url: icon_url(rawData.icon_key), feature_url: feature_url(rawData.feature_key) },
+    app: { ...ap, icon_url: icon_url(rawData.icon_key, c.env), feature_url: feature_url(rawData.feature_key, c.env) },
     screenshots,
   });
 });
@@ -867,7 +876,7 @@ app.get('/apps/:slug/download', async (c) => {
   if (!rateLimit(ip, 'download', 30, 60)) {
     return c.json({ error: 'rate_limit_exceeded' }, 429);
   }
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
@@ -882,7 +891,7 @@ app.get('/apps/:slug/download', async (c) => {
 
   const filename = `${a.slug || 'app'}-${a.version_name || ''}.apk`.replace(/-+/g, '-');
   const disposition = `attachment; filename="${filename}"`;
-  const url = await r2PresignGet(a.apk_key, 300, disposition);
+  const url = await r2PresignGet(c.env, a.apk_key, 300, disposition);
 
   // Same-origin streaming mode: proxy the bytes through this function so the
   // browser can read a real Content-Length and report genuine download progress.
@@ -915,11 +924,8 @@ function serverFingerprint(c: any): string {
   return `${ip}||${ua}||${lang}`;
 }
 
-function computeVoteHash(clientFp: string, serverFp: string): string {
-  return crypto
-    .createHash('sha256')
-    .update(`${clientFp}::${serverFp}`)
-    .digest('hex');
+function computeVoteHash(clientFp: string, serverFp: string): Promise<string> {
+  return sha256Hex(`${clientFp}::${serverFp}`);
 }
 
 app.post('/apps/:slug/star', async (c) => {
@@ -945,15 +951,15 @@ app.post('/apps/:slug/star', async (c) => {
   let photo_url = sanitizeUrl(body.photo_url);
   if (!photo_url.startsWith('https://')) photo_url = '';
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
 
   const sFp = serverFingerprint(c);
-  const voteHash = computeVoteHash(clientFp, sFp);
+  const voteHash = await computeVoteHash(clientFp, sFp);
   // Also store a server-only hash to prevent same IP+UA from voting with different client FPs
-  const serverOnlyHash = crypto.createHash('sha256').update(sFp).digest('hex');
+  const serverOnlyHash = await sha256Hex(sFp);
 
   // Check for duplicate votes before writing.
   const votesRef = doc.ref.collection('star_votes');
@@ -1016,7 +1022,7 @@ app.post('/apps/:slug/star-check', async (c) => {
     return c.json({ voted: false });
   }
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
@@ -1041,8 +1047,8 @@ app.post('/apps/:slug/star-check', async (c) => {
   }
 
   const sFp = serverFingerprint(c);
-  const voteHash = computeVoteHash(clientFp, sFp);
-  const serverOnlyHash = crypto.createHash('sha256').update(sFp).digest('hex');
+  const voteHash = await computeVoteHash(clientFp, sFp);
+  const serverOnlyHash = await sha256Hex(sFp);
   const existingByHash = await doc.ref.collection('star_votes').where('hash', '==', voteHash).limit(1).get();
   if (!existingByHash.empty) return mine(existingByHash.docs[0].data());
   const existingByServer = await doc.ref.collection('star_votes').where('server_hash', '==', serverOnlyHash).limit(1).get();
@@ -1054,7 +1060,7 @@ app.post('/apps/:slug/star-check', async (c) => {
 app.get('/apps/:slug/reviews', async (c) => {
   const slug = c.req.param('slug');
   const limit = Math.min(Number(c.req.query('limit') || '50') || 50, 100);
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
@@ -1103,7 +1109,7 @@ app.post('/apps/:slug/request-update', async (c) => {
   const source = sanitizeUrl(body.source) || sanitizeText(body.source, 500);
   if (!newVersion) return c.json({ error: 'new_version_required' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const a = snap.docs[0].data() as App;
@@ -1133,7 +1139,7 @@ app.post('/apps/:slug/report', async (c) => {
   const details = sanitizeText(body.details, 2000);
   if (!reason) return c.json({ error: 'reason_required' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').where('slug', '==', slug).limit(1).get();
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const a = snap.docs[0].data() as App;
@@ -1153,7 +1159,7 @@ app.post('/apps/:slug/report', async (c) => {
 // ---------------- auth ----------------
 
 function isSecureRequest(c: any): boolean {
-  // Trust Vercel/CDN forwarded headers; fall back to URL scheme.
+  // Trust the edge proxy's forwarded protocol; fall back to the URL scheme.
   const proto = c.req.header('x-forwarded-proto');
   if (proto) return proto.split(',')[0].trim() === 'https';
   try {
@@ -1171,11 +1177,11 @@ app.post('/login', async (c) => {
   }
 
   const body = await c.req.json().catch(() => ({} as any));
-  const adminUser = process.env.ADMIN_USERNAME || 'admin';
+  const adminUser = c.env.ADMIN_USERNAME || 'admin';
   const username = String(body.username ?? adminUser);
   const password = String(body.password ?? '');
-  const adminPass = process.env.ADMIN_PASSWORD || '';
-  const secret = process.env.JWT_SECRET || '';
+  const adminPass = c.env.ADMIN_PASSWORD || '';
+  const secret = c.env.JWT_SECRET || '';
   if (!adminPass || !secret) return c.json({ error: 'server_not_configured' }, 500);
 
   const userOk = constantTimeEqual(username, adminUser);
@@ -1185,7 +1191,7 @@ app.post('/login', async (c) => {
     return c.json({ error: 'invalid_credentials' }, 401);
   }
 
-  const token = signJwt({ sub: adminUser, role: 'admin' }, secret);
+  const token = await signJwt({ sub: adminUser, role: 'admin' }, secret);
   setCookie(c, COOKIE_NAME, token, {
     httpOnly: true,
     secure: isSecureRequest(c),
@@ -1207,13 +1213,35 @@ app.post('/logout', (c) => {
   return c.json({ ok: true });
 });
 
-app.get('/me', (c) => {
+app.get('/me', async (c) => {
   const token = getCookie(c, COOKIE_NAME);
-  const secret = process.env.JWT_SECRET || '';
+  const secret = c.env.JWT_SECRET || '';
   if (!token || !secret) return c.json({ authenticated: false });
-  const payload = verifyJwt(token, secret);
+  const payload = await verifyJwt(token, secret);
   if (!payload) return c.json({ authenticated: false });
   return c.json({ authenticated: true, user: { username: payload.sub, role: payload.role } });
+});
+
+// Configure direct browser uploads for the existing R2 bucket. This one-time
+// setup endpoint remains compatible with the former /api/setup-r2-cors path.
+app.post('/setup-r2-cors', async (c) => {
+  const expectedPassword = c.env.ADMIN_PASSWORD || '';
+  const suppliedPassword = c.req.header('x-admin-password') || '';
+  if (!expectedPassword) return c.json({ error: 'server_not_configured' }, 500);
+  if (!constantTimeEqual(suppliedPassword, expectedPassword)) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  const origins = (c.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  try {
+    await r2ConfigureCors(c.env, origins);
+    return c.json({ ok: true, message: 'CORS configured for R2 bucket' });
+  } catch (error: any) {
+    console.error('[setup-r2-cors] failed:', error?.message || error);
+    return c.json({ error: 'r2_cors_configuration_failed' }, 500);
+  }
 });
 
 // ---------------- admin ----------------
@@ -1221,7 +1249,7 @@ app.get('/me', (c) => {
 app.use('/admin/*', requireAdmin);
 
 app.get('/admin/settings', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   return c.json({ settings: await getStoreSettings(db) });
 });
 
@@ -1230,7 +1258,7 @@ app.patch('/admin/settings', async (c) => {
   if (typeof body.notify_new_publications !== 'boolean') {
     return c.json({ error: 'notify_new_publications_must_be_boolean' }, 400);
   }
-  const db = await firestore();
+  const db = await firestore(c.env);
   const settings = {
     notify_new_publications: body.notify_new_publications,
     updated_at: nowSec(),
@@ -1240,7 +1268,7 @@ app.patch('/admin/settings', async (c) => {
 });
 
 app.get('/admin/stats', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').get();
   let totalDownloads = 0;
   let totalSize = 0;
@@ -1254,7 +1282,7 @@ app.get('/admin/stats', async (c) => {
       slug: a.slug,
       name: a.name,
       downloads: a.downloads || 0,
-      icon_url: icon_url(a.icon_key),
+      icon_url: icon_url(a.icon_key, c.env),
     });
   });
   apps.sort((a, b) => b.downloads - a.downloads);
@@ -1267,11 +1295,11 @@ app.get('/admin/stats', async (c) => {
 });
 
 app.get('/admin/apps', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').orderBy('created_at', 'desc').get();
   const apps = snap.docs.map((d: any) => {
     const a = appPublic(d, true);
-    return { ...a, icon_url: icon_url(a.icon_key), feature_url: feature_url((a as any).feature_key) };
+    return { ...a, icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url((a as any).feature_key, c.env) };
   });
   return c.json({ apps });
 });
@@ -1279,7 +1307,7 @@ app.get('/admin/apps', async (c) => {
 // One-time backfill: legacy docs created before the app/game split have no
 // `type` field, so type-filtered queries skip them. Set them all to 'app'.
 app.post('/admin/migrate-types', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   const snap = await db.collection('apps').get();
   let updated = 0;
   let batch = db.batch();
@@ -1298,7 +1326,7 @@ app.post('/admin/migrate-types', async (c) => {
 
 // List update-requests / reports submitted by users.
 app.get('/admin/requests', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   let docs: any[];
   try {
     const snap = await db.collection('app_requests').orderBy('ts', 'desc').limit(200).get();
@@ -1312,14 +1340,14 @@ app.get('/admin/requests', async (c) => {
 });
 
 app.get('/admin/notifications', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   const notifications = await listNotifications(db);
   return c.json({ notifications });
 });
 
 app.post('/admin/notifications', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
-  const db = await firestore();
+  const db = await firestore(c.env);
   const title = sanitizeText(body.title, 200);
   const text = sanitizeText(body.body, 1000);
   if (!title) return c.json({ error: 'title_required' }, 400);
@@ -1329,7 +1357,7 @@ app.post('/admin/notifications', async (c) => {
     body: text,
     type: 'announcement',
     created_at: nowSec(),
-  });
+  }, c.env);
   // `push` reports how many devices were targeted / succeeded so the dashboard
   // can tell whether the notification actually went out over FCM.
   return c.json({ ok: true, id: ref.id, push });
@@ -1351,15 +1379,15 @@ app.post('/admin/app-update', async (c) => {
 
   if (apk_key) {
     if (!isValidR2Key(apk_key, 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
-    const head = await r2Head(apk_key);
+    const head = await r2Head(c.env, apk_key);
     if (!head) return c.json({ error: 'apk_not_found_in_r2' }, 400);
-    apk_url = r2PublicUrl(apk_key);
+    apk_url = r2PublicUrl(apk_key, c.env);
     size_bytes = head.size || 0;
   }
 
   if (!apk_url) return c.json({ error: 'apk_url_required' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const updateDoc: any = {
     version_name: version_name || '',
     version_code,
@@ -1391,7 +1419,7 @@ app.post('/admin/app-update', async (c) => {
           force: updateDoc.force,
         },
         created_at: updateDoc.created_at,
-      });
+      }, c.env);
       push = p;
     } catch (err: any) {
       console.error('[admin/app-update] notification failed:', err?.message || err);
@@ -1405,7 +1433,7 @@ app.post('/admin/app-update', async (c) => {
 // registration info (when it last registered, platform, masked uid/token) so
 // the dashboard can tell whether a test device actually registered.
 app.get('/admin/push/status', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   let count = 0;
   const platforms: Record<string, number> = {};
   const tokens: any[] = [];
@@ -1434,13 +1462,13 @@ app.get('/admin/push/status', async (c) => {
 // Diagnostics: send a test push right now and return the detailed FCM result
 // (targeted / success / failure / error codes) without saving a notification.
 app.post('/admin/push/test', async (c) => {
-  const db = await firestore();
+  const db = await firestore(c.env);
   const body = await c.req.json().catch(() => ({} as any));
   const title = sanitizeText(body.title, 200) || 'اختبار الإشعارات';
   const text = sanitizeText(body.body, 1000) || 'هذا إشعار تجريبي من لوحة التحكم';
   let push: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   try {
-    push = await sendPushToRegistered(db, { title, body: text, type: 'announcement', app_slug: '', id: 'test-' + nowSec() });
+    push = await sendPushToRegistered(db, { title, body: text, type: 'announcement', app_slug: '', id: 'test-' + nowSec() }, c.env);
   } catch (err: any) {
     return c.json({ ok: false, error: 'send_failed', message: err?.message || String(err) }, 500);
   }
@@ -1449,7 +1477,7 @@ app.post('/admin/push/test', async (c) => {
 
 app.delete('/admin/notifications/:id', async (c) => {
   const id = c.req.param('id');
-  const db = await firestore();
+  const db = await firestore(c.env);
   await db.collection('notifications').doc(id).delete().catch(() => {});
   return c.json({ ok: true });
 });
@@ -1457,23 +1485,23 @@ app.delete('/admin/notifications/:id', async (c) => {
 // Delete (dismiss/resolve) a request.
 app.delete('/admin/requests/:id', async (c) => {
   const id = c.req.param('id');
-  const db = await firestore();
+  const db = await firestore(c.env);
   await db.collection('app_requests').doc(id).delete().catch(() => {});
   return c.json({ ok: true });
 });
 
 app.get('/admin/apps/:id', async (c) => {
   const id = c.req.param('id');
-  const db = await firestore();
+  const db = await firestore(c.env);
   const doc = await db.collection('apps').doc(id).get();
   if (!doc.exists) return c.json({ error: 'not_found' }, 404);
   const a = appPublic(doc, true);
   const ssSnap = await doc.ref.collection('screenshots').orderBy('position', 'asc').get();
   const screenshots = ssSnap.docs.map((s: any) => {
     const sd = s.data() as Screenshot;
-    return { id: s.id, position: sd.position, r2_key: sd.r2_key, url: icon_url(sd.r2_key) };
+    return { id: s.id, position: sd.position, r2_key: sd.r2_key, url: icon_url(sd.r2_key, c.env) };
   });
-  return c.json({ app: { ...a, icon_url: icon_url(a.icon_key), feature_url: feature_url((a as any).feature_key) }, screenshots });
+  return c.json({ app: { ...a, icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url((a as any).feature_key, c.env) }, screenshots });
 });
 
 // Step 1: client requests a presigned upload URL for R2
@@ -1503,7 +1531,7 @@ app.post('/admin/upload-url', async (c) => {
   const rand = randomId().slice(0, 6);
   const folder = kind === 'apk' ? 'apk' : kind === 'icon' ? 'icon' : kind === 'feature' ? 'feature' : 'ss';
   const key = `${folder}/${slugHint}-${ts}-${rand}.${ext}`;
-  const url = await r2PresignPut(key, contentType, 7200);
+  const url = await r2PresignPut(c.env, key, contentType, 7200);
   return c.json({ url, key });
 });
 
@@ -1540,13 +1568,13 @@ app.post('/admin/multipart/create', async (c) => {
   const folder = kind === 'apk' ? 'apk' : kind === 'icon' ? 'icon' : kind === 'feature' ? 'feature' : 'ss';
   const key = `${folder}/${slugHint}-${ts}-${rand}.${ext}`;
 
-  const uploadId = await r2CreateMultipartUpload(key, contentType);
+  const uploadId = await r2CreateMultipartUpload(c.env, key, contentType);
 
   const PART_SIZE = 10 * 1024 * 1024; // 10 MB per part
   const partCount = Math.ceil(fileSize / PART_SIZE);
   const parts: { partNumber: number; url: string }[] = [];
   for (let i = 1; i <= partCount; i++) {
-    const url = await r2PresignUploadPart(key, uploadId, i, 3600);
+    const url = await r2PresignUploadPart(c.env, key, uploadId, i, 3600);
     parts.push({ partNumber: i, url });
   }
 
@@ -1564,7 +1592,7 @@ app.post('/admin/multipart/complete', async (c) => {
     return c.json({ error: 'missing_fields' }, 400);
   }
 
-  await r2CompleteMultipartUpload(key, uploadId, parts);
+  await r2CompleteMultipartUpload(c.env, key, uploadId, parts);
   return c.json({ ok: true, key });
 });
 
@@ -1574,7 +1602,7 @@ app.post('/admin/multipart/abort', async (c) => {
   const key = String(body.key || '');
   const uploadId = String(body.uploadId || '');
   if (key && uploadId) {
-    await r2AbortMultipartUpload(key, uploadId);
+    await r2AbortMultipartUpload(c.env, key, uploadId);
   }
   return c.json({ ok: true });
 });
@@ -1608,11 +1636,11 @@ app.post('/admin/apps', async (c) => {
   }
 
   // Verify the file exists in R2 to get size
-  const head = await r2Head(apk_key);
+  const head = await r2Head(c.env, apk_key);
   if (!head) return c.json({ error: 'apk_not_found_in_r2' }, 400);
 
   const base = slugify(name);
-  const slug = await ensureUniqueSlug(base);
+  const slug = await ensureUniqueSlug(base, c.env);
   const now = nowSec();
 
   const docData: App = {
@@ -1642,8 +1670,8 @@ app.post('/admin/apps', async (c) => {
     updated_at: now,
   };
 
-  const db = await firestore();
-  const ref = await db.collection('apps').add(docData);
+  const db = await firestore(c.env);
+  const ref = await db.collection('apps').add(docData as unknown as Record<string, unknown>);
 
   try {
     const settings = await getStoreSettings(db);
@@ -1654,7 +1682,7 @@ app.post('/admin/apps', async (c) => {
         body: '',
         app_slug: slug,
         created_at: now,
-      });
+      }, c.env);
     }
   } catch (err: any) {
     // A settings-read failure should not block publishing an app. Fail closed
@@ -1672,7 +1700,7 @@ app.post('/admin/apps', async (c) => {
       r2_key,
       position: i,
       created_at: now,
-    } as Screenshot);
+    } as unknown as Record<string, unknown>);
   }
 
   return c.json({ ok: true, id: ref.id, slug });
@@ -1681,7 +1709,7 @@ app.post('/admin/apps', async (c) => {
 app.patch('/admin/apps/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({} as any));
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('apps').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
@@ -1733,7 +1761,7 @@ app.patch('/admin/apps/:id', async (c) => {
         body: `إصدار جديد ${merged.version_name || ''}`.trim(),
         app_slug: merged.slug,
         created_at: nowSec(),
-      });
+      }, c.env);
     } catch {}
   }
   return c.json({ ok: true });
@@ -1746,10 +1774,10 @@ app.post('/admin/apps/:id/apk', async (c) => {
   const newKey = String(body.apk_key || '');
   if (!newKey) return c.json({ error: 'apk_key_required' }, 400);
   if (!isValidR2Key(newKey, 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
-  const head = await r2Head(newKey);
+  const head = await r2Head(c.env, newKey);
   if (!head) return c.json({ error: 'apk_not_found' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('apps').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
@@ -1764,7 +1792,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
   });
 
   if (old.apk_key && old.apk_key !== newKey) {
-    await r2Delete(old.apk_key).catch(() => {});
+    await r2Delete(c.env, old.apk_key).catch(() => {});
   }
 
   // Replacing the APK is an update — notify users (store + FCM push).
@@ -1776,7 +1804,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
       body: `إصدار جديد ${newVersion}`.trim(),
       app_slug: old.slug,
       created_at: nowSec(),
-    });
+    }, c.env);
   } catch {}
 
   return c.json({ ok: true });
@@ -1790,7 +1818,7 @@ app.post('/admin/apps/:id/icon', async (c) => {
   if (!newKey) return c.json({ error: 'icon_key_required' }, 400);
   if (!isValidR2Key(newKey, 'icon')) return c.json({ error: 'invalid_icon_key' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('apps').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
@@ -1799,7 +1827,7 @@ app.post('/admin/apps/:id/icon', async (c) => {
   await ref.update({ icon_key: newKey, updated_at: nowSec() });
 
   if (old.icon_key && old.icon_key !== newKey) {
-    await r2Delete(old.icon_key).catch(() => {});
+    await r2Delete(c.env, old.icon_key).catch(() => {});
   }
   return c.json({ ok: true });
 });
@@ -1812,7 +1840,7 @@ app.post('/admin/apps/:id/feature', async (c) => {
   if (!newKey) return c.json({ error: 'feature_key_required' }, 400);
   if (!isValidR2Key(newKey, 'feature')) return c.json({ error: 'invalid_feature_key' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('apps').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
@@ -1821,7 +1849,7 @@ app.post('/admin/apps/:id/feature', async (c) => {
   await ref.update({ feature_key: newKey, updated_at: nowSec() });
 
   if (old.feature_key && old.feature_key !== newKey) {
-    await r2Delete(old.feature_key).catch(() => {});
+    await r2Delete(c.env, old.feature_key).catch(() => {});
   }
   return c.json({ ok: true });
 });
@@ -1833,7 +1861,7 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
   const keys: string[] = Array.isArray(body.screenshot_keys) ? body.screenshot_keys.slice(0, 20) : [];
   if (keys.length === 0) return c.json({ error: 'no_screenshots' }, 400);
 
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('apps').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
@@ -1858,20 +1886,20 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
 app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {
   const id = c.req.param('id');
   const sid = c.req.param('sid');
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ssRef = db.collection('apps').doc(id).collection('screenshots').doc(sid);
   const snap = await ssRef.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
   const ss = snap.data() as Screenshot;
   await ssRef.delete();
-  if (ss.r2_key) await r2Delete(ss.r2_key).catch(() => {});
+  if (ss.r2_key) await r2Delete(c.env, ss.r2_key).catch(() => {});
   return c.json({ ok: true });
 });
 
 // Delete app
 app.delete('/admin/apps/:id', async (c) => {
   const id = c.req.param('id');
-  const db = await firestore();
+  const db = await firestore(c.env);
   const ref = db.collection('apps').doc(id);
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
@@ -1881,12 +1909,12 @@ app.delete('/admin/apps/:id', async (c) => {
   const ssSnap = await ref.collection('screenshots').get();
   for (const s of ssSnap.docs) {
     const sd = s.data() as Screenshot;
-    if (sd.r2_key) await r2Delete(sd.r2_key).catch(() => {});
+    if (sd.r2_key) await r2Delete(c.env, sd.r2_key).catch(() => {});
     await s.ref.delete();
   }
-  if (a.apk_key) await r2Delete(a.apk_key).catch(() => {});
-  if (a.icon_key) await r2Delete(a.icon_key).catch(() => {});
-  if (a.feature_key) await r2Delete(a.feature_key).catch(() => {});
+  if (a.apk_key) await r2Delete(c.env, a.apk_key).catch(() => {});
+  if (a.icon_key) await r2Delete(c.env, a.icon_key).catch(() => {});
+  if (a.feature_key) await r2Delete(c.env, a.feature_key).catch(() => {});
   await ref.delete();
   return c.json({ ok: true });
 });
@@ -1898,4 +1926,4 @@ app.onError((err, c) => {
   return c.json({ error: 'internal_error' }, 500);
 });
 
-export default getRequestListener(app.fetch);
+export default app;

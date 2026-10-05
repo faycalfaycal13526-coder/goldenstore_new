@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM"],
-    "types": ["node"],
+    "types": ["@cloudflare/workers-types"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,6 +14,6 @@
     "noEmit": true,
     "allowImportingTsExtensions": false
   },
-  "include": ["api/**/*.ts", "lib/**/*.ts"],
+  "include": ["api/**/*.ts", "functions/**/*.ts", "lib/**/*.ts"],
   "exclude": ["node_modules", "public", ".vercel"]
 }

@@ -6,38 +6,119 @@
     "cleanUrls": true,
     "trailingSlash": false,
     "rewrites": [
-        { "source": "/admin", "destination": "/gs-admin-c0d982f8.html" },
-        { "source": "/login", "destination": "/login.html" },
-        { "source": "/app", "destination": "/app.html" },
-        { "source": "/search", "destination": "/search.html" },
-        { "source": "/featured", "destination": "/featured.html" },
-        { "source": "/account", "destination": "/account.html" },
-        { "source": "/books", "destination": "/books.html" },
-        { "source": "/games", "destination": "/games.html" },
-        { "source": "/more", "destination": "/more.html" },
-        { "source": "/gs-admin-c0d982f8", "destination": "/gs-admin-c0d982f8.html" },
-        { "source": "/api/:path*", "destination": "/api/[...path]" },
-        { "source": "/points", "destination": "/index.html" }
+        {
+            "source": "/admin",
+            "destination": "/gs-admin-c0d982f8.html"
+        },
+        {
+            "source": "/login",
+            "destination": "/login.html"
+        },
+        {
+            "source": "/app",
+            "destination": "/app.html"
+        },
+        {
+            "source": "/search",
+            "destination": "/search.html"
+        },
+        {
+            "source": "/featured",
+            "destination": "/featured.html"
+        },
+        {
+            "source": "/account",
+            "destination": "/account.html"
+        },
+        {
+            "source": "/books",
+            "destination": "/books.html"
+        },
+        {
+            "source": "/games",
+            "destination": "/games.html"
+        },
+        {
+            "source": "/more",
+            "destination": "/more.html"
+        },
+        {
+            "source": "/gs-admin-c0d982f8",
+            "destination": "/gs-admin-c0d982f8.html"
+        },
+        {
+            "source": "/api/:path*",
+            "destination": "https://api.goldenstore.online/api/:path*"
+        },
+        {
+            "source": "/points",
+            "destination": "/index.html"
+        }
     ],
     "headers": [
         {
             "source": "/(.*)",
             "headers": [
-                { "key": "X-Content-Type-Options", "value": "nosniff" },
-                { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
-                { "key": "X-XSS-Protection", "value": "1; mode=block" },
-                { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-                { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
-                { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
-                { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" },
-                { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data:; connect-src 'self' https:; font-src 'self' https:; frame-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }
+                {
+                    "key": "X-Content-Type-Options",
+                    "value": "nosniff"
+                },
+                {
+                    "key": "X-Frame-Options",
+                    "value": "SAMEORIGIN"
+                },
+                {
+                    "key": "X-XSS-Protection",
+                    "value": "1; mode=block"
+                },
+                {
+                    "key": "Referrer-Policy",
+                    "value": "strict-origin-when-cross-origin"
+                },
+                {
+                    "key": "Permissions-Policy",
+                    "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+                },
+                {
+                    "key": "Strict-Transport-Security",
+                    "value": "max-age=63072000; includeSubDomains; preload"
+                },
+                {
+                    "key": "Cross-Origin-Opener-Policy",
+                    "value": "same-origin-allow-popups"
+                },
+                {
+                    "key": "Content-Security-Policy",
+                    "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data:; connect-src 'self' https:; font-src 'self' https:; frame-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+                }
             ]
         },
-        { "source": "/css/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }] },
-        { "source": "/js/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }] },
-        { "source": "/images/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
-    ],
-    "functions": {
-        "api/[...path].ts": { "maxDuration": 30 }
-    }
+        {
+            "source": "/css/(.*)",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=0, must-revalidate"
+                }
+            ]
+        },
+        {
+            "source": "/js/(.*)",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=0, must-revalidate"
+                }
+            ]
+        },
+        {
+            "source": "/images/(.*)",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=31536000, immutable"
+                }
+            ]
+        }
+    ]
 }

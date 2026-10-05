@@ -84,7 +84,6 @@ app.use('*', async (c, next) => {
   c.header('X-XSS-Protection', '1; mode=block');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
-  c.header('Cache-Control', 'no-store');
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
 });
 
@@ -119,9 +118,6 @@ app.use('/apps/:slug', async (c, next) => {
 // ---------------- helpers ----------------
 
 async function requireAdmin(c: any, next: any) {
-  // Cookie session first; fall back to a Bearer JWT in the Authorization
-  // header. Some WebView flows drop cookies on XHR redirects, which used to
-  // cause random 401s mid-upload.
   let token = getCookie(c, COOKIE_NAME);
   const authHeader = c.req.header('authorization') || '';
   if (!token && authHeader.toLowerCase().startsWith('bearer ')) {
@@ -189,7 +185,6 @@ function appPublic(doc: any, includeInternalKeys = false): App & { id: string } 
   return result;
 }
 
-// Public URL for the wide feature graphic (same R2 public bucket as icons).
 function feature_url(feature_key: string | undefined, env: Env): string | null {
   if (!feature_key) return null;
   try {
@@ -241,22 +236,16 @@ async function listNotifications(db: any, limit?: number) {
   return docs.map((d: any) => notificationPublic(d));
 }
 
-// New app/game publication notifications stay enabled until the owner opts out,
-// preserving the existing behaviour for stores that have not saved settings.
 async function getStoreSettings(db: any): Promise<{ notify_new_publications: boolean }> {
   const snap = await db.collection('store_settings').doc('general').get();
   const data = snap.exists ? (snap.data() || {}) : {};
   return { notify_new_publications: data.notify_new_publications !== false };
 }
 
-// Public URL of the store logo, shown as the notification large icon for
-// announcements (and as a fallback for app-specific notifications).
 function storeLogoUrl(env: Env): string {
   return env.STORE_LOGO_URL || 'https://goldenstore.online/images/logo.png';
 }
 
-// Resolve the real app icon URL for a notification tied to an app, so the
-// pushed notification shows the actual app's logo instead of a generic icon.
 async function resolveNotificationImage(db: any, app_slug: string): Promise<string> {
   if (!app_slug) return '';
   try {
@@ -285,8 +274,6 @@ async function addNotification(db: any, data: any, env: Env) {
     data: payloadData,
     created_at,
   });
-  // Await the push before responding so the Worker invocation stays active
-  // until FCM has accepted the message.
   let push: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
   try {
     const image = await resolveNotificationImage(db, app_slug);
@@ -306,12 +293,8 @@ async function addNotification(db: any, data: any, env: Env) {
   return { ref, push };
 }
 
-// Send an FCM push to every registered device token. Only logged-in users
-// register tokens (see /notifications/register-token), so this targets
-// registered users only. Invalid/expired tokens are pruned from Firestore.
 type PushResult = { targeted: number; success: number; failure: number; errors: string[]; invalid_tokens?: string[] };
 
-// Send an FCM push (dual payload) to an explicit list of device tokens.
 async function sendPushToTokens(
   tokens: string[],
   n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
@@ -322,10 +305,6 @@ async function sendPushToTokens(
   if (tokens.length === 0) return result;
 
   const msg = await messaging(env);
-  // Data payload: when the app is in the FOREGROUND, the Android client
-  // receives this in GoldenFirebaseMessagingService and builds the
-  // notification natively so it can show the real store/app logo as the
-  // large icon and a per-type label ("تطبيق جديد" / "تحديث" / "إشعار").
   const dataPayload: Record<string, string> = {
     title: n.title,
     body: n.body || '',
@@ -335,16 +314,9 @@ async function sendPushToTokens(
     image: n.image || '',
     store_logo: storeLogoUrl(env),
   };
-  // Include extra payload data (e.g. app update link) as a JSON string.
   if (n.data && typeof n.data === 'object') {
     try { dataPayload.extra = JSON.stringify(n.data); } catch {}
   }
-  // Dual payload (notification + data): the system tray renders the
-  // `notification` block itself when the app is backgrounded/killed (works
-  // even on aggressive OEMs where background services never run), while the
-  // `data` block reaches GoldenFirebaseMessagingService in the foreground for
-  // the rich rendering (store/app logo as the large icon). This is the only
-  // fully reliable combination for user-visible announcements.
   const invalidTokens: string[] = [];
   for (let i = 0; i < tokens.length; i += 500) {
     const batch = tokens.slice(i, i + 500);
@@ -387,19 +359,10 @@ async function sendPushToTokens(
       }
     });
   }
-  // Dead-token pruning is handled by the caller (it owns the Firestore docs).
   result.invalid_tokens = invalidTokens;
   return result;
 }
 
-// Send an FCM push to every registered device token. Only logged-in users
-// register tokens (see /notifications/register-token), so this targets
-// registered users only. Invalid/expired tokens are pruned from Firestore.
-// DELIVERY: broadcasts go to the 'all' FCM topic — every app (v1.14+)
-// subscribes to it automatically on startup, so delivery no longer depends
-// on per-device token registration (stale tokens after reinstalls were the
-// main reason pushes silently never arrived). Token sends remain only for
-// the user-targeted self-test.
 async function sendPushToRegistered(
   db: any,
   n: { title: string; body: string; type: string; app_slug: string; id: string; image?: string; data?: any },
@@ -430,10 +393,6 @@ async function sendPushToRegistered(
     try { dataPayload.extra = JSON.stringify(n.data); } catch {}
   }
   try {
-    // Dual payload to the topic: the system tray renders the `notification`
-    // block itself when the app is backgrounded/killed (and on aggressive
-    // OEMs), while the `data` block reaches GoldenFirebaseMessagingService in
-    // the foreground for the rich rendering (store/app logo as large icon).
     await msg.send({
       topic: 'all',
       data: dataPayload,
@@ -461,20 +420,13 @@ async function sendPushToRegistered(
 // ---------------- public ----------------
 
 app.get('/store', (c) => {
+  c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   return c.json({
     name: c.env.STORE_NAME || 'Goldenstore',
     domain: c.env.STORE_DOMAIN || 'goldenstore.online',
   });
 });
 
-// Latest published app update (used by the download landing page and the Android app).
-//
-// Sanity guard: old/bogus records (e.g. version_code 999999999 pointing at a
-// stale February APK) used to trigger a fake "3.0.0" update dialog in every
-// app version that lacks the client-side cap. Real version codes are small,
-// so anything absurd — or a record with no working APK link — is replaced by
-// the actual current release below. Publishing a normal record from the
-// admin panel (version_code <= 100000) always passes through unchanged.
 const CURRENT_RELEASE = {
   version_name: '1.17',
   version_code: 18,
@@ -513,8 +465,8 @@ app.get('/app-update', async (c) => {
       created_at: Number(d.created_at || 0),
       downloads: safeInt(d.downloads, 0, Number.MAX_SAFE_INTEGER),
     };
-    // Native update-check.js expects { update: {...} }
     out.update = { ...out };
+    c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
     return c.json(out);
   } catch (err: any) {
     console.error('[app-update] get failed:', err?.message || err);
@@ -522,9 +474,6 @@ app.get('/app-update', async (c) => {
   }
 });
 
-// Count downloads of the store's own Android APK, then redirect to the actual
-// release URL. The counter is rate-limited per IP to reduce accidental refresh
-// inflation while keeping the download itself available on every request.
 app.get('/app-update/download', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'app-update-download', 30, 60)) {
@@ -546,7 +495,6 @@ app.get('/app-update/download', async (c) => {
       const FV = await getFieldValue();
       await ref.set({ downloads: FV.increment(1) }, { merge: true });
     } catch (err: any) {
-      // A metrics write must never prevent the user from receiving the APK.
       console.error('[app-update/download] counter update failed:', err?.message || err);
     }
   }
@@ -554,9 +502,6 @@ app.get('/app-update/download', async (c) => {
   return c.redirect(apkUrl, 302);
 });
 
-// Issue a Firebase custom auth token for an anonymous guest session.
-// This lets the Android app work without requiring a SHA-1 fingerprint for
-// Google Sign-In. The client trades this token for a real Firebase session.
 app.get('/auth/token', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'auth-token', 20, 60)) {
@@ -577,6 +522,7 @@ app.get('/notifications', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') || '30') || 30, 50);
   const db = await firestore(c.env);
   const notifications = await listNotifications(db, limit);
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=60');
   return c.json({ notifications });
 });
 
@@ -587,8 +533,6 @@ async function requireFirebaseUser(c: any) {
   return verifyFirebaseToken(token, c.env);
 }
 
-// Register an FCM device token for the logged-in user. Only authenticated
-// users can register, so pushes are delivered to registered users only.
 app.post('/notifications/register-token', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'reg-token', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
@@ -608,7 +552,6 @@ app.post('/notifications/register-token', async (c) => {
   return c.json({ ok: true });
 });
 
-// Remove an FCM device token (e.g. on logout).
 app.post('/notifications/unregister-token', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const token = String(body.token || '').trim();
@@ -619,8 +562,6 @@ app.post('/notifications/unregister-token', async (c) => {
   return c.json({ ok: true });
 });
 
-// The caller's own registered push tokens (diagnostics for the in-app
-// notification status card).
 app.get('/notifications/my-tokens', async (c) => {
   const user = await requireFirebaseUser(c);
   if (!user) return c.json({ error: 'unauthorized' }, 401);
@@ -637,9 +578,6 @@ app.get('/notifications/my-tokens', async (c) => {
   return c.json({ registered: tokens.length, tokens });
 });
 
-// Self-test: send a REAL push to the caller's own registered devices only,
-// so any user can verify notification delivery with one tap. Never saved to
-// the notifications list.
 app.post('/notifications/self-test', async (c) => {
   const ip = getClientIp(c);
   const user = await requireFirebaseUser(c);
@@ -665,7 +603,6 @@ app.post('/notifications/self-test', async (c) => {
   return c.json({ ok: true, push });
 });
 
-// ---------------- i18n machine translation (free MT + Firestore cache) ----------------
 const SUPPORTED_TL = new Set(['en', 'fr', 'es']);
 const memTranslate = new Map<string, string>();
 
@@ -731,12 +668,11 @@ app.post('/translate', async (c) => {
   }
 
   for (let i = 0; i < q.length; i++) if (out[i] == null) out[i] = q[i];
+  c.header('Cache-Control', 'public, max-age=86400, s-maxage=86400');
   return c.json({ t: out });
 });
 
 app.get('/categories', async (c) => {
-  // type=app → app categories only, type=game → game categories only,
-  // anything else → the combined list (legacy compatibility).
   const type = (c.req.query('type') || '').trim();
   const db = await firestore(c.env);
   const snap = await db.collection('apps').select('category').get();
@@ -749,6 +685,7 @@ app.get('/categories', async (c) => {
     : type === 'game' ? GAME_CATEGORIES
     : DEFAULT_CATEGORIES;
   const categories: Category[] = source.map((c) => ({ ...c, count: counts[c.slug] || 0 }));
+  c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   return c.json({ categories });
 });
 
@@ -761,9 +698,6 @@ app.get('/apps', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') || '24') || 24, 60);
   const offset = Math.max(Number(c.req.query('offset') || '0') || 0, 0);
 
-  // type=game → only games. type=app → everything that isn't a game, including
-  // legacy docs created before the app/game split that have no `type` field
-  // (so the apps view never goes empty before the one-time backfill runs).
   const gameOnly = type === 'game';
   const excludeGames = type === 'app';
 
@@ -779,8 +713,6 @@ app.get('/apps', async (c) => {
     return docs;
   };
 
-  // "Apps" view excludes games in-memory (can't express "type != game OR missing"
-  // as an efficient Firestore filter), so always take the fetch-all path here.
   if (excludeGames) {
     let base: any = db.collection('apps');
     if (category) base = base.where('category', '==', category);
@@ -797,6 +729,7 @@ app.get('/apps', async (c) => {
       const a = appPublic(d);
       return { ...a, icon_url: icon_url((d.data() as App).icon_key, c.env), feature_url: feature_url((d.data() as App).feature_key, c.env) };
     });
+    c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
     return c.json({ apps, total });
   }
 
@@ -821,7 +754,6 @@ app.get('/apps', async (c) => {
     snap = await query.limit(limit).offset(offset).get();
   } catch (err: any) {
     if (err?.code === 9 || err?.code === 3 || /index/i.test(err?.message ?? '')) {
-      // Composite index not yet created — fall back to unordered fetch + in-memory sort
       let fallback: any = db.collection('apps');
       if (category) fallback = fallback.where('category', '==', category);
       if (gameOnly) fallback = fallback.where('type', '==', 'game');
@@ -843,6 +775,7 @@ app.get('/apps', async (c) => {
     const a = appPublic(d);
     return { ...a, icon_url: icon_url((d.data() as App).icon_key, c.env), feature_url: feature_url((d.data() as App).feature_key, c.env) };
   });
+  c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
   return c.json({ apps, total });
 });
 
@@ -864,6 +797,7 @@ app.get('/apps/:slug', async (c) => {
     const sd = s.data() as Screenshot;
     return { id: s.id, position: sd.position, url: icon_url(sd.r2_key, c.env) };
   });
+  c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
   return c.json({
     app: { ...ap, icon_url: icon_url(rawData.icon_key, c.env), feature_url: feature_url(rawData.feature_key, c.env) },
     screenshots,
@@ -883,7 +817,6 @@ app.get('/apps/:slug/download', async (c) => {
   const a = doc.data() as App;
   if (!a.apk_key) return c.json({ error: 'apk_not_available' }, 404);
 
-  // Rate-limit download counter: max 1 increment per IP per app per 10 min
   if (rateLimit(ip, `dl-count:${slug}`, 1, 600)) {
     const FV = await getFieldValue();
     await doc.ref.update({ downloads: FV.increment(1) });
@@ -893,8 +826,6 @@ app.get('/apps/:slug/download', async (c) => {
   const disposition = `attachment; filename="${filename}"`;
   const url = await r2PresignGet(c.env, a.apk_key, 300, disposition);
 
-  // Same-origin streaming mode: proxy the bytes through this function so the
-  // browser can read a real Content-Length and report genuine download progress.
   if (c.req.query('stream') === '1') {
     const upstream = await fetch(url);
     if (!upstream.ok || !upstream.body) {
@@ -912,8 +843,6 @@ app.get('/apps/:slug/download', async (c) => {
   return c.redirect(url);
 });
 
-// ---------------- star / vote ----------------
-
 function serverFingerprint(c: any): string {
   const ip =
     c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -930,7 +859,6 @@ function computeVoteHash(clientFp: string, serverFp: string): Promise<string> {
 
 app.post('/apps/:slug/star', async (c) => {
   const ip = getClientIp(c);
-  // Rate limit: max 10 star attempts per IP per minute (anti-spam burst guard)
   if (!rateLimit(ip, 'star', 10, 60)) {
     return c.json({ error: 'rate_limit_exceeded' }, 429);
   }
@@ -958,19 +886,15 @@ app.post('/apps/:slug/star', async (c) => {
 
   const sFp = serverFingerprint(c);
   const voteHash = await computeVoteHash(clientFp, sFp);
-  // Also store a server-only hash to prevent same IP+UA from voting with different client FPs
   const serverOnlyHash = await sha256Hex(sFp);
 
-  // Check for duplicate votes before writing.
   const votesRef = doc.ref.collection('star_votes');
   if (uid) {
-    // Signed-in users: exactly one rating/review per account.
     const existingByUid = await votesRef.where('uid', '==', uid).limit(1).get();
     if (!existingByUid.empty) {
       return c.json({ error: 'already_voted', rating: ratingAverage(doc.data()), rating_count: Number((doc.data() as any).rating_count || 0) }, 409);
     }
   } else {
-    // Anonymous fallback: dedupe by device fingerprint.
     const existingByHash = await votesRef.where('hash', '==', voteHash).limit(1).get();
     if (!existingByHash.empty) {
       return c.json({ error: 'already_voted', rating: ratingAverage(doc.data()), rating_count: Number((doc.data() as any).rating_count || 0) }, 409);
@@ -981,7 +905,6 @@ app.post('/apps/:slug/star', async (c) => {
     }
   }
 
-  // Write the vote and update the running average atomically.
   await votesRef.add({
     hash: voteHash,
     server_hash: serverOnlyHash,
@@ -1039,7 +962,6 @@ app.post('/apps/:slug/star-check', async (c) => {
     rating_count: ratingCount,
   });
 
-  // Signed-in users are matched by account id first.
   if (uid) {
     const existingByUid = await doc.ref.collection('star_votes').where('uid', '==', uid).limit(1).get();
     if (!existingByUid.empty) return mine(existingByUid.docs[0].data());
@@ -1056,7 +978,6 @@ app.post('/apps/:slug/star-check', async (c) => {
   return c.json({ voted: false, my_rating: 0, my_comment: '', my_name: '', my_photo: '', rating: ratingAvg, rating_count: ratingCount });
 });
 
-// List reviews (votes that include a written comment) + rating distribution.
 app.get('/apps/:slug/reviews', async (c) => {
   const slug = c.req.param('slug');
   const limit = Math.min(Number(c.req.query('limit') || '50') || 50, 100);
@@ -1086,6 +1007,7 @@ app.get('/apps/:slug/reviews', async (c) => {
   });
   reviews.sort((a, b) => b.ts - a.ts);
 
+  c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
   return c.json({
     reviews: reviews.slice(0, limit),
     total: reviews.length,
@@ -1095,9 +1017,6 @@ app.get('/apps/:slug/reviews', async (c) => {
   });
 });
 
-// ---------------- update requests & reports (sent to admin) ----------------
-
-// User asks for a newer version to be uploaded.
 app.post('/apps/:slug/request-update', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'req-update', 5, 300)) {
@@ -1127,7 +1046,6 @@ app.post('/apps/:slug/request-update', async (c) => {
   return c.json({ ok: true });
 });
 
-// User reports a problem (virus, broken, etc.).
 app.post('/apps/:slug/report', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'report', 5, 300)) {
@@ -1156,10 +1074,7 @@ app.post('/apps/:slug/report', async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------------- auth ----------------
-
 function isSecureRequest(c: any): boolean {
-  // Trust the edge proxy's forwarded protocol; fall back to the URL scheme.
   const proto = c.req.header('x-forwarded-proto');
   if (proto) return proto.split(',')[0].trim() === 'https';
   try {
@@ -1171,7 +1086,6 @@ function isSecureRequest(c: any): boolean {
 
 app.post('/login', async (c) => {
   const ip = getClientIp(c);
-  // Rate limit: max 5 login attempts per IP per 5 minutes
   if (!rateLimit(ip, 'login', 5, 300)) {
     return c.json({ error: 'rate_limit_exceeded' }, 429);
   }
@@ -1222,8 +1136,6 @@ app.get('/me', async (c) => {
   return c.json({ authenticated: true, user: { username: payload.sub, role: payload.role } });
 });
 
-// Configure direct browser uploads for the existing R2 bucket. This one-time
-// setup endpoint remains compatible with the former /api/setup-r2-cors path.
 app.post('/setup-r2-cors', async (c) => {
   const expectedPassword = c.env.ADMIN_PASSWORD || '';
   const suppliedPassword = c.req.header('x-admin-password') || '';
@@ -1304,8 +1216,6 @@ app.get('/admin/apps', async (c) => {
   return c.json({ apps });
 });
 
-// One-time backfill: legacy docs created before the app/game split have no
-// `type` field, so type-filtered queries skip them. Set them all to 'app'.
 app.post('/admin/migrate-types', async (c) => {
   const db = await firestore(c.env);
   const snap = await db.collection('apps').get();
@@ -1324,7 +1234,6 @@ app.post('/admin/migrate-types', async (c) => {
   return c.json({ ok: true, updated, total: snap.size });
 });
 
-// List update-requests / reports submitted by users.
 app.get('/admin/requests', async (c) => {
   const db = await firestore(c.env);
   let docs: any[];
@@ -1358,14 +1267,9 @@ app.post('/admin/notifications', async (c) => {
     type: 'announcement',
     created_at: nowSec(),
   }, c.env);
-  // `push` reports how many devices were targeted / succeeded so the dashboard
-  // can tell whether the notification actually went out over FCM.
   return c.json({ ok: true, id: ref.id, push });
 });
 
-// Publish/update the public app download link. This is shown on the landing
-// page and checked by the Android app on launch. Optionally sends a push
-// notification so users open the update dialog.
 app.post('/admin/app-update', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const version_name = sanitizeText(body.version_name, 60);
@@ -1398,8 +1302,6 @@ app.post('/admin/app-update', async (c) => {
     size_bytes,
     created_at: nowSec(),
   };
-  // Merge the published release fields so the download counter survives each
-  // APK/version update.
   await db.collection('app_updates').doc('current').set(updateDoc, { merge: true });
 
   let push: PushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
@@ -1429,9 +1331,6 @@ app.post('/admin/app-update', async (c) => {
   return c.json({ ok: true, update: updateDoc, push });
 });
 
-// Diagnostics: how many device tokens are registered right now, plus per-device
-// registration info (when it last registered, platform, masked uid/token) so
-// the dashboard can tell whether a test device actually registered.
 app.get('/admin/push/status', async (c) => {
   const db = await firestore(c.env);
   let count = 0;
@@ -1459,8 +1358,6 @@ app.get('/admin/push/status', async (c) => {
   return c.json({ registered_tokens: count, platforms, tokens });
 });
 
-// Diagnostics: send a test push right now and return the detailed FCM result
-// (targeted / success / failure / error codes) without saving a notification.
 app.post('/admin/push/test', async (c) => {
   const db = await firestore(c.env);
   const body = await c.req.json().catch(() => ({} as any));
@@ -1482,7 +1379,6 @@ app.delete('/admin/notifications/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// Delete (dismiss/resolve) a request.
 app.delete('/admin/requests/:id', async (c) => {
   const id = c.req.param('id');
   const db = await firestore(c.env);
@@ -1504,15 +1400,13 @@ app.get('/admin/apps/:id', async (c) => {
   return c.json({ app: { ...a, icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url((a as any).feature_key, c.env) }, screenshots });
 });
 
-// Step 1: client requests a presigned upload URL for R2
 app.post('/admin/upload-url', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
-  const kind = String(body.kind || ''); // 'apk' | 'icon' | 'screenshot'
+  const kind = String(body.kind || '');
   const filename = String(body.filename || '');
   const contentType = String(body.content_type || 'application/octet-stream');
   const slugHint = slugify(String(body.slug_hint || 'app'));
 
-  // Validate content-type to prevent serving malicious HTML/JS from R2
   const ALLOWED_CONTENT_TYPES: Record<string, string[]> = {
     apk: ['application/vnd.android.package-archive', 'application/octet-stream'],
     icon: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
@@ -1535,9 +1429,6 @@ app.post('/admin/upload-url', async (c) => {
   return c.json({ url, key });
 });
 
-// --- Multipart upload for large files (>10 MB) ---
-
-// Initiate a multipart upload and return presigned URLs for all parts
 app.post('/admin/multipart/create', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const kind = String(body.kind || '');
@@ -1570,7 +1461,7 @@ app.post('/admin/multipart/create', async (c) => {
 
   const uploadId = await r2CreateMultipartUpload(c.env, key, contentType);
 
-  const PART_SIZE = 10 * 1024 * 1024; // 10 MB per part
+  const PART_SIZE = 10 * 1024 * 1024;
   const partCount = Math.ceil(fileSize / PART_SIZE);
   const parts: { partNumber: number; url: string }[] = [];
   for (let i = 1; i <= partCount; i++) {
@@ -1581,7 +1472,6 @@ app.post('/admin/multipart/create', async (c) => {
   return c.json({ key, uploadId, partSize: PART_SIZE, parts });
 });
 
-// Complete a multipart upload after all parts have been uploaded
 app.post('/admin/multipart/complete', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const key = String(body.key || '');
@@ -1596,7 +1486,6 @@ app.post('/admin/multipart/complete', async (c) => {
   return c.json({ ok: true, key });
 });
 
-// Abort a multipart upload (cleanup on failure)
 app.post('/admin/multipart/abort', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const key = String(body.key || '');
@@ -1607,13 +1496,11 @@ app.post('/admin/multipart/abort', async (c) => {
   return c.json({ ok: true });
 });
 
-// Validate that R2 keys match expected folder prefixes (prevent path traversal)
 function isValidR2Key(key: string, expectedPrefix: string): boolean {
   if (!key || key.includes('..') || key.startsWith('/')) return false;
   return key.startsWith(`${expectedPrefix}/`);
 }
 
-// Step 2: after R2 upload, client posts metadata to create the app
 app.post('/admin/apps', async (c) => {
   const body = await c.req.json().catch(() => ({} as any));
   const name = sanitizeText(body.name, 200);
@@ -1635,7 +1522,6 @@ app.post('/admin/apps', async (c) => {
     return c.json({ error: 'invalid_feature_key' }, 400);
   }
 
-  // Verify the file exists in R2 to get size
   const head = await r2Head(c.env, apk_key);
   if (!head) return c.json({ error: 'apk_not_found_in_r2' }, 400);
 
@@ -1685,12 +1571,9 @@ app.post('/admin/apps', async (c) => {
       }, c.env);
     }
   } catch (err: any) {
-    // A settings-read failure should not block publishing an app. Fail closed
-    // for automatic pushes so an opt-out is never accidentally ignored.
     console.error('[admin/apps] publication notification skipped:', err?.message || err);
   }
 
-  // Add screenshots if provided
   const screenshotKeys: string[] = Array.isArray(body.screenshot_keys) ? body.screenshot_keys.slice(0, 20) : [];
   for (let i = 0; i < screenshotKeys.length; i++) {
     const r2_key = String(screenshotKeys[i]);
@@ -1714,14 +1597,12 @@ app.patch('/admin/apps/:id', async (c) => {
   const snap = await ref.get();
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
   const old = snap.data() as App;
-  // Input length limits
   if (('name' in body && String(body.name).length > 200) ||
       ('package_name' in body && String(body.package_name).length > 200) ||
       ('description' in body && String(body.description).length > 10000) ||
       ('short_description' in body && String(body.short_description).length > 500)) {
     return c.json({ error: 'input_too_long' }, 400);
   }
-  // Prevent admin from tampering with stars/downloads via PATCH
   const update: Partial<App> = { updated_at: nowSec() };
   if ('name' in body) {
     update.name = String(body.name);
@@ -1736,7 +1617,6 @@ app.patch('/admin/apps/:id', async (c) => {
   if ('version_name' in body) update.version_name = String(body.version_name) || undefined;
   if ('version_code' in body) update.version_code = Number(body.version_code) || undefined;
   if ('min_sdk' in body) update.min_sdk = Number(body.min_sdk) || undefined;
-  // Recompute search terms if relevant fields changed
   if ('name' in body || 'developer' in body || 'short_description' in body || 'package_name' in body) {
     const merged = { ...old, ...update };
     update.search_terms = searchTerms(
@@ -1767,7 +1647,6 @@ app.patch('/admin/apps/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// Replace APK
 app.post('/admin/apps/:id/apk', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({} as any));
@@ -1795,7 +1674,6 @@ app.post('/admin/apps/:id/apk', async (c) => {
     await r2Delete(c.env, old.apk_key).catch(() => {});
   }
 
-  // Replacing the APK is an update — notify users (store + FCM push).
   try {
     const newVersion = body.version_name ? String(body.version_name) : (old.version_name || '');
     await addNotification(db, {
@@ -1810,7 +1688,6 @@ app.post('/admin/apps/:id/apk', async (c) => {
   return c.json({ ok: true });
 });
 
-// Replace icon
 app.post('/admin/apps/:id/icon', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({} as any));
@@ -1832,7 +1709,6 @@ app.post('/admin/apps/:id/icon', async (c) => {
   return c.json({ ok: true });
 });
 
-// Replace / set the wide feature graphic
 app.post('/admin/apps/:id/feature', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({} as any));
@@ -1854,7 +1730,6 @@ app.post('/admin/apps/:id/feature', async (c) => {
   return c.json({ ok: true });
 });
 
-// Add screenshots
 app.post('/admin/apps/:id/screenshots', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({} as any));
@@ -1882,7 +1757,6 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
   return c.json({ ok: true, added: keys.length });
 });
 
-// Delete screenshot
 app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {
   const id = c.req.param('id');
   const sid = c.req.param('sid');
@@ -1896,7 +1770,6 @@ app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {
   return c.json({ ok: true });
 });
 
-// Delete app
 app.delete('/admin/apps/:id', async (c) => {
   const id = c.req.param('id');
   const db = await firestore(c.env);
@@ -1905,7 +1778,6 @@ app.delete('/admin/apps/:id', async (c) => {
   if (!snap.exists) return c.json({ error: 'not_found' }, 404);
   const a = snap.data() as App;
 
-  // Delete subcollection screenshots
   const ssSnap = await ref.collection('screenshots').get();
   for (const s of ssSnap.docs) {
     const sd = s.data() as Screenshot;
@@ -1919,7 +1791,6 @@ app.delete('/admin/apps/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// 404 fallback
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => {
   console.error('[api error]', err);

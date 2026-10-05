@@ -952,6 +952,13 @@ async function signOut() {
 // Explicit account switching: end the current Firebase session, then open the
 // dedicated sign-in screen. The web provider requests Google’s account chooser;
 // native wrappers may additionally expose a Google-session sign-out bridge.
+
+
+
+
+
+
+
 async function switchAccount() {
   cacheUser(null);
   try {
@@ -969,9 +976,31 @@ async function switchAccount() {
     toast(t('تعذّر تسجيل الخروج، حاول مرة أخرى'), 'error');
     return;
   }
-  const next = '/account';
-  location.replace('/login?next=' + encodeURIComponent(next) + '&switch=1');
+  // ✅ بعد تسجيل الخروج: افتح قائمة إيميلات Google مباشرة (بدون صفحة /login)
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await firebase.auth().signInWithPopup(provider);
+  } catch (e) {
+    // إذا فشل الـ popup (مثلاً في جوال)، استخدم redirect
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await firebase.auth().signInWithRedirect(provider);
+    } catch (e2) {
+      const next = '/account';
+      location.replace('/login?next=' + encodeURIComponent(next) + '&switch=1');
+    }
+  }
 }
+
+
+
+
+
+
+
+
 
 /* ----------------------------- App update popup ----------------------------- */
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';

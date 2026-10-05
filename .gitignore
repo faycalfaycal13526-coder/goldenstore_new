@@ -3,6 +3,13 @@ node_modules
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
+.secrets.env
+.secrets.json
+service-account.json
+firebase-service-account.json
+.wrangler
 *.log
 .DS_Store
 *.tsbuildinfo

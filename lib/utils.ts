@@ -32,9 +32,20 @@ export function safeExt(filename: string, fallback = 'bin'): string {
 }
 
 export function randomId(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) =>
-    b.toString(16).padStart(2, '0'),
-  ).join('');
+  return crypto.randomUUID().replace(/-/g, '');
+}
+
+async function digestHex(algorithm: 'SHA-1' | 'SHA-256', input: string): Promise<string> {
+  const bytes = await crypto.subtle.digest(algorithm, new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export function sha256Hex(input: string): Promise<string> {
+  return digestHex('SHA-256', input);
+}
+
+export function sha1Hex(input: string): Promise<string> {
+  return digestHex('SHA-1', input);
 }
 
 export function nowSec(): number {

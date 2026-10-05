@@ -94,10 +94,6 @@ function formatBytes(bytes) {
     en: ['B', 'KB', 'MB', 'GB'],
     fr: ['o', 'Ko', 'Mo', 'Go'],
     es: ['B', 'KB', 'MB', 'GB'],
-    de: ['B', 'KB', 'MB', 'GB'],
-    it: ['B', 'KB', 'MB', 'GB'],
-    pt: ['B', 'KB', 'MB', 'GB'],
-    tr: ['B', 'KB', 'MB', 'GB'],
   };
   const u = units[lang] || units['ar'];
   let i = 0;

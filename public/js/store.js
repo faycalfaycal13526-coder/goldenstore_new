@@ -766,12 +766,70 @@ function isLocalhost() {
 // Cache the last signed-in user so navigation between pages renders instantly
 // (no login-screen flash) while Firebase re-validates the session in the background.
 const CACHE_KEY = 'gs_user';
+const SAVED_ACCOUNTS_KEY = 'gs_saved_accounts_v1';
+const ACCOUNT_SWITCH_EMAIL_KEY = 'gs_account_switch_email';
+const ACCOUNT_SWITCH_INTENT_KEY = 'gs_account_switch_intent';
+const ACCOUNT_SWITCH_STARTED_KEY = 'gs_account_switch_started';
+const MAX_SAVED_ACCOUNTS = 8;
+
+function normalizeAccountEmail(value) {
+  const email = String(value || '').trim();
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+function getSavedAccounts() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SAVED_ACCOUNTS_KEY) || '[]');
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    return value.map((item) => {
+      const email = normalizeAccountEmail(item && item.email);
+      if (!email) return null;
+      const key = email.toLowerCase();
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return {
+        email,
+        displayName: String((item && item.displayName) || '').slice(0, 80),
+        lastUsedAt: Number((item && item.lastUsedAt) || 0),
+      };
+    }).filter(Boolean).slice(0, MAX_SAVED_ACCOUNTS);
+  } catch { return []; }
+}
+function rememberAccount(user) {
+  const email = normalizeAccountEmail(user && user.email);
+  if (!email) return;
+  try {
+    const lower = email.toLowerCase();
+    const previous = getSavedAccounts().filter((account) => account.email.toLowerCase() !== lower);
+    const accounts = [{
+      email,
+      displayName: String((user && user.displayName) || '').slice(0, 80),
+      lastUsedAt: Date.now(),
+    }, ...previous].slice(0, MAX_SAVED_ACCOUNTS);
+    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+  } catch {}
+}
+function removeSavedAccount(email) {
+  const normalized = normalizeAccountEmail(email);
+  if (!normalized || (_user && normalizeAccountEmail(_user.email).toLowerCase() === normalized.toLowerCase())) return false;
+  try {
+    const accounts = getSavedAccounts().filter((account) => account.email.toLowerCase() !== normalized.toLowerCase());
+    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+    return true;
+  } catch { return false; }
+}
+function importLegacyCachedAccount() {
+  const previous = cachedUser();
+  if (previous && previous.email) rememberAccount(previous);
+}
 function cacheUser(user) {
   try {
-    if (user) localStorage.setItem(CACHE_KEY, JSON.stringify({
-      displayName: user.displayName || '', email: user.email || '', photoURL: user.photoURL || '', uid: user.uid || '',
-    }));
-    else localStorage.removeItem(CACHE_KEY);
+    if (user) {
+      rememberAccount(user);
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        displayName: user.displayName || '', email: user.email || '', photoURL: user.photoURL || '', uid: user.uid || '',
+      }));
+    } else localStorage.removeItem(CACHE_KEY);
   } catch {}
 }
 function cachedUser() {
@@ -950,11 +1008,20 @@ async function signOut() {
 }
 
 // Explicit account switching: end the current Firebase session, then open the
-// dedicated sign-in screen. The web provider requests Google’s account chooser;
-// native wrappers may additionally expose a Google-session sign-out bridge.
+// dedicated sign-in flow. A locally saved email is passed only as a Google
+// login hint; it is never treated as proof of identity or stored as a credential.
+async function switchAccount(emailHint) {
+  const selectedEmail = normalizeAccountEmail(emailHint);
+  const currentEmail = normalizeAccountEmail(_user && _user.email);
+  if (selectedEmail && currentEmail && selectedEmail.toLowerCase() === currentEmail.toLowerCase()) return;
 
+  try {
+    if (selectedEmail) sessionStorage.setItem(ACCOUNT_SWITCH_EMAIL_KEY, selectedEmail);
+    else sessionStorage.removeItem(ACCOUNT_SWITCH_EMAIL_KEY);
+    sessionStorage.setItem(ACCOUNT_SWITCH_INTENT_KEY, '1');
+    sessionStorage.removeItem(ACCOUNT_SWITCH_STARTED_KEY);
+  } catch {}
 
-async function switchAccount() {
   cacheUser(null);
   try {
     const nativeSignOut = window.GSAndroid &&
@@ -967,36 +1034,16 @@ async function switchAccount() {
     if (!window.GAuth || !window.GAuth.signOut) throw new Error('auth_not_available');
     await window.GAuth.signOut();
   } catch (e) {
+    try {
+      sessionStorage.removeItem(ACCOUNT_SWITCH_EMAIL_KEY);
+      sessionStorage.removeItem(ACCOUNT_SWITCH_INTENT_KEY);
+    } catch {}
     console.warn('Firebase sign-out failed during account switch', e);
     toast(t('تعذّر تسجيل الخروج، حاول مرة أخرى'), 'error');
     return;
   }
-  const provider = new firebase.auth.GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
-  try {
-    await firebase.auth().signInWithPopup(provider);
-  } catch (e) {
-    if (e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')) {
-      return;
-    }
-    try {
-      await firebase.auth().signInWithRedirect(provider);
-    } catch (e2) {
-      location.replace('/login?next=' + encodeURIComponent('/account') + '&switch=1');
-    }
-  }
+  location.replace('/login?next=' + encodeURIComponent('/account') + '&switch=1');
 }
-
-
-
-
-
-
-
-
-
-
-
 
 /* ----------------------------- App update popup ----------------------------- */
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
@@ -1475,6 +1522,8 @@ function cancelDownload(slug) {
 
 /* ----------------------------- Boot ----------------------------- */
 function boot() {
+  // Migrate the last account remembered by older builds into the local switcher.
+  importLegacyCachedAccount();
   initAuth();
   // Restore live download/install states from the native bridge right away so
   // the app page and the library show real progress/status after a restart.
@@ -1679,7 +1728,7 @@ window.Store = {
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications,
-  ready, signOut, switchAccount, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
+  ready, signOut, switchAccount, getSavedAccounts, removeSavedAccount, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,

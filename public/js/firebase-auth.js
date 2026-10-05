@@ -86,9 +86,17 @@ async function getIdToken(forceRefresh) {
   return null;
 }
 
-function makeProvider() {
+function validGoogleEmailHint(value) {
+  var email = String(value || '').trim();
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
+function makeProvider(loginHint) {
   var provider = new firebase.auth.GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
+  var hint = validGoogleEmailHint(loginHint);
+  // A saved email hint helps Google resume the selected account. Without a hint,
+  // keep the explicit chooser for a normal sign-in or “use another account”.
+  provider.setCustomParameters(hint ? { login_hint: hint } : { prompt: 'select_account' });
   return provider;
 }
 
@@ -175,12 +183,15 @@ async function signInAnonymously() {
 // Use a popup in regular browsers. In the GoldenStore app, use the native
 // Google Sign-In bridge so everything happens inside the app without leaving
 // the WebView.
-async function signInWithGoogle() {
+async function signInWithGoogle(options) {
+  options = options || {};
+  var loginHint = validGoogleEmailHint(options.loginHint);
   initFirebase();
   if (!_auth) throw new Error('Firebase not initialized');
+  var provider = makeProvider(loginHint);
 
-  // Native Android app path: the GSAndroid bridge performs a real Google Sign-In
-  // and returns the Google ID token, which we then exchange for a Firebase credential.
+  // Native Android app path. An updated wrapper may implement the optional
+  // account-hint method; otherwise fall back to its standard Google chooser.
   if (window.GSAndroid && typeof window.GSAndroid.signInWithGoogle === 'function') {
     return new Promise(function(resolve, reject) {
       var timeout = setTimeout(function() {
@@ -205,7 +216,11 @@ async function signInWithGoogle() {
       };
 
       try {
-        window.GSAndroid.signInWithGoogle();
+        if (loginHint && typeof window.GSAndroid.signInWithGoogleForAccount === 'function') {
+          window.GSAndroid.signInWithGoogleForAccount(loginHint);
+        } else {
+          window.GSAndroid.signInWithGoogle();
+        }
       } catch (e) {
         clearTimeout(timeout);
         window.__gsGoogleSignInResolve = null;
@@ -221,9 +236,15 @@ async function signInWithGoogle() {
     throw iae;
   }
 
+  if (options.forceRedirect) {
+    _redirectPending = true;
+    await _auth.signInWithRedirect(provider);
+    return null;
+  }
+
   // Fallback for non-native, non-in-app browsers.
   try {
-    var result = await _auth.signInWithPopup(makeProvider());
+    var result = await _auth.signInWithPopup(provider);
     return result.user;
   } catch (e) {
     var code = e && e.code;
@@ -237,7 +258,7 @@ async function signInWithGoogle() {
         code === 'auth/operation-not-supported-in-this-environment' ||
         code === 'auth/web-storage-unsupported') {
       _redirectPending = true;
-      await _auth.signInWithRedirect(makeProvider());
+      await _auth.signInWithRedirect(provider);
       return null;
     }
     // Any other error: throw so the UI shows it

@@ -7,11 +7,18 @@
 
   const slug = getQuery('slug');
 
+  // True when running inside the Golden Store native Android wrapper, where the
+  // GSAndroid JS bridge is available for real device downloads.
   function isNativeApp() {
     return !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
   }
 
   const apkStateHandlers = Object.create(null);
+  // IMPORTANT: the central hub (store.js) must ALWAYS run — it maintains the
+  // global registry (gs_apk_states / gs_active_dl) used by the library, home
+  // badges and future page loads. Previously this wrapper swallowed every
+  // non-"app-update" event, so states were never cleaned up while this page
+  // was open and the install button appeared "stuck" on other screens.
   const storeApkHandler = window.__gsApkDownloadUpdate;
   window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
     if (typeof storeApkHandler === 'function') storeApkHandler(slug, status, progress, message);
@@ -33,6 +40,7 @@
     document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { m.remove(); document.removeEventListener('keydown', esc); } });
   }
 
+  // Browser fingerprint for the star-vote endpoint.
   async function getFingerprint() {
     const parts = [];
     try {
@@ -63,6 +71,8 @@
     content.append(S.skeletonDetail());
 
     function share(a) {
+      // Share/copy the PUBLIC web link of the app on the store site — never a
+      // local WebView URL like capacitor://localhost (meaningless outside the app).
       const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
       const url = origin
         ? `${origin}/app?slug=${encodeURIComponent(a && a.slug ? a.slug : slug)}`
@@ -89,6 +99,7 @@
     nav.querySelector('.title') && (nav.querySelector('.title').textContent = '');
     content.innerHTML = '';
 
+    // Head
     content.append(el('div', { class: 'd-head' },
       el('div', { class: 'd-icon' }, app.icon_url ? el('img', { src: app.icon_url, alt: app.name }) : ico('package', 'icon icon-lg')),
       el('div', { class: 'd-titles' },
@@ -98,6 +109,7 @@
       ),
     ));
 
+    // Stats row
     const rt = ratingOf(app);
     content.append(el('div', { class: 'd-stats' },
       stat(rt ? el('span', null, rt, ico('star', 'icon fill')) : el('span', null, '—'), t('تقييمات')),
@@ -106,15 +118,18 @@
       stat(sdkName(app.min_sdk), t('أندرويد')),
     ));
 
+    // Actions — animated install with a smooth progress bar.
     content.append(installControl(app));
     content.append(el('div', { class: 'd-note' }, t('سيتم تنزيل ملف APK') + ` (${formatBytes(app.size_bytes || 0)}). ` + t('فعّل «تثبيت من مصادر غير معروفة» لإكمال التثبيت.')));
 
+    // Screenshots
     if (screenshots.length) {
       const shots = el('div', { class: 'shots' });
       screenshots.forEach((s) => { if (s.url) shots.append(el('img', { src: s.url, alt: '', loading: 'lazy', onclick: () => openModal(s.url) })); });
       content.append(el('div', { class: 'd-section' }, shots));
     }
 
+    // About
     if (app.short_description || app.description) {
       content.append(el('div', { class: 'd-section' },
         el('h3', null, t('لمحة عن هذا التطبيق')),
@@ -122,13 +137,16 @@
       ));
     }
 
+    // Tags
     content.append(el('div', { class: 'chip-row' },
       app.category ? el('span', { class: 'chip' }, S.categoryName(app.category)) : null,
       el('span', { class: 'chip' }, t('الإصدار') + ' ' + (app.version_name || '—')),
     ));
 
+    // Rating section (star vote)
     content.append(ratingSection(app));
 
+    // Similar apps/games
     loadSimilar(app, content);
 
     function stat(value, label) {
@@ -140,6 +158,7 @@
 
   async function loadSimilar(app, container) {
     const simTitle = app.type === 'game' ? t('ألعاب مماثلة') : t('تطبيقات مماثلة');
+    // Skeleton placeholder while the similar list loads (smooth content loading).
     const section = el('div', { class: 'd-section' },
       el('h3', null, simTitle),
       S.skeletonSimilar(),
@@ -154,6 +173,7 @@
       const row = el('div', { class: 'hrow' });
       similar.forEach((a) => row.append(S.posterCard(a)));
       section.innerHTML = '';
+      // The whole header is a "see all" link: the chevron opens the full list of this category.
       const href = `/more?section=similar&type=${app.type === 'game' ? 'game' : 'app'}`
         + `${app.category ? `&category=${encodeURIComponent(app.category)}` : ''}&exclude=${encodeURIComponent(app.slug)}`;
       section.append(
@@ -168,6 +188,7 @@
     }
   }
 
+  // Static 5-star bar reflecting an average value (filled vs empty).
   function starBar(value) {
     const wrap = el('div', { class: 'rate-static', style: { marginTop: '4px' } });
     const rounded = Math.round(Number(value) || 0);
@@ -175,6 +196,7 @@
     return wrap;
   }
 
+  // One row of the rating distribution bar chart (Google Play style).
   function distRow(starN, c, total) {
     const pct = total > 0 ? Math.round((c / total) * 100) : 0;
     return el('div', { class: 'row' },
@@ -183,6 +205,7 @@
     );
   }
 
+  // A single review card: avatar + name + date, star row, then the comment.
   function reviewCard(r) {
     const initial = ((r.name || 'م').trim().charAt(0) || 'م').toUpperCase();
     const stars = el('div', { class: 'stars' });
@@ -204,10 +227,13 @@
     );
   }
 
+  // ----- Install: persist "installed" apps locally so the state survives reloads.
+  // (Registry helpers live in store.js now; the REAL source of truth is the
+  // device PackageManager via S.installedVersionOnDevice.)
   const isInstalled = (slug) => S.isInstalledStored(slug);
   const markInstalledStored = (slug) => S.markInstalledStored(slug);
   const unmarkInstalledStored = (slug) => S.unmarkInstalledStored(slug);
-
+  // Generic centered dialog (used by "request update" and "report").
   function openDialog({ icon, title, fields, submitLabel, onSubmit }) {
     const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
     const inputs = {};
@@ -286,6 +312,7 @@
     });
   }
 
+  // Save a downloaded blob to the user's device.
   function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = el('a', { href: url, download: filename, style: { display: 'none' } });
@@ -294,6 +321,8 @@
     setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 30000);
   }
 
+  // Fallback: plain navigation download (browser's own download UI) when the
+  // streaming fetch isn't possible.
   function fallbackDownload(slug) {
     const a = el('a', { href: `/api/apps/${encodeURIComponent(slug)}/download`, download: '', style: { display: 'none' } });
     document.body.append(a);
@@ -301,29 +330,26 @@
     setTimeout(() => a.remove(), 30000);
   }
 
+  // The install button + REAL download progress bar. Streams the APK while
+  // reporting genuine progress, saves the file to the device, then settles into
+  // an "installed" state ("التطبيق لديك").
   function installControl(app) {
     const label = el('span', { class: 'install-label', 'data-noi18n': '' }, t('تثبيت'));
     const fill = el('span', { class: 'install-fill' });
     const btn = el('button', { class: 'btn btn-primary btn-lg install-btn', type: 'button' }, fill, label);
-
-    // تعريف group و cancelBtn أولاً لتجنب الخطأ
-    const group = el('div', { class: 'install-group' }, btn);
     const cancelBtn = el('button', {
       class: 'btn btn-secondary btn-lg download-cancel-btn hidden',
       type: 'button',
       'aria-label': t('إلغاء التنزيل'),
       title: t('إلغاء التنزيل'),
       onclick: handleCancelDownload,
-    }, ico('close', 'icon icon-sm'));
-    group.append(cancelBtn);
-
+    }, ico('close', 'icon icon-sm'), t('إلغاء التنزيل'));
     let nativeActiveDownloadRegistered = false;
     let activeDownloadController = null;
     let activeStreamReader = null;
     let cancelRequested = false;
 
     function setCancelVisible(visible) {
-      group.classList.toggle('split-active', visible);
       cancelBtn.classList.toggle('hidden', !visible);
       if (visible) cancelBtn.disabled = false;
     }
@@ -369,6 +395,7 @@
       btn.disabled = false;
       label.innerHTML = '';
       if (mode === 'update') {
+        // A newer store version is available: Google Play style "تحديث" button.
         btn.classList.remove('installed');
         btn.classList.add('has-update');
         label.append(ico('refresh', 'icon'), document.createTextNode(t('تحديث')));
@@ -378,6 +405,10 @@
       }
     }
 
+    // ---- Post-install actions: Open + Uninstall (native app only) ----
+    // CRITICAL: always open/uninstall by the REAL device package. The store
+    // metadata can be empty or wrong; S.resolvedPackageName returns the
+    // package learned from the device itself (native ground truth).
     function realPackage(a) {
       return (S.resolvedPackageName && S.resolvedPackageName(a.slug)) || a.package_name || '';
     }
@@ -410,6 +441,8 @@
       }
       toast(t('غير متاح في هذا المتصفح'), 'info');
     }
+    // Open the system installer for a previously-downloaded APK file
+    // (lets the user retry installation if they dismissed the prompt).
     function openDownloadedApk(a, filename) {
       if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.openDownloadedApk === 'function') {
         try {
@@ -425,6 +458,12 @@
         try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
       }
     }
+    /**
+     * Post-install actions. Default (fully installed): the Open + Uninstall
+     * pair REPLACES the install button entirely — Google Play end state.
+     * With a newer store version available (opts.withOpen=false): keep the
+     * "تحديث" button visible and show only the Uninstall action below it.
+     */
     function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
       removeInstalledActions();
@@ -444,6 +483,9 @@
         if (det) det.prepend(bar);
       }
     }
+    // Show "open APK / delete file" actions after a download completes but
+    // before the package is actually installed (e.g. user dismissed the
+    // installer or installation is still pending).
     function showDownloadedActions(a, filename) {
       setCancelVisible(false);
       if (!isNativeApp()) return;
@@ -466,6 +508,7 @@
       const existing = document.getElementById('gs-installed-actions');
       if (existing) existing.remove();
       setCancelVisible(false);
+      // Restore the install button row (hidden while Open/Uninstall shown).
       const anchor = document.querySelector('.detail .d-actions');
       if (anchor) anchor.style.display = '';
     }
@@ -512,12 +555,20 @@
       if (status === 'downloaded') {
         setCancelVisible(false);
         cancelRequested = false;
+        // The APK is on the device. Never leave the button stuck in a
+        // disabled "installing…" state: if the system installer prompt was
+        // dismissed (or the user cancelled inside it), the button must
+        // become an active "جاهز للتثبيت" state with retry/delete actions —
+        // exactly like Google Play's "ready to install" row.
         setProgress(1);
         btn.classList.remove('installing');
         btn.disabled = false;
         label.textContent = t('جاهز للتثبيت');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
+        // Show the post-download actions bar immediately so the user can
+        // retry the install or delete the file. The native bridge reports
+        // the real filename.
         showDownloadedActions(app, message || filename);
         return;
       }
@@ -532,6 +583,11 @@
         return;
       }
       if (status === 'installed') {
+        // Install finished — IMMEDIATELY swap to the Google Play end state:
+        // [فتح] + [إلغاء التثبيت] replacing the download button, and clean
+        // every pending state (the central hub already did the registry cleanup).
+        // NOTE: `message` carries the REAL resolved PACKAGE NAME (not the
+        // version) — wire it into the resolver cache for Open/Uninstall.
         markInstalledStored(app.slug);
         S.removeActiveDownload(app.slug);
         S.removeApkState(app.slug);
@@ -574,6 +630,8 @@
       }
     };
 
+    // Listen for native uninstall events: when THIS app's package is removed
+    // from the device, drop the local installed state and restore the button.
     window.addEventListener('gs-package-uninstalled', (e) => {
       const d = (e && e.detail) || {};
       const pkg = d.packageName;
@@ -591,7 +649,7 @@
 
     const filename = `${app.slug || 'app'}-${app.version_name || ''}.apk`.replace(/-+/g, '-');
 
-    async function runInstall() {
+      async function runInstall() {
       if (btn.classList.contains('installing')) return;
       cancelRequested = false;
 
@@ -599,18 +657,26 @@
         window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
       } catch (e) {}
 
+      // Already installed: tapping the button opens the app directly.
       if (btn.classList.contains('installed')) { openInstalled(app); return; }
 
+      // APK already downloaded but not installed: open the system installer
+      // again instead of re-downloading the whole file.
       const liveState = S.getApkState(app.slug);
       if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveState.filename) {
         openDownloadedApk(app, liveState.filename);
         return;
       }
 
+      // Require login before downloading (skip in native wrapper where anonymous
+      // downloads are allowed and the redirect sign-in flow interrupts the flow)
       if (!isNativeApp() && !S.isLoggedIn()) {
         try { await S.requireAuth(); } catch { return; }
       }
 
+      // Native Android app: blob/<a download> don't persist files inside a
+      // WebView, so hand off to the native DownloadManager bridge which saves
+      // the APK to the device's Downloads and shows an "open to install" notice.
       if (isNativeApp()) {
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
         const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
@@ -731,12 +797,16 @@
         activeStreamReader = null;
         activeDownloadController = null;
         if (cancelRequested) {
+          // A user-requested cancellation must never fall through to the
+          // ordinary browser download, which would silently restart the APK.
           cancelRequested = false;
           S.removeActiveDownload(app.slug);
           S.removeApkState(app.slug);
           showIdle();
           return;
         }
+        // Streaming failed (network/limits) — fall back to a normal download so
+        // the user still gets the file, and don't fake an "installed" state.
         fallbackDownload(app.slug);
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
@@ -747,18 +817,30 @@
 
     btn.addEventListener('click', runInstall);
 
+    // ----- Restore the REAL install/download state when the page (re)loads.
+    // Native: the DEVICE is the source of truth. checkAppStatus() resolves
+    // through every ground truth — store metadata package → native slug
+    // registry → REAL package read from the downloaded APK file — so the page
+    // shows "فتح / إلغاء التثبيت" immediately after an install, even when the
+    // store metadata is wrong or an event was lost. A heartbeat keeps this
+    // re-validated every 1.5s while the page is open.
     function resolveInstallState() {
+      // Keep the global heartbeat watching this app (self-heals the UI).
       if (S.registerInstallWatch) S.registerInstallWatch(app.slug, app.package_name || '');
 
+      // 1) Device truth first (covers metadata + registry + APK-file package).
       const st = isNativeApp() && S.checkAppStatus ? S.checkAppStatus(app.slug, app.package_name || '') : null;
       if (st && st.installed) {
         markInstalledStored(app.slug);
         if (st.package_name) S.rememberResolvedPackage(app.slug, st.package_name);
         const hasUpdate = S.versionIsNewer(app.version_name || '', st.version || '');
         showInstalled(hasUpdate ? 'update' : 'open');
+        // Installed → [فتح][إلغاء التثبيت] replacing the button; update
+        // available → keep the "تحديث" button and show uninstall only.
         showInstalledActions(app, { withOpen: !hasUpdate });
         return;
       }
+      // Not installed on the device — never trust a stale local registry.
       unmarkInstalledStored(app.slug);
       removeInstalledActions();
       const live = (st && st.status && st.status !== 'none')
@@ -780,6 +862,7 @@
         return;
       }
       if (live && live.status === 'downloaded') {
+        // APK downloaded but not installed yet (e.g. installer dismissed).
         setProgress(1);
         btn.classList.remove('installing');
         btn.disabled = false;
@@ -790,6 +873,9 @@
       showIdle();
     }
 
+    // When the heartbeat (or a native event) resolves an install while this
+    // page is open, re-render the button so it flips to فتح/إلغاء التثبيت
+    // even if the original event was missed.
     window.addEventListener('gs-install-resolved', (e) => {
       const d = e && e.detail || {};
       if (!d.slug || d.slug !== app.slug) return;
@@ -807,27 +893,34 @@
     if (isNativeApp()) {
       resolveInstallState();
     } else {
+      // Browser fallback: restore download state on page reload by estimating
+      // progress (no native bridge to ask for the truth).
       const activeDls = S.getActiveDownloads();
       const activeDl = activeDls.find((d) => d.slug === app.slug);
       if (activeDl && activeDl.status === 'downloading') {
       btn.classList.add('installing');
       btn.disabled = true;
 
+      // Calculate estimated progress based on elapsed time
       const startedAt = activeDl.started_at || Math.floor(Date.now() / 1000);
       const elapsed = Math.floor(Date.now() / 1000) - startedAt;
       const sizeBytes = app.size_bytes || activeDl.size_bytes || 20 * 1024 * 1024;
+      // Estimate: ~400KB/s average mobile speed
       const estimatedTotalTime = Math.max(10, sizeBytes / (400 * 1024));
       const lastProgress = (activeDl.progress >= 0) ? activeDl.progress : 0;
+      // Start from either the stored progress or the time-based estimate (whichever is higher)
       const timeBasedProgress = Math.min(0.95, elapsed / estimatedTotalTime);
       let currentProgress = Math.max(lastProgress, timeBasedProgress);
 
       if (currentProgress >= 0.95) {
+        // Likely finished already — mark as installed
         S.removeActiveDownload(app.slug);
         markInstalledStored(app.slug);
         S.addToDownloadHistory(app);
         showInstalled();
       } else {
         setProgress(currentProgress);
+        // Continue advancing the bar smoothly until completion
         const remainingTime = (estimatedTotalTime - elapsed) * 1000;
         const stepInterval = 300;
         const steps = Math.max(1, Math.floor(remainingTime / stepInterval));
@@ -840,6 +933,7 @@
           S.updateActiveDownloadProgress(app.slug, currentProgress);
           if (stepsDone >= steps) {
             clearInterval(progressTimer);
+            // After reaching ~98%, complete the download
             setTimeout(() => {
               setProgress(1);
               S.removeActiveDownload(app.slug);
@@ -856,6 +950,7 @@
       }
     }
 
+    // Split dropdown attached to the install button: request-update / report.
     const menu = el('div', { class: 'install-menu' },
       el('button', { class: 'install-menu-item', type: 'button', onclick: () => { toggleMenu(false); openRequestUpdate(app); } },
         ico('refresh', 'icon'), t('طلب تحديث')),
@@ -863,9 +958,7 @@
         ico('flag', 'icon'), t('إبلاغ عن مشكلة')),
     );
     const caret = el('button', { class: 'btn btn-primary btn-lg install-caret', type: 'button', 'aria-label': t('خيارات إضافية') }, ico('chevronDown', 'icon'));
-
-    // إضافة caret و menu إلى group بعد تعريفهما
-    group.append(caret, menu);
+    const group = el('div', { class: 'install-group' }, btn, caret, menu);
 
     function toggleMenu(force) {
       const open = typeof force === 'boolean' ? force : !group.classList.contains('menu-open');
@@ -874,7 +967,7 @@
     caret.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
     document.addEventListener('click', (e) => { if (!group.contains(e.target)) toggleMenu(false); });
 
-    return el('div', { class: 'd-actions' }, group);
+    return el('div', { class: 'd-actions' }, group, cancelBtn);
   }
 
   function ratingSection(app) {
@@ -890,6 +983,7 @@
     const count = el('div', { class: 'rate-meta' },
       initialCount > 0 ? `${formatNum(initialCount)} ${t('تقييم')}` : t('كن أول من يقيّم هذا التطبيق'));
 
+    // Rating distribution (5 → 1)
     const distRows = el('div', { class: 'rate-dist' });
     function renderDist(dist, total) {
       distRows.innerHTML = '';
@@ -904,6 +998,7 @@
       count.textContent = ratingCount > 0 ? `${formatNum(ratingCount)} ${t('تقييم')}` : t('كن أول من يقيّم هذا التطبيق');
     }
 
+    // Interactive star picker (1–5). Text glyphs so stars are always visible/tappable.
     const icons = [];
     const picker = el('div', { class: 'rate-input' });
     function paint(n) {
@@ -928,6 +1023,8 @@
     }
     const pickerHint = el('div', { style: { fontSize: '14px', marginBottom: '8px' } }, t('قيّم واكتب مراجعتك'));
 
+    // Review form — reviews are tied to the signed-in Google account, so the
+    // reviewer identity (name + photo) is shown and submitted automatically.
     const accountName = (user && (user.displayName || user.email)) || t('مستخدم');
     const accountPhoto = (user && user.photoURL) || '';
     const accountUid = (user && user.uid) || '';
@@ -943,6 +1040,7 @@
     submitBtn.addEventListener('click', () => submit());
     const form = el('div', { class: 'review-form' }, identity, commentInput, el('div', { class: 'actions' }, submitBtn));
 
+    // Reviews list — show only 1-2 initially, "show more" opens modal
     const INITIAL_REVIEWS = 2;
     const reviewsList = el('div', { class: 'reviews' });
     const showMoreBtn = el('button', { class: 'btn btn-secondary btn-sm', style: { marginTop: '12px', display: 'none' } }, t('عرض المزيد'));
@@ -989,9 +1087,11 @@
       paint(myRating);
       picker.classList.add('voted');
       pickerHint.textContent = myRating ? `${t('تقييمك')}: ${myRating} ${t('من')} 5` : t('لقد قيّمت هذا التطبيق');
+      // Completely hide the input form after voting
       form.style.display = 'none';
     }
 
+    // Initial load — my vote state.
     (async () => {
       try {
         fingerprint = await getFingerprint();
@@ -1001,6 +1101,7 @@
       } catch {}
     })();
 
+    // Initial load — reviews list + distribution.
     async function loadReviews() {
       try {
         const res = await window.Store.api(`/api/apps/${encodeURIComponent(app.slug)}/reviews`);
@@ -1015,6 +1116,8 @@
     async function submit() {
       if (voted) { toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info'); return; }
       if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
+      // Require login before rating (skip in native wrapper where anonymous
+      // votes are allowed and the redirect sign-in flow cannot be awaited)
       if (!isNativeApp() && !S.isLoggedIn()) {
         try { await S.requireAuth(); } catch { return; }
       }
@@ -1050,6 +1153,7 @@
       }
     }
 
+    // Collapsible rating section
     const rateBody = el('div', { class: 'rate-collapse-body' });
     rateBody.append(
       el('div', { style: { marginTop: '18px' } },
@@ -1060,6 +1164,7 @@
       reviewsList,
       showMoreBtn,
     );
+    // Initially collapsed
     rateBody.style.maxHeight = '0';
     rateBody.style.overflow = 'hidden';
     rateBody.style.transition = 'max-height .35s ease';
@@ -1081,6 +1186,7 @@
     );
     toggleIcon.style.transition = 'transform .3s ease';
 
+    // Auto-close after rating: watch for the 'voted' class on picker
     const collapseObserver = new MutationObserver(() => {
       if (picker.classList.contains('voted') && rateOpen) {
         setTimeout(() => {

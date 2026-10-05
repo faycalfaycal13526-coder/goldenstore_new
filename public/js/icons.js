@@ -22,6 +22,7 @@ const ICONS = {
   close:       '<path d="M6 6l12 12M18 6 6 18"/>',
   arrowLeft:   '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   arrowRight:  '<path d="m12 5 7 7-7 7"/><path d="M5 12h14"/>',
+  accountSwitch: '<path d="m16 3 4 4-4 4"/><path d="M4 7h16"/><path d="m8 21-4-4 4-4"/><path d="M20 17H4"/>',
   external:    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="m10 14 11-11"/>',
   refresh:     '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   logout:      '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',

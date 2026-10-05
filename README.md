@@ -1,198 +1,171 @@
 # Goldenstore
 
-**المتجر الذهبي الحصري للتطبيقات المهكرة** — استضافة على **Vercel**، قاعدة بيانات **Firebase Firestore**، وتخزين الملفات على **Cloudflare R2**.
+**المتجر الذهبي الحصري للتطبيقات المهكرة** — واجهة ثابتة مع **Cloudflare Workers** لواجهة API، و**Firebase Firestore/Auth/FCM**، و**Cloudflare R2** لتخزين الملفات.
 
-* خفيف وسريع (لا توجد عملية بناء، HTML/CSS/JS مباشرة + Vercel Function واحدة).
-* تصميم أسود صافٍ مع ذهبي مدروس (بدون مبالغة).
-* رفع APK يصل مباشرة من المتصفح إلى R2 (بدون المرور عبر Vercel) لدعم ملفات كبيرة.
-* دخول إدارة مباشر بكلمة سر واحدة (JWT) — لا يوجد رابط أو زر عام للإدارة؛ الوصول فقط عبر `/admin`.
-* RTL وعربية بالكامل.
+* الواجهة الحالية مبنية بـ HTML/CSS/JavaScript ولا تحتاج إلى تعديل عند ترحيل الـ API.
+* يستخدم Worker واجهات Web القياسية وHono؛ لا يعتمد على Vercel Functions أو Firebase Admin SDK أو AWS SDK.
+* رفع APK والملفات يتم مباشرة من المتصفح إلى R2 عبر روابط موقعة، بما في ذلك multipart للملفات الكبيرة.
+* جميع مسارات `/api/*` الحالية تحتفظ بعقود الاستجابة؛ يمر `/api/*` من نطاق الموقع إلى Worker عبر Cloudflare Route.
 
-## تحديثات الوظائف
+## تحديثات الوظائف الموجودة
 
-* **إلغاء التنزيل:** يظهر زر مستقل «إلغاء التنزيل» أثناء نقل APK فقط؛ لا يحل محل زر «تثبيت». تنزيلات المتصفح تُلغى عبر `AbortController`. في Android يستدعي الويب `GSAndroid.cancelDownload(slug)` عند توفره؛ تنفيذ الجسر الأصلي نفسه يتطلب مصدر تطبيق Android.
-* **عداد تنزيلات APK المتجر:** يعرض `/download` إجمالي التنزيلات المسجلة، ويمر زر التحميل عبر `/api/app-update/download`. العداد محفوظ في `app_updates/current.downloads`، مع حدّ تقريبي للاحتساب مرة لكل عنوان IP خلال 10 دقائق لتقليل أثر إعادة التحميل.
-* **إشعارات النشر:** من تبويب «إعدادات المتجر» في `/admin` يمكن تشغيل/إيقاف إشعارات التطبيقات والألعاب الجديدة. الإعداد محفوظ في `store_settings/general`؛ الافتراضي مفعّل للتوافق مع السلوك السابق. لا يؤثر ذلك على الإعلانات اليدوية أو إشعارات تحديث المتجر.
-* **اللغات:** العربية والإنجليزية والفرنسية والإسبانية، بالإضافة إلى الألمانية والإيطالية والبرتغالية والتركية. تُترجم النصوص غير الموجودة في القاموس عبر واجهة الترجمة وتُخزّن مؤقتاً لكل لغة.
-* **تبديل الحساب:** زر مستقل في صفحة الحساب يسجّل الخروج ويفتح اختيار حساب Google مجدداً.
-* **الاشتراك عبر WhatsApp:** صفحة الحساب تفتح محادثة مسبقة التعبئة مع `+213 551 30 41 68` وتتضمن بريد المستخدم. تفعيل الاشتراك ومعلومات الباقات يظلان يدوياً عبر WhatsApp؛ لا توجد معالجة دفع آلية أو أسعار محددة في هذا الإصدار.
+* **إلغاء التنزيل:** زر مستقل «إلغاء التنزيل» أثناء نقل APK فقط؛ لا يحل محل زر «تثبيت». تنزيلات المتصفح تُلغى عبر `AbortController`. في Android يستدعي الويب `GSAndroid.cancelDownload(slug)` عند توفره؛ تنفيذ الجسر الأصلي نفسه يتطلب مصدر تطبيق Android.
+* **عداد تنزيلات APK المتجر:** يعرض `/download` إجمالي التنزيلات، ويمر زر التحميل عبر `/api/app-update/download`. العداد محفوظ في `app_updates/current.downloads`.
+* **إشعارات النشر:** إعداد النشر الجديد منفصل عن الإعلانات اليدوية وإشعارات تحديث المتجر.
+* **اللغات:** العربية والإنجليزية والفرنسية والإسبانية فقط.
+* **تبديل الحساب:** أيقونة تبديل بجانب البريد تعرض العناوين المحفوظة على هذا الجهاز (حتى 8). القائمة محلية ولا تحفظ كلمات مرور؛ اختيار عنوان محفوظ يمرّره كتلميح إلى Google، وقد يطلب Google تأكيد الهوية.
+* **الاشتراك عبر WhatsApp:** جهة التواصل `+213 551 30 41 68`؛ إتمام الاشتراك يدوي.
 
 ---
 
-## 1) إنشاء المشاريع الخارجية
+## 1. متطلبات Firebase وR2
 
 ### Firebase
-1. افتح [https://console.firebase.google.com](https://console.firebase.google.com) وأنشئ مشروعاً جديداً.
-2. من القائمة الجانبية افتح **Build → Firestore Database → Create database**.
-3. اختر **Native mode** والمنطقة الأقرب لك (مثلاً `eur3` أو `nam5`).
-4. اذهب إلى **Project Settings → Service Accounts → Generate new private key**.
-5. سيتحمّل ملف JSON. ستحتاج منه ثلاث قيم: `project_id` و `client_email` و `private_key`.
+1. فعّل Firestore بنمط Native في مشروع Firebase.
+2. فعّل Firebase Authentication ومزوّد تسجيل الدخول الذي يستخدمه التطبيق.
+3. أنشئ service-account JSON من **Project settings → Service accounts**.
+4. احفظ JSON كـ Worker secret باسم `FIREBASE_SERVICE_ACCOUNT`، أو استخدم متغيرات المفتاح المنفصلة الموضّحة أدناه.
+5. انسخ **Web API key** من إعدادات تطبيق Firebase؛ يستخدمه Worker مع Identity Toolkit REST للتحقق من رموز الدخول عبر `accounts:lookup`.
 
 ### Cloudflare R2
-1. افتح [https://dash.cloudflare.com](https://dash.cloudflare.com) → **R2**.
-2. أنشئ Bucket باسم `goldenstore-apks` (أو الاسم الذي تريده).
-3. من تبويب **Settings** للـ Bucket، فعّل **Public Access** (أو اربط دومين مخصص مثل `cdn.goldenstore.me`).
-4. من **R2 → Manage R2 API Tokens** أنشئ Token بصلاحيات **Object Read & Write** على هذا الـ Bucket فقط.
-5. احفظ القيم: `Account ID` و `Access Key ID` و `Secret Access Key` و `Public R2.dev URL`.
+1. أنشئ bucket (الافتراضي `goldenstore-apks`) وفعّل Public Access أو اربط نطاق CDN.
+2. أنشئ R2 API token بصلاحيات Object Read & Write على هذا الـ bucket فقط.
+3. جهّز Account ID وAccess Key ID وSecret Access Key ورابط القراءة العام.
+4. اسمح بالرفع من أصل الموقع في إعدادات bucket → **CORS Policy**. مثال:
 
-> **مهم — CORS:** يجب السماح بـ PUT من المتصفح. اذهب إلى الـ Bucket → **Settings → CORS Policy** والصق:
-> ```json
-> [
->   {
->     "AllowedOrigins": ["*"],
->     "AllowedMethods": ["GET", "PUT", "HEAD"],
->     "AllowedHeaders": ["*"],
->     "ExposeHeaders": ["ETag"],
->     "MaxAgeSeconds": 3600
->   }
-> ]
-> ```
-> بعد النشر، استبدل `*` بدومينك (مثل `https://goldenstore.me`).
-
----
-
-## 2) إعداد متغيرات البيئة
-
-انسخ `.env.example` إلى `.env.local` وعبّئ القيم:
-
-```bash
-cp .env.example .env.local
+```json
+[
+  {
+    "AllowedOrigins": ["https://goldenstore.online", "https://www.goldenstore.online", "https://goldenstore-new.pages.dev"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
 ```
 
-ثم افتح `.env.local` وعبّئ:
-
-| المتغير | الوصف |
-|---|---|
-| `STORE_NAME` | اسم المتجر — `Goldenstore` |
-| `STORE_DOMAIN` | الدومين — `goldenstore.me` |
-| `ADMIN_USERNAME` | اسم المستخدم للوحة الإدارة — `admin` |
-| `ADMIN_PASSWORD` | كلمة مرور قوية للإدارة |
-| `JWT_SECRET` | نص عشوائي ≥ 32 حرفاً — `openssl rand -hex 32` |
-| `FIREBASE_PROJECT_ID` | من JSON الذي حمّلته |
-| `FIREBASE_CLIENT_EMAIL` | من JSON الذي حمّلته |
-| `FIREBASE_PRIVATE_KEY` | المفتاح PEM — يقبل أسطر حقيقية أو `\n` المهروبة، باقتباس أو بدونه |
-| `FIREBASE_PRIVATE_KEY_BASE64` | بديل أنظف لـ `FIREBASE_PRIVATE_KEY` — السلسلة بصيغة base64 (انظر القسم 4) |
-| `FIREBASE_SERVICE_ACCOUNT` | بديل آخر: ملف Firebase service account JSON كاملاً في متغير واحد |
-| `R2_ACCOUNT_ID` | Account ID من Cloudflare |
-| `R2_ACCESS_KEY_ID` | من R2 API Token |
-| `R2_SECRET_ACCESS_KEY` | من R2 API Token |
-| `R2_BUCKET` | اسم الـ Bucket — `goldenstore-apks` |
-| `R2_PUBLIC_URL` | رابط R2.dev العام، بدون شرطة في النهاية |
+يمكن إعداد هذه القاعدة أيضاً عبر `POST /api/setup-r2-cors` مع ترويسة `x-admin-password`؛ يستعمل Worker قائمة `ALLOWED_ORIGINS` ولا يضبط wildcard تلقائياً.
 
 ---
 
-## 3) التشغيل المحلي
+## 2. إعداد Worker محلياً
+
+يتطلب Node.js 22 أو أحدث لأدوات Wrangler التطويرية فقط. انسخ ملف المثال إلى ملف Wrangler المحلي، ثم أدخل القيم محلياً ولا ترفعها إلى Git:
 
 ```bash
-npm install
+cp .env.example .dev.vars
+npm ci
 npm run dev
 ```
 
-ثم افتح [http://localhost:3000](http://localhost:3000).
-لوحة الإدارة على [http://localhost:3000/admin](http://localhost:3000/admin).
+يخدم Wrangler الـ API محلياً على `http://localhost:8787`؛ اختبر `http://localhost:8787/api/store`. شغّل الواجهة الثابتة بالطريقة المعتادة بشكل منفصل. للسماح بطلبات المتصفح المحلية، أضف أصل التطوير إلى `ALLOWED_ORIGINS` في `.dev.vars`، مثلاً `http://localhost:5500`.
 
----
+`npm run build` يبقى فحص TypeScript فقط (`tsc --noEmit`). وللتأكد من إعداد الحزمة قبل النشر:
 
-## 4) النشر على Vercel
-
-### الطريقة الأولى — عبر GitHub (مستحسن)
-1. ارفع المجلد إلى مستودع GitHub.
-2. افتح [https://vercel.com/new](https://vercel.com/new) واختر المستودع.
-3. لا تغيّر إعدادات البناء (المشروع جاهز).
-4. في صفحة الإعداد، أضف جميع متغيرات البيئة من `.env.local`.
-   * إن أردت لصق ملف Firebase JSON كاملاً كما هو، استخدم متغيراً واحداً باسم `FIREBASE_SERVICE_ACCOUNT` واترك `FIREBASE_PROJECT_ID` و`FIREBASE_CLIENT_EMAIL` و`FIREBASE_PRIVATE_KEY` فارغة.
-   * **مفتاح Firebase** — أسهل طريقة مع Vercel هي استخدام `FIREBASE_PRIVATE_KEY_BASE64`:
-     ```bash
-     # 1) استخرج قيمة private_key من ملف service-account.json
-     # 2) رمّزه إلى base64 (سطر واحد، بدون \n):
-     node -e 'const k = require("./service-account.json").private_key; process.stdout.write(Buffer.from(k).toString("base64"))'
-     ```
-     ثم الصق الناتج في Vercel كقيمة لـ `FIREBASE_PRIVATE_KEY_BASE64` — لن تحتاج إلى التعامل مع `\n` أو الاقتباس.
-   * إن استخدمت `FIREBASE_PRIVATE_KEY` مباشرة، الصق المحتوى كما هو من ملف JSON (مع `\n` المهروبة) — الكود يعالجها تلقائياً. **هام**: لا تحط علامتي تنصيص حول القيمة في واجهة Vercel، فقط الصقها كنص خام.
-5. اضغط **Deploy**.
-
-### الطريقة الثانية — عبر Vercel CLI
 ```bash
-npm i -g vercel
-vercel login
-vercel link
-# أضف المتغيرات
-vercel env add ADMIN_PASSWORD production
-vercel env add JWT_SECRET production
-# … باقي المتغيرات
-vercel --prod
+npm run build
+npx wrangler deploy --dry-run
 ```
 
 ---
 
-## 5) ربط دومين goldenstore.me
+## 3. الإعداد والنشر على Cloudflare Workers
 
-في Vercel → Project → **Settings → Domains** أضف `goldenstore.me` و `www.goldenstore.me`.
-ستظهر تعليمات DNS — اتبعها في لوحة الدومين عندك.
+1. عدّل `wrangler.toml` عند الحاجة: اسم Worker، نطاق Cloudflare، نطاقات CORS، Firebase Project ID، R2 Account ID، وR2 Public URL. القيم الخاصة في الملف مجرد placeholders.
+2. سجّل الدخول إلى Wrangler:
+
+```bash
+npx wrangler login
+```
+
+3. خزّن الأسرار عبر Wrangler. للنشر الأول، أنشئ ملفاً محلياً غير متعقّب اسمه `.secrets.env` يتضمن مفاتيح الأسرار الستة أدناه فقط، ثم مرّره إلى `deploy` حتى لا تُنشر نسخة أولى بلا credentials. لا تضع قيماً حقيقية في Git أو في أوامر shell:
+
+```text
+ADMIN_PASSWORD=...
+JWT_SECRET=...
+FIREBASE_SERVICE_ACCOUNT='{"type":"service_account",...}'
+FIREBASE_API_KEY=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+```
+
+`FIREBASE_SERVICE_ACCOUNT` هو JSON كامل ومضغوط في سطر واحد. الملف `.secrets.env` مُدرج في `.gitignore`. لنشر تحديث لاحق أو تدوير سرّ موجود استخدم Wrangler بشكل تفاعلي، مثلاً `npx wrangler secret put JWT_SECRET`، من دون كتابة القيمة في الأمر. `FIREBASE_API_KEY` إعداد Firebase عام وليس مفتاح خدمة، لكنه يُحفظ هنا كـ secret كي لا يلزم تضمينه في ملف الإعداد.
+
+إذا أردت بدلاً من JSON الكامل مفاتيح Firebase منفصلة، اضبط `FIREBASE_CLIENT_EMAIL` و`FIREBASE_PRIVATE_KEY` (أو `FIREBASE_PRIVATE_KEY_BASE64`) بالطريقة نفسها، مع إبقاء `FIREBASE_PROJECT_ID` في متغير Worker.
+
+4. ابنِ وانشر Worker مع الأسرار:
+
+```bash
+npm run build
+npx wrangler deploy --secrets-file .secrets.env
+```
+
+لمتابعة السجلات:
+
+```bash
+npx wrangler tail goldenstore-api
+```
+
+### توجيه الإنتاج من دون تعديل الواجهة
+
+يحتوي `wrangler.toml` على Routes لـ `goldenstore.online/api/*` و`www.goldenstore.online/api/*`، إضافة إلى Custom Domain `api.goldenstore.online` لواجهة الـ Worker. يجب أن يكون نطاق `goldenstore.online` مفعّلاً في حساب Cloudflare نفسه، وأن يمر DNS عبر Cloudflare. على نطاق الموقع، الـ Route يمرر الاستدعاءات الحالية النسبية مثل `/api/apps` مباشرة إلى Worker. ولأن `goldenstore-new.pages.dev` ليس ضمن نطاق DNS الخاص بك، يحتوي المشروع على Pages Function صغيرة في `functions/api/[[path]].ts` تعمل كـ same-origin proxy إلى `https://api.goldenstore.online/api/*`. إذا استمر نشر الواجهة على Vercel، فإن `vercel.json` يستخدم الـ Custom Domain نفسه كـ proxy خارجي فقط (لا توجد Vercel Function). **قائمة `ALLOWED_ORIGINS` تخص CORS فقط ولا تقوم بعمل proxy أو توجيه بحد ذاتها.** أضف أي أصل إنتاجي أو معاينة آخر إلى `ALLOWED_ORIGINS` قبل النشر.
+
+لا يُنشر ملف الواجهة الثابتة من Worker هذا؛ يمكن أن تبقى الاستضافة الثابتة الحالية منفصلة.
 
 ---
 
-## 6) البنية
+## 4. متغيرات البيئة
 
-```
+| المتغير | النوع / الاستخدام |
+|---|---|
+| `ADMIN_USERNAME` | متغير غير سري؛ الافتراضي `admin` |
+| `ADMIN_PASSWORD`, `JWT_SECRET` | أسرار Wrangler للوحة الإدارة وجلسة JWT |
+| `ALLOWED_ORIGINS` | قائمة origins مفصولة بفواصل، مثل نطاق الموقع و`www` |
+| `STORE_NAME`, `STORE_DOMAIN`, `STORE_LOGO_URL` | إعدادات المتجر العامة |
+| `FIREBASE_SERVICE_ACCOUNT` | سر JSON لحساب الخدمة، أو استخدم حقول الخدمة المنفصلة |
+| `FIREBASE_PROJECT_ID` | معرّف المشروع؛ يمكن استخلاصه من JSON الكامل لحساب الخدمة |
+| `FIREBASE_API_KEY` | Web API key مطلوب لاستدعاء Firebase Auth REST `accounts:lookup` |
+| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_PUBLIC_URL` | متغيرات غير سرية لإعداد R2 |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | أسرار R2 بصلاحية أقل ما يمكن |
+
+---
+
+## 5. المسارات والميزات
+
+يظل Hono تحت `basePath('/api')`. تشمل العائلات الموجودة: معلومات المتجر والتحديث والتنزيل، إصدار رمز الضيف، الإشعارات وتسجيل/إزالة رموز FCM والاختبار، الترجمة والتصنيفات والتطبيقات، صفحات slug للتنزيل والتقييم والمراجعات وطلبات التحديث والتبليغ، جلسات تسجيل الدخول والخروج و`/me`، ومسارات الإدارة والرفع متعدد الأجزاء.
+
+يعتمد الوصول إلى Firestore على REST (`runQuery`, `runAggregationQuery`, `PATCH`, `DELETE`, `commit`, والمعاملات) مع تحويل قيم Firestore وعمليات FieldValue اللازمة للمسارات الحالية. يستخدم Firebase Auth Identity Toolkit REST للتحقق، وFCM HTTP v1 للإرسال. عمليات R2 وPresigned URLs وmultipart تُوقّع عبر `aws4fetch`.
+
+---
+
+## 6. بنية المشروع
+
+```text
 goldenstore/
 ├── api/
-│   └── [[...path]].ts     # Vercel Function واحدة — Hono مع كل المسارات
+│   └── [[...path]].ts       # Worker entry point: Hono basePath('/api')
+├── functions/
+│   └── api/[[path]].ts      # Pages same-origin proxy to api.goldenstore.online
 ├── lib/
-│   ├── firebase.ts        # تهيئة Firebase Admin SDK
-│   ├── r2.ts              # عميل R2 (S3-compatible) + presigned URLs
-│   ├── auth.ts            # JWT (HS256) + cookies
-│   ├── types.ts           # أنواع البيانات + التصنيفات الافتراضية
-│   └── utils.ts           # سلَج + مصطلحات بحث + IDs
-├── public/
-│   ├── index.html         # الرئيسية
-│   ├── browse.html        # تصفّح وبحث
-│   ├── app.html           # صفحة تطبيق
-│   ├── categories.html    # التصنيفات
-│   ├── admin.html         # لوحة الإدارة
-│   ├── 404.html
-│   ├── css/style.css      # التصميم
-│   ├── js/
-│   │   ├── icons.js       # مكتبة أيقونات SVG
-│   │   ├── common.js      # helpers + header + footer
-│   │   ├── home.js
-│   │   ├── browse.js
-│   │   ├── app.js
-│   │   └── admin.js
-│   └── images/logo.png    # شعار Goldenstore
-├── .env.example
+│   ├── env.ts               # Cloudflare Worker bindings
+│   ├── firebase.ts          # Firestore/Auth/FCM REST adapters
+│   ├── r2.ts                # aws4fetch + presigned/multipart operations
+│   ├── auth.ts              # JWT عبر jose + مقارنة بيانات الاعتماد
+│   ├── types.ts             # أنواع البيانات والتصنيفات
+│   └── utils.ts             # Web Crypto وعمليات التنظيف والبحث
+├── public/                  # الواجهة الثابتة الحالية
+├── wrangler.toml
 ├── package.json
-├── tsconfig.json
-└── vercel.json
+└── tsconfig.json
 ```
 
----
+## 7. ملاحظات تشغيلية وأمنية
 
-## 7) الوصول للإدارة
+* روابط الرفع الموقعة تحدد مفتاح R2 ونوع المحتوى ومدة الصلاحية؛ يجب أن يتطابق `Content-Type` المرسل من المتصفح مع الرابط.
+* محدد المعدل الحالي محفوظ في ذاكرة Worker isolate، لذا هو أفضل جهد محلي وليس حداً موزعاً أو دائماً. لا تستخدمه بديلاً عن Cloudflare WAF/Rate Limiting عند الحاجة إلى حد موثوق على مستوى كل الزيارات.
+* FCM HTTP v1 لا يقدم multicast واحداً؛ إرسال الرسائل إلى عدة tokens يتطلب طلباً لكل token. الإشعارات العامة الحالية ترسل إلى topic واحد.
+* خطط Cloudflare وFirebase وR2 لها حصص استخدام وحدود؛ لا يُفترض أن تكون مجانية أو غير محدودة عند أي حجم.
+* لا تضع بيانات الخدمة أو كلمات المرور أو مفاتيح R2 في Git أو في ملف `wrangler.toml`.
 
-* **الوصول فقط عبر الرابط المباشر** `/admin` — لا يوجد أي زر أو رابط في الواجهة العامة.
-* صفحة الدخول تطلب **كلمة المرور فقط** (اسم المستخدم ثابت في متغيرات البيئة).
-* تستخدم جلسة JWT لمدة 7 أيام داخل كوكي HttpOnly.
-
-## 8) كيفية رفع تطبيق مهكّر
-
-1. ادخل إلى `/admin` بكلمة المرور.
-2. اختر تبويب **تطبيق جديد**.
-3. عبّئ الاسم، اسم الحزمة (`com.example.app`)، التصنيف، الإصدار…
-4. اسحب أو اختر ملف APK المهكّر + أيقونة + لقطات شاشة.
-5. اضغط **رفع التطبيق**.
-
-تُرفع الملفات مباشرة من متصفحك إلى R2 (بدون المرور عبر Vercel)، وتُحفظ بيانات التطبيق في Firestore.
-
----
-
-## 9) ملاحظات
-
-* **حجم الملف**: لا يوجد حد عند الرفع عبر presigned URLs (يصل لعدة جيجابايت).
-* **التنزيل**: عند ضغط زر التنزيل، يُولَّد رابط مؤقت (5 دقائق) ويُرسل ملف APK باسم مناسب. يُحدَّث عدّاد التنزيلات تلقائياً.
-* **التحديثات التلقائية**: غير مدعومة (كما في Google Play). تحتاج إلى آلية داخل التطبيق نفسه للتحقق من الإصدار الجديد.
-* **التكلفة**: Vercel Free + Firebase Spark + R2 Free يكفون لمتاجر صغيرة/متوسطة بدون أي تكلفة (10 GB R2 + 1 GB Firestore + 100 GB Vercel bandwidth).
-
----
-
-© goldenstore.me — المتجر الذهبي الحصري للتطبيقات المهكرة
+© goldenstore.online — المتجر الذهبي الحصري للتطبيقات المهكرة

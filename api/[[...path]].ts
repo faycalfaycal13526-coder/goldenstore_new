@@ -448,33 +448,51 @@ app.get('/store', (c) => {
   });
 });
 
+// Fallback only — used when Firestore has no app_updates/current document.
 const CURRENT_RELEASE = {
-  version_name: '1.17',
-  version_code: 18,
-  apk_url:
-    'https://github.com/faycalfaycal13526-coder/Golden-android/releases/download/v1.17/GoldenStore-v1.17.apk',
+  version_name: '1.18',
+  version_code: 19,
+  apk_url: 'https://cdn.goldenstore.online/apk/goldenstore-app-1791319330825-c2d8f1.apk',
   notes: 'نسخة أسرع بكثير: التطبيق الآن يفتح المتجر مباشرة بدون انتظار — حدّث الآن',
 };
-const MAX_PLAUSIBLE_VERSION_CODE = 100000;
 
 app.get('/app-update', async (c) => {
   try {
     const db = await firestore(c.env);
     const doc = await db.collection('app_updates').doc('current').get();
-    if (!doc.exists) return c.json({});
-    const d = doc.data() || {};
-    let version_code = safeInt(d.version_code, 0, 999999999);
-    let apk_url = sanitizeUrl(d.apk_url) || sanitizeUrl(d.url) || '';
-    let notes = sanitizeText(d.notes, 1000);
-    let version_name = sanitizeText(d.version_name, 60) || '';
-    let force = d.force === true;
-    if (version_code > MAX_PLAUSIBLE_VERSION_CODE || !apk_url) {
-      version_code = CURRENT_RELEASE.version_code;
-      apk_url = CURRENT_RELEASE.apk_url;
-      notes = CURRENT_RELEASE.notes;
-      version_name = CURRENT_RELEASE.version_name;
-      force = false;
+
+    // No Firestore document → return the hardcoded fallback.
+    if (!doc.exists) {
+      return c.json({
+        version_name: CURRENT_RELEASE.version_name,
+        version_code: CURRENT_RELEASE.version_code,
+        apk_url: CURRENT_RELEASE.apk_url,
+        url: CURRENT_RELEASE.apk_url,
+        notes: CURRENT_RELEASE.notes,
+        message: CURRENT_RELEASE.notes,
+        force: false,
+        created_at: 0,
+        downloads: 0,
+        update: {
+          version_name: CURRENT_RELEASE.version_name,
+          version_code: CURRENT_RELEASE.version_code,
+          apk_url: CURRENT_RELEASE.apk_url,
+          url: CURRENT_RELEASE.apk_url,
+          notes: CURRENT_RELEASE.notes,
+          message: CURRENT_RELEASE.notes,
+          force: false,
+        },
+      });
     }
+
+    // Firestore is the source of truth — no version_code sanity check.
+    const d = doc.data() || {};
+    const version_code = safeInt(d.version_code, 0, 999999999);
+    const apk_url = sanitizeUrl(d.apk_url) || sanitizeUrl(d.url) || CURRENT_RELEASE.apk_url;
+    const notes = sanitizeText(d.notes, 1000) || CURRENT_RELEASE.notes;
+    const version_name = sanitizeText(d.version_name, 60) || CURRENT_RELEASE.version_name;
+    const force = d.force === true;
+
     const out: Record<string, any> = {
       version_name,
       version_code,
@@ -503,15 +521,16 @@ app.get('/app-update/download', async (c) => {
   const db = await firestore(c.env);
   const ref = db.collection('app_updates').doc('current');
   const doc = await ref.get();
-  if (!doc.exists) return c.json({ error: 'not_found' }, 404);
 
-  const data = doc.data() || {};
-  let apkUrl = sanitizeUrl(data.apk_url) || sanitizeUrl(data.url) || '';
-  const versionCode = safeInt(data.version_code, 0, 999999999);
-  if (versionCode > MAX_PLAUSIBLE_VERSION_CODE || !apkUrl) apkUrl = CURRENT_RELEASE.apk_url;
+  let apkUrl = '';
+  if (doc.exists) {
+    const data = doc.data() || {};
+    apkUrl = sanitizeUrl(data.apk_url) || sanitizeUrl(data.url) || '';
+  }
+  if (!apkUrl) apkUrl = CURRENT_RELEASE.apk_url;
   if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
 
-  if (rateLimit(ip, 'dl-count:store-app-update', 1, 600)) {
+  if (doc.exists && rateLimit(ip, 'dl-count:store-app-update', 1, 600)) {
     try {
       const FV = await getFieldValue();
       await ref.set({ downloads: FV.increment(1) }, { merge: true });
@@ -728,9 +747,6 @@ app.get('/categories', async (c) => {
   return c.json({ categories });
 });
 
-// ============================================================
-// ⚡ FIXED: /apps endpoint — filter in-memory (no Firestore index needed)
-// ============================================================
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase();
   const category = (c.req.query('category') || '').trim();
@@ -745,7 +761,6 @@ app.get('/apps', async (c) => {
 
   const db = await firestore(c.env);
 
-  // Fetch all apps from Firestore (no composite index needed)
   let allDocs: any[];
   try {
     const allSnap = await db.collection('apps').get();
@@ -757,24 +772,20 @@ app.get('/apps', async (c) => {
 
   let docs = allDocs;
 
-  // Filter by type
   if (gameOnly) {
     docs = docs.filter((d: any) => (d.data() as any).type === 'game');
   } else if (excludeGames) {
     docs = docs.filter((d: any) => (d.data() as any).type !== 'game');
   }
 
-  // Filter by category
   if (category) {
     docs = docs.filter((d: any) => (d.data() as any).category === category);
   }
 
-  // Filter by stars
   if (starredOnly) {
     docs = docs.filter((d: any) => ((d.data() as any).stars || 0) > 0);
   }
 
-  // Filter by search query
   if (q) {
     const token = q.split(/\s+/).filter((w) => w.length >= 2)[0];
     if (token) {
@@ -785,7 +796,6 @@ app.get('/apps', async (c) => {
     }
   }
 
-  // Sort in memory
   if (sort === 'popular') {
     docs.sort((a: any, b: any) => {
       const diff = ((b.data().downloads || 0) - (a.data().downloads || 0));

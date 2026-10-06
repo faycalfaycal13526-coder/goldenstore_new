@@ -32,18 +32,12 @@ function langSwitcherEl() {
   try { if (window.GSI18N && window.GSI18N.switcherEl) return window.GSI18N.switcherEl(); } catch (e) {}
   return document.createComment('lang');
 }
-// Apply persisted theme as early as possible.
 applyTheme(currentTheme());
 
 /* ----------------------------- API ----------------------------- */
 function isNativeApp() {
   return typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 }
-// The store's one and only API origin. IMPORTANT: window.Capacitor.getConfig()
-// is NOT available inside the WebView (it is not part of the injected native
-// bridge), so the old fallback silently sent every API call from the app to
-// the DEPRECATED goldenstore.vercel.app deployment — a different store with a
-// different database. This constant is the single source of truth now.
 const STORE_API_ORIGIN = 'https://goldenstore-new.vercel.app';
 
 function apiBaseUrl() {
@@ -185,15 +179,12 @@ function formatDate(ts) {
   return new Date(ts * 1000).toLocaleDateString(lang, { year: 'numeric', month: 'short', day: 'numeric', numberingSystem: 'latn' });
 }
 
-// Real rating helpers — based on actual user votes from the backend.
-// rating = average (0–5), rating_count/stars = number of ratings.
 function ratingCountOf(app) {
   return Number((app && (app.rating_count != null ? app.rating_count : app.stars)) || 0);
 }
 function ratingValue(app) {
   return Number((app && app.rating) || 0);
 }
-// Formatted average for display, or null when the app has no ratings yet.
 function ratingOf(app) {
   if (ratingCountOf(app) <= 0) return null;
   return ratingValue(app).toFixed(1);
@@ -201,9 +192,6 @@ function ratingOf(app) {
 
 function getQuery(name) { return new URLSearchParams(location.search).get(name) || ''; }
 
-// Public origin of the store website for share links. Inside the native
-// WebView the document origin is a local scheme (capacitor://localhost), so
-// shared links must point at the real site instead.
 function publicOrigin() {
   try {
     if (isNativeApp()) {
@@ -230,8 +218,6 @@ function toast(msg, type = 'info', ms = 3000) {
 }
 
 /* ----------------------------- Cards ----------------------------- */
-// Square poster card (horizontal rows)
-// <bdi> keeps Latin/mixed app names from breaking RTL punctuation order.
 function posterCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'poster' },
@@ -243,7 +229,6 @@ function posterCard(a) {
   );
 }
 
-// Full-width list row (recommended / search results)
 function listRow(a, opts = {}) {
   const cat = categoryName(a.category);
   const rt = ratingOf(a);
@@ -265,7 +250,6 @@ function listRow(a, opts = {}) {
   );
 }
 
-// Square grid card used in the home-page grid view.
 function gridCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'grid-card' },
@@ -281,7 +265,6 @@ function gridCard(a) {
   );
 }
 
-// Google Play-style featured card: image with gradient + description overlay, compact info bar below.
 function featureSlide(a) {
   const slide = el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'fc-slide' });
   const media = el('div', { class: 'fc-media' });
@@ -293,7 +276,6 @@ function featureSlide(a) {
       ? el('img', { class: 'fc-fallback-ico', src: a.icon_url, alt: '', loading: 'lazy' })
       : ico('package', 'icon icon-lg'));
   }
-  // Description overlay on gradient at bottom of image
   const desc = a.short_description || a.description || '';
   if (desc) {
     media.append(el('div', { class: 'fc-desc' }, desc));
@@ -333,15 +315,8 @@ function featureCarousel(apps, opts = {}) {
 
   let idx = 0;
   let timer = null;
-  // Auto-advance is OFF by default — users complained that the carousel
-  // "scrolls by itself" which interrupted manual touch scrolling. Manual
-  // touch scroll + dots is the Google Play model.
   const AUTO_ADVANCE = false;
 
-  // --- Touch-scroll carousel ---
-  // The track is a native horizontal scroller: momentum, edge resistance and
-  // swipe direction all follow the finger exactly (like Google Play). The
-  // active index is derived from the scroll position; dots stay in sync.
   function slideWidth() {
     return track.clientWidth || wrap.clientWidth || 1;
   }
@@ -377,7 +352,6 @@ function featureCarousel(apps, opts = {}) {
     });
   }, { passive: true });
 
-  // Resume auto-advance (if enabled) after the user finishes touching.
   let touchResumeTimer = null;
   track.addEventListener('touchstart', () => {
     if (timer) clearInterval(timer);
@@ -396,7 +370,6 @@ function featureCarousel(apps, opts = {}) {
 }
 
 const CAT_NAMES = {
-  // App categories
   social: 'تواصل اجتماعي', communication: 'اتصالات', tools: 'أدوات', productivity: 'إنتاجية',
   entertainment: 'ترفيه', education: 'تعليم', photography: 'تصوير', music: 'موسيقى وصوتيات',
   video_players: 'مشغّلات فيديو', finance: 'مالية', shopping: 'تسوق', news: 'أخبار ومجلات',
@@ -407,7 +380,6 @@ const CAT_NAMES = {
   house_home: 'منزل', parenting: 'أبوّة وأمومة', events: 'فعاليات', comics: 'قصص مصوّرة',
   vpn: 'VPN وخصوصية', system: 'أدوات النظام', wallpapers: 'خلفيات', files: 'إدارة الملفات',
   connectivity: 'اتصال وشبكات', other: 'أخرى',
-  // Game categories
   game_action: 'أكشن', game_adventure: 'مغامرات', game_arcade: 'أركيد', game_board: 'ألعاب لوحية',
   game_card: 'ورق (كوتشينة)', game_casino: 'كازينو', game_casual: 'عادية', game_educational: 'تعليمية',
   game_music: 'موسيقى', game_puzzle: 'ألغاز', game_racing: 'سباقات', game_rpg: 'تقمّص أدوار',
@@ -415,7 +387,6 @@ const CAT_NAMES = {
   game_trivia: 'معلومات عامة', game_word: 'كلمات', game_other: 'ألعاب أخرى',
   game_family: 'عائلية', game_shooter: 'إطلاق نار', game_action_adventure: 'حركة ومغامرة',
   game_role_playing: 'ألعاب جماعية',
-  // Legacy
   games: 'ألعاب',
 };
 function categoryName(slug) {
@@ -431,17 +402,13 @@ function categoryName(slug) {
 /* -------------------------- States UI -------------------------- */
 function spinner() { return el('div', { class: 'center' }, el('div', { class: 'spinner' })); }
 
-// --- Skeleton loaders ---
 function skEl(w, h, cls = '') {
   return el('div', { class: `sk ${cls}`, style: { width: w, height: h, flexShrink: '0' } });
 }
 function skeletonHome() {
   const wrap = el('div', { class: 'sk-section' });
-  // Hero skeleton
   wrap.append(el('div', { class: 'sk-card', style: { width: '100%', height: '180px', marginBottom: '20px' } }));
-  // Section title
   wrap.append(skEl('35%', '18px'));
-  // Poster row
   const row = el('div', { class: 'sk-hrow', style: { marginTop: '12px' } });
   for (let i = 0; i < 4; i++) {
     const p = el('div', { class: 'sk-poster' });
@@ -451,7 +418,6 @@ function skeletonHome() {
     row.append(p);
   }
   wrap.append(row);
-  // List section
   wrap.append(skEl('30%', '18px', ''), el('div', { style: { height: '16px' } }));
   for (let i = 0; i < 4; i++) {
     const r = el('div', { class: 'sk-row' });
@@ -474,10 +440,8 @@ function skeletonDetail() {
   hInfo.append(skEl('30%', '12px'));
   hdr.append(hInfo);
   wrap.append(hdr);
-  // Button skeleton
   const body = el('div', { class: 'sk-detail-body' });
   body.append(skEl('100%', '44px', ''));
-  // Stats row
   const stats = el('div', { style: { display: 'flex', gap: '24px', justifyContent: 'center', marginTop: '8px' } });
   for (let i = 0; i < 3; i++) {
     const s = el('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' } });
@@ -486,11 +450,9 @@ function skeletonDetail() {
     stats.append(s);
   }
   body.append(stats);
-  // Screenshots
   const scrRow = el('div', { style: { display: 'flex', gap: '10px', overflow: 'hidden', marginTop: '12px' } });
   for (let i = 0; i < 3; i++) scrRow.append(el('div', { class: 'sk-card', style: { width: '140px', height: '250px', flexShrink: '0', borderRadius: '12px' } }));
   body.append(scrRow);
-  // Description
   body.append(skEl('50%', '16px'));
   body.append(skEl('100%', '12px'));
   body.append(skEl('90%', '12px'));
@@ -511,7 +473,6 @@ function skeletonList() {
   }
   return wrap;
 }
-// Poster-row skeleton for the "similar apps" section of the detail page.
 function skeletonSimilar() {
   const row = el('div', { class: 'sk-similar' });
   for (let i = 0; i < 4; i++) {
@@ -557,8 +518,6 @@ const NOTIF_SEEN_KEY = 'gs_notif_seen';
 function notifSeenAt() {
   try { return Number(localStorage.getItem(NOTIF_SEEN_KEY) || 0) || 0; } catch { return 0; }
 }
-// Notifications baseline: set once at first sign-in so everything that
-// existed on the platform BEFORE this user joined never appears to them.
 function notifBaseline(uid) {
   try {
     if (!uid) return 0;
@@ -621,7 +580,6 @@ async function openNotifications() {
   try {
     list = await fetchNotifications();
   } catch {}
-  // Hide everything created before this user's sign-in baseline.
   const base = notifBaseline(_user && _user.uid);
   if (base) list = list.filter((n) => Number(n.created_at || 0) > base);
   const seen = maxNotifCreated(list);
@@ -660,7 +618,6 @@ async function openNotifications() {
   });
 }
 
-// Google Play–style home header: brand logo (start), search + bell + avatar (end).
 function topbarSearch(user) {
   const bellBadge = el('span', { class: 'bell-badge hidden' });
   const searchBtn = el('button', {
@@ -678,8 +635,6 @@ function topbarSearch(user) {
     onclick: openNotifications,
   }, ico('bell'), bellBadge);
   Promise.resolve().then(() => refreshBellBadge());
-  // Profile avatar moved to the bottom nav ("أنت"); the search button now sits
-  // where the avatar used to be (top end).
   return el('div', { class: 'topbar' },
     el('div', { class: 'topbar-home' },
       el('a', { href: '/', class: 'brand', 'aria-label': 'Golden Store' }, el('img', { src: '/images/logo.png', alt: 'Golden Store' })),
@@ -690,10 +645,6 @@ function topbarSearch(user) {
   );
 }
 
-// Back/title top bar (detail)
-// Smart back: return to wherever the user came from (search, home, games…);
-// only fall back to the home page when this page was opened directly
-// (deep link / cold start), where history.back() has nowhere to go.
 function topbarNav(title = '', actions = []) {
   return el('div', { class: 'topbar-nav' },
     el('button', { class: 'icon-btn', 'aria-label': t('رجوع'), onclick: () => {
@@ -723,8 +674,6 @@ function bottomNav(active) {
     el('div', { class: 'bottomnav-inner' },
       brand,
       ...NAV_ITEMS_RAW.map((it) => {
-        // The account tab ("أنت") shows the signed-in user's profile picture
-        // instead of a generic icon.
         const isAccount = it.key === 'account';
         let iconNode;
         if (isAccount && _user) {
@@ -746,9 +695,6 @@ function bottomNav(active) {
 }
 
 /* --------------------------- Auth gate --------------------------- */
-// Sign-in UI lives on the dedicated /login page (see login.html / login.js).
-// Other pages render optimistically from cache and redirect to /login when
-// there is no valid session.
 
 let _user = null;
 let _authed = false;
@@ -763,69 +709,11 @@ function isLocalhost() {
   return ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname);
 }
 
-// Cache the last signed-in user so navigation between pages renders instantly
-// (no login-screen flash) while Firebase re-validates the session in the background.
 const CACHE_KEY = 'gs_user';
-const SAVED_ACCOUNTS_KEY = 'gs_saved_accounts_v1';
-const ACCOUNT_SWITCH_EMAIL_KEY = 'gs_account_switch_email';
-const ACCOUNT_SWITCH_INTENT_KEY = 'gs_account_switch_intent';
-const ACCOUNT_SWITCH_STARTED_KEY = 'gs_account_switch_started';
-const MAX_SAVED_ACCOUNTS = 8;
 
-function normalizeAccountEmail(value) {
-  const email = String(value || '').trim();
-  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
-}
-function getSavedAccounts() {
-  try {
-    const value = JSON.parse(localStorage.getItem(SAVED_ACCOUNTS_KEY) || '[]');
-    if (!Array.isArray(value)) return [];
-    const seen = new Set();
-    return value.map((item) => {
-      const email = normalizeAccountEmail(item && item.email);
-      if (!email) return null;
-      const key = email.toLowerCase();
-      if (seen.has(key)) return null;
-      seen.add(key);
-      return {
-        email,
-        displayName: String((item && item.displayName) || '').slice(0, 80),
-        lastUsedAt: Number((item && item.lastUsedAt) || 0),
-      };
-    }).filter(Boolean).slice(0, MAX_SAVED_ACCOUNTS);
-  } catch { return []; }
-}
-function rememberAccount(user) {
-  const email = normalizeAccountEmail(user && user.email);
-  if (!email) return;
-  try {
-    const lower = email.toLowerCase();
-    const previous = getSavedAccounts().filter((account) => account.email.toLowerCase() !== lower);
-    const accounts = [{
-      email,
-      displayName: String((user && user.displayName) || '').slice(0, 80),
-      lastUsedAt: Date.now(),
-    }, ...previous].slice(0, MAX_SAVED_ACCOUNTS);
-    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
-  } catch {}
-}
-function removeSavedAccount(email) {
-  const normalized = normalizeAccountEmail(email);
-  if (!normalized || (_user && normalizeAccountEmail(_user.email).toLowerCase() === normalized.toLowerCase())) return false;
-  try {
-    const accounts = getSavedAccounts().filter((account) => account.email.toLowerCase() !== normalized.toLowerCase());
-    localStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
-    return true;
-  } catch { return false; }
-}
-function importLegacyCachedAccount() {
-  const previous = cachedUser();
-  if (previous && previous.email) rememberAccount(previous);
-}
 function cacheUser(user) {
   try {
     if (user) {
-      rememberAccount(user);
       localStorage.setItem(CACHE_KEY, JSON.stringify({
         displayName: user.displayName || '', email: user.email || '', photoURL: user.photoURL || '', uid: user.uid || '',
       }));
@@ -837,8 +725,6 @@ function cachedUser() {
 }
 
 function hideGate() { if (_gateEl) { _gateEl.remove(); _gateEl = null; } }
-// The mandatory sign-in gate is hidden through hideAuthGate() (called by
-// initAuth's onAuthChange handler), nothing else needed here.
 
 function onAuthed(user) {
   const firstRender = !_authed;
@@ -862,8 +748,6 @@ function isLoggedIn() { return !!_user; }
 
 async function authedApi(path, opts = {}) {
   if (!window.GAuth || !window.GAuth.getIdToken) { const e = new Error('unauthorized'); e.status = 401; throw e; }
-  // Pages render optimistically from the cached user, so Firebase may not have
-  // resolved _currentUser yet. Wait for it before requesting an ID token.
   let token = await window.GAuth.getIdToken();
   if (!token && window.GAuth.ready) { await window.GAuth.ready(); token = await window.GAuth.getIdToken(true); }
   if (!token) { const e = new Error('unauthorized'); e.status = 401; throw e; }
@@ -871,8 +755,6 @@ async function authedApi(path, opts = {}) {
   return api(path, { ...opts, headers });
 }
 
-// Shows a login-required modal; returns a Promise that resolves to the user
-// (after successful sign-in) or rejects if cancelled.
 function requireAuth() {
   if (_user) return Promise.resolve(_user);
   return new Promise((resolve, reject) => {
@@ -917,9 +799,6 @@ function goToLogin() {
 }
 
 function showAuthGate() {
-  // Full-screen sign-in gate: nothing in the store is reachable until the
-  // user signs in with Google. Notifications are only registered after this
-  // succeeds, so users never receive platform notifications before signing in.
   if (document.getElementById('gs-auth-gate')) return;
   const gate = el('div', { id: 'gs-auth-gate', class: 'gate' });
   const inner = el('div', null,
@@ -959,7 +838,7 @@ function showAuthGate() {
     if (spin) spin.classList.remove('hidden');
     try {
       const user = await window.GAuth.signInWithGoogle();
-      if (user) return; // onAuthChange will tear the gate down
+      if (user) return;
       if (spin) spin.classList.add('hidden');
       if (btn) btn.disabled = false;
     } catch (e) {
@@ -975,11 +854,8 @@ function hideAuthGate() {
 }
 
 function initAuth() {
-  // Localhost-only preview bypass (never active in production).
   if (isLocalhost() && getQuery('devskip') === '1') { onAuthed(devUser()); return; }
 
-  // If GAuth isn't available (SDK failed to load), keep the gate visible
-  // with a retry affordance instead of letting guests browse the store.
   if (!window.GAuth || typeof window.GAuth.onAuthChange !== 'function') {
     console.error('GAuth not available — Firebase SDK may have failed to load');
     showAuthGate();
@@ -993,7 +869,6 @@ function initAuth() {
       onAuthed(user);
       hideAuthGate();
     } else {
-      // No valid session: block the store behind the sign-in gate.
       cacheUser(null);
       _user = null;
       hideGate();
@@ -1007,49 +882,10 @@ async function signOut() {
   location.href = '/';
 }
 
-// Explicit account switching: end the current Firebase session, then open the
-// dedicated sign-in flow. A locally saved email is passed only as a Google
-// login hint; it is never treated as proof of identity or stored as a credential.
-async function switchAccount(emailHint) {
-  const selectedEmail = normalizeAccountEmail(emailHint);
-  const currentEmail = normalizeAccountEmail(_user && _user.email);
-  if (selectedEmail && currentEmail && selectedEmail.toLowerCase() === currentEmail.toLowerCase()) return;
-
-  try {
-    if (selectedEmail) sessionStorage.setItem(ACCOUNT_SWITCH_EMAIL_KEY, selectedEmail);
-    else sessionStorage.removeItem(ACCOUNT_SWITCH_EMAIL_KEY);
-    sessionStorage.setItem(ACCOUNT_SWITCH_INTENT_KEY, '1');
-    sessionStorage.removeItem(ACCOUNT_SWITCH_STARTED_KEY);
-  } catch {}
-
-  cacheUser(null);
-  try {
-    const nativeSignOut = window.GSAndroid &&
-      (window.GSAndroid.signOutFromGoogle || window.GSAndroid.signOutGoogle);
-    if (typeof nativeSignOut === 'function') await nativeSignOut.call(window.GSAndroid);
-  } catch (e) {
-    console.warn('Native Google account sign-out was unavailable', e);
-  }
-  try {
-    if (!window.GAuth || !window.GAuth.signOut) throw new Error('auth_not_available');
-    await window.GAuth.signOut();
-  } catch (e) {
-    try {
-      sessionStorage.removeItem(ACCOUNT_SWITCH_EMAIL_KEY);
-      sessionStorage.removeItem(ACCOUNT_SWITCH_INTENT_KEY);
-    } catch {}
-    console.warn('Firebase sign-out failed during account switch', e);
-    toast(t('تعذّر تسجيل الخروج، حاول مرة أخرى'), 'error');
-    return;
-  }
-  location.replace('/login?next=' + encodeURIComponent('/account') + '&switch=1');
-}
-
 /* ----------------------------- App update popup ----------------------------- */
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
 
 function getCurrentAppVersion() {
-  // Native bridge first — getConfig() is unavailable inside the WebView.
   try {
     if (window.GSAndroid && typeof window.GSAndroid.getVersionName === 'function') {
       const v = window.GSAndroid.getVersionName();
@@ -1079,10 +915,6 @@ function shouldShowUpdate(update) {
     const dismissed = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
     if (!update.force && dismissed[update.version_name]) return false;
   } catch (e) {}
-  // Numeric version-code comparison against the installed app (native truth).
-  // Sanity cap: reject absurd version codes (e.g. stale 999999999 records
-  // from old deployments) — they used to trigger a fake update dialog on
-  // every launch. Real version codes for this store are small integers.
   const vc = Number(update.version_code || 0);
   const nativeVc = getCurrentVersionCode();
   if (vc && vc > 100000) return false;
@@ -1125,7 +957,6 @@ function showUpdateDialog(update) {
         return;
       } catch (e) {}
     }
-    // Fallback: open the APK URL in the system/browser.
     window.open(update.apk_url, '_blank');
     setTimeout(() => overlay.remove(), 200);
   }
@@ -1153,9 +984,6 @@ function showUpdateDialog(update) {
 }
 
 window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
-  // --- Central live-state hub (page-independent, like Google Play) ---
-  // Every native download/install event flows through here so ANY screen
-  // (app page, library, home) can render the same live progress and status.
   try {
     if (slug && slug !== 'app-update') {
       if (status === 'downloading') {
@@ -1187,8 +1015,6 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
         const dls = getActiveDownloadMap();
         if (dls[slug]) setActiveDownload({ slug, status: 'installing', progress: 1 });
       } else if (status === 'installed') {
-        // Central pipeline: registry + state cleanup + UI events. `message`
-        // carries the REAL resolved package name (native ground truth).
         applyInstalled(slug, message || '');
       } else if (status === 'uninstalled') {
         unmarkInstalledStored(slug);
@@ -1205,15 +1031,12 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
         removeApkState(slug);
         removeActiveDownload(slug);
       }
-      // NOTE: for "installed" applyInstalled() already dispatched the
-      // gs-apk-state event — don't fire it twice (double toasts/UI swaps).
       if (status !== 'installed') {
         try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status, progress, message } })); } catch (e) {}
       }
     }
   } catch (e) { console.error('[apkStateHub]', e); }
 
-  // --- Self-update dialog (Golden Store app itself) ---
   if (slug !== 'app-update') return;
   if (status === 'failed') {
     const map = {
@@ -1232,8 +1055,6 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
   }
 };
 
-// Native pushes a full snapshot after reconciling states with the device
-// (fired on every onResume). Merges everything into the live hub.
 window.__gsDownloadStatesSnapshot = function (states) {
   try {
     if (!states || typeof states !== 'object') return;
@@ -1263,22 +1084,16 @@ window.__gsDownloadStatesSnapshot = function (states) {
       }
       try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status, progress, message: st.filename || '' } })); } catch (e) {}
     });
-    // Native is the SOURCE OF TRUTH: prune web-side entries it no longer
-    // tracks (installs completed / cancelled while this page was closed).
-    // Without this, the library keeps showing "جارٍ التثبيت" forever.
     const valid = new Set(Object.keys(states));
     const apkMap = getApkStateMap();
     Object.keys(apkMap).forEach((slug) => {
-      if (slug === 'app-update') return; // self-update flow tracks itself
+      if (slug === 'app-update') return;
       if (!valid.has(slug)) { removeApkState(slug); removeActiveDownload(slug); }
     });
     notifyActiveDownloads();
   } catch (e) { console.error('[statesSnapshot]', e); }
 };
 
-// Native bridge notifies the web layer when any package is uninstalled.
-// Pages that care (app detail) listen for 'gs-package-uninstalled' and can
-// match the removed package name against the app they display.
 window.__gsPackageUninstalled = function (packageName) {
   try {
     if (!packageName) return;
@@ -1303,8 +1118,6 @@ async function checkAppUpdate() {
 }
 
 /* ------------------- Live APK state registry (persistent) ------------------- */
-// Tracks downloading / downloaded / installing states across pages and app
-// restarts. The native bridge pushes snapshots; every page can subscribe.
 const APK_STATE_KEY = 'gs_apk_states';
 function getApkStateMap() {
   try {
@@ -1335,9 +1148,6 @@ function onApkState(fn) {
   return () => window.removeEventListener('gs-apk-state', handler);
 }
 
-// Pull the full download/install snapshot from the native bridge (called on
-// every page load). This is what makes progress/status live across restarts:
-// the native side persists its states and reconciles them with the device.
 function syncNativeStates() {
   if (!isNativeApp()) return;
   try {
@@ -1348,18 +1158,10 @@ function syncNativeStates() {
   } catch (e) { console.error('[syncNativeStates]', e); }
 }
 
-/* ------------------- Device truth resolver + heartbeat (v1.9) -------------------
- * The #1 reliability rule of Google Play: the DEVICE decides, always.
- * Native checkAppStatus(slug, pkg) resolves an app through every ground truth
- * (metadata package → slug registry → REAL package read from the APK file),
- * so a missed broadcast, a stale snapshot or wrong store metadata can never
- * leave a button stuck on "جارٍ التثبيت" or "تثبيت + حذف الملف" again:
- * within a heartbeat the UI re-syncs itself to the real device state. */
+/* ------------------- Device truth resolver + heartbeat (v1.9) ------------------- */
 function isNativeBridge() {
   return !!(window.GSAndroid && typeof window.GSAndroid.checkAppStatus === 'function');
 }
-// Ask the device for the REAL install status of an app. Returns
-// { installed, version, package_name, status, progress, filename } or null.
 function checkAppStatus(slug, packageName) {
   if (!slug || !isNativeBridge()) return null;
   try {
@@ -1369,9 +1171,6 @@ function checkAppStatus(slug, packageName) {
     return obj;
   } catch (e) { return null; }
 }
-// slug → REAL device package (learned from successful status checks / install
-// events). Open/Uninstall must always use THIS, never the possibly-wrong
-// store metadata.
 const RESOLVED_PKG_KEY = 'gs_resolved_pkgs';
 function rememberResolvedPackage(slug, pkg) {
   if (!slug || !pkg) return;
@@ -1389,14 +1188,11 @@ function resolvedPackageName(slug) {
     return map[slug] || '';
   } catch { return ''; }
 }
-// Central "install completed" pipeline — the ONLY place that flips states,
-// so events from the native push, the snapshot and the heartbeat all end up
-// in exactly the same clean state.
 const recentInstalledAt = Object.create(null);
 function applyInstalled(slug, resolvedPkg) {
   if (!slug) return;
   const now = Date.now();
-  if (now - (recentInstalledAt[slug] || 0) < 3000) return; // dedupe bursts
+  if (now - (recentInstalledAt[slug] || 0) < 3000) return;
   recentInstalledAt[slug] = now;
   if (resolvedPkg) rememberResolvedPackage(slug, resolvedPkg);
   markInstalledStored(slug);
@@ -1405,9 +1201,7 @@ function applyInstalled(slug, resolvedPkg) {
   try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'installed', progress: 1, message: resolvedPkg || '' } })); } catch (e) {}
   try { window.dispatchEvent(new CustomEvent('gs-install-resolved', { detail: { slug, packageName: resolvedPkg || '' } })); } catch (e) {}
 }
-// Apps the current page wants watched (detail page registers its app here;
-// the heartbeat keeps it synced even with zero live downloads).
-const watchedApps = new Map(); // slug → packageName
+const watchedApps = new Map();
 let heartbeatTimer = null;
 function registerInstallWatch(slug, packageName) {
   if (!slug) return;
@@ -1417,8 +1211,6 @@ function registerInstallWatch(slug, packageName) {
 function startHeartbeat() {
   if (heartbeatTimer || !isNativeBridge()) return;
   heartbeatTimer = setInterval(heartbeatTick, 1500);
-  // Re-sync the moment the page becomes visible/focused again (returning
-  // from the system installer, app switch, lock screen…).
   const onVisible = () => { if (!document.hidden) heartbeatTick(); };
   document.addEventListener('visibilitychange', onVisible);
   window.addEventListener('focus', onVisible);
@@ -1427,7 +1219,6 @@ function startHeartbeat() {
 function heartbeatTick() {
   if (!isNativeBridge()) return;
   try {
-    // 1) The app this page displays (even when no live download exists).
     watchedApps.forEach((pkg, slug) => {
       const targetPkg = pkg || resolvedPackageName(slug) || '';
       const st = checkAppStatus(slug, targetPkg);
@@ -1441,7 +1232,6 @@ function heartbeatTick() {
         try { window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { slug, packageName: targetPkg } })); } catch (e) {}
       }
     });
-    // 2) Every non-idle live entry (self-heals the library & other pages).
     const map = getApkStateMap();
     Object.keys(map).forEach((slug) => {
       const st = map[slug];
@@ -1473,8 +1263,6 @@ function markInstalledStored(slug) {
 function unmarkInstalledStored(slug) {
   try { const s = installedSet(); s.delete(slug); localStorage.setItem(INSTALL_KEY, JSON.stringify([...s])); } catch {}
 }
-// REAL device check: asks the native PackageManager. Returns the installed
-// versionName, or '' when not installed / not running natively.
 function installedVersionOnDevice(packageName) {
   if (!isNativeApp() || !packageName) return '';
   try {
@@ -1484,9 +1272,6 @@ function installedVersionOnDevice(packageName) {
   } catch (e) {}
   return '';
 }
-// Slug-based installed check: the native registry remembers slug→package for
-// every real install, so this keeps فتح/إلغاء التثبيت correct even when the
-// store metadata package name is missing or wrong. Returns versionName or ''.
 function isSlugInstalled(slug) {
   if (!isNativeApp() || !slug) return '';
   try {
@@ -1496,7 +1281,6 @@ function isSlugInstalled(slug) {
   } catch (e) {}
   return '';
 }
-// Compare dotted versions: true when `store` is strictly newer than `device`.
 function versionIsNewer(storeVersion, deviceVersion) {
   if (!storeVersion || !deviceVersion) return false;
   if (deviceVersion === 'installed') return false;
@@ -1509,7 +1293,6 @@ function versionIsNewer(storeVersion, deviceVersion) {
   }
   return false;
 }
-// Cancel a native download (Google Play style long-press/cancel affordance).
 function cancelDownload(slug) {
   try {
     if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.cancelDownload === 'function') {
@@ -1522,16 +1305,9 @@ function cancelDownload(slug) {
 
 /* ----------------------------- Boot ----------------------------- */
 function boot() {
-  // Migrate the last account remembered by older builds into the local switcher.
-  importLegacyCachedAccount();
   initAuth();
-  // Restore live download/install states from the native bridge right away so
-  // the app page and the library show real progress/status after a restart.
   syncNativeStates();
-  // Device-truth heartbeat: continuously reconcile install states with the
-  // real PackageManager so no missed event can ever leave a button stuck.
   startHeartbeat();
-  // Check for a newer app version shortly after the store renders.
   if (isNativeApp()) setTimeout(checkAppUpdate, 2000);
 }
 
@@ -1543,7 +1319,6 @@ function getDownloadHistory() {
 function addToDownloadHistory(app) {
   try {
     const list = getDownloadHistory();
-    // Remove existing entry for same slug to avoid duplicates
     const filtered = list.filter((e) => e.slug !== app.slug);
     filtered.unshift({
       slug: app.slug,
@@ -1554,7 +1329,6 @@ function addToDownloadHistory(app) {
       package_name: app.package_name || '',
       downloaded_at: Math.floor(Date.now() / 1000),
     });
-    // Keep max 200 entries
     localStorage.setItem(DL_HISTORY_KEY, JSON.stringify(filtered.slice(0, 200)));
   } catch {}
 }
@@ -1619,9 +1393,6 @@ function onActiveDownloadsChange(fn) {
 
 
 /* --------------- Native app integration (Capacitor/WebView) --------------- */
-// Disable pinch/double-tap zoom, long-press text selection and the callout
-// menu so the store feels like a native app. Inputs stay selectable so search
-// and forms keep working.
 (function injectNativeUx() {
   try {
     var style = document.createElement('style');
@@ -1635,16 +1406,12 @@ function onActiveDownloadsChange(fn) {
       '.bottomnav .nav-avatar-txt{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#0d0d0f;background:#e0b64c;}';
     (document.head || document.documentElement).appendChild(style);
     document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
-    // Block pinch-zoom via multi-touch.
     document.addEventListener('touchmove', function (e) {
       if (e.touches && e.touches.length > 1) e.preventDefault();
     }, { passive: false });
   } catch (e) {}
 })();
 
-// FCM push token bridge. The native app fetches its FCM token and calls
-// window.__gsRegisterPushToken(token). We forward it to the backend only for
-// logged-in users, so pushes reach registered users only.
 (function pushBridge() {
   var currentToken = null;
   var registeredToken = null;
@@ -1668,8 +1435,6 @@ function onActiveDownloadsChange(fn) {
     if (registeredToken === currentToken) return;
     if (!window.Store || !window.Store.isLoggedIn || !window.Store.isLoggedIn()) return;
     var uid = currentUid();
-    // Only real signed-in users (Google accounts) get push notifications.
-    // Anonymous guest sessions use uid prefix 'gs_' and must never register.
     if (!uid || String(uid).indexOf('gs_') === 0) return;
     var stored = getStoredReg();
     if (stored && stored.token === currentToken && stored.uid === uid) {
@@ -1709,7 +1474,6 @@ function onActiveDownloadsChange(fn) {
     } catch (e) {}
   };
 
-  // Re-register whenever auth state settles (login) and drop on logout.
   try {
     if (window.GAuth && window.GAuth.onAuthChange) {
       window.GAuth.onAuthChange(function (user) {
@@ -1728,7 +1492,7 @@ window.Store = {
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications,
-  ready, signOut, switchAccount, getSavedAccounts, removeSavedAccount, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
+  ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,

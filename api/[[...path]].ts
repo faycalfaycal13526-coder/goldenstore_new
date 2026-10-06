@@ -189,7 +189,6 @@ function feature_url(feature_key: string | undefined, env: Env, width: number = 
   if (!feature_key) return null;
   try {
     const baseUrl = r2PublicUrl(feature_key, env);
-    // Optimize via Cloudflare Image Transformations for smaller, faster features.
     return `https://goldenstore.online/cdn-cgi/image/width=${width},format=auto,quality=80/${baseUrl}`;
   } catch {
     return null;
@@ -200,7 +199,6 @@ function icon_url(icon_key: string | undefined, env: Env, width: number = 200): 
   if (!icon_key) return null;
   try {
     const baseUrl = r2PublicUrl(icon_key, env);
-    // Optimize via Cloudflare Image Transformations for smaller, faster icons.
     return `https://goldenstore.online/cdn-cgi/image/width=${width},format=auto,quality=80/${baseUrl}`;
   } catch {
     return null;
@@ -419,11 +417,6 @@ async function sendPushToRegistered(
     result.errors.push('topic_send_failed: ' + (err?.message || String(err)));
   }
 
-  // Web Push (browsers) — sent alongside the Android topic send so both
-  // platforms are notified together. This path only runs through
-  // addNotification, so the admin "notify on publish" toggle
-  // (store_settings/general.notify_new_publications) skips BOTH the Android
-  // topic send and this web send when disabled.
   try {
     const web = await sendWebPush(env, n.title, n.body || '', {
       type: n.type,
@@ -580,12 +573,6 @@ app.post('/notifications/register-token', async (c) => {
   return c.json({ ok: true });
 });
 
-// Web Push token registration (browser clients only — the Capacitor app uses
-// /notifications/register-token with its native FCM device token).
-// The Firebase ID token is verified via Identity Toolkit accounts:lookup
-// (requireFirebaseUser → verifyFirebaseToken → getAuthAdmin().verifyIdToken).
-// One document per user (web_tokens/{uid}) so a rotated browser token
-// replaces the previous one instead of accumulating stale entries.
 app.post('/notifications/register-web', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'reg-web-token', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
@@ -741,6 +728,9 @@ app.get('/categories', async (c) => {
   return c.json({ categories });
 });
 
+// ============================================================
+// ⚡ FIXED: /apps endpoint — filter in-memory (no Firestore index needed)
+// ============================================================
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase();
   const category = (c.req.query('category') || '').trim();
@@ -755,78 +745,81 @@ app.get('/apps', async (c) => {
 
   const db = await firestore(c.env);
 
-  const sortDocs = (docs: any[]) => {
-    if (sort === 'popular') docs.sort((a: any, b: any) =>
-      ((b.data().downloads || 0) - (a.data().downloads || 0)) || (ratingAverage(b.data()) - ratingAverage(a.data())));
-    else if (sort === 'stars' || sort === 'rating') docs.sort((a: any, b: any) =>
-      (ratingAverage(b.data()) - ratingAverage(a.data())) || ((b.data().rating_count || 0) - (a.data().rating_count || 0)));
-    else if (sort === 'name') docs.sort((a: any, b: any) => (a.data().name_lower || '').localeCompare(b.data().name_lower || ''));
-    else docs.sort((a: any, b: any) => (b.data().created_at || 0) - (a.data().created_at || 0));
-    return docs;
-  };
-
-  if (excludeGames) {
-    let base: any = db.collection('apps');
-    if (category) base = base.where('category', '==', category);
-    if (starredOnly) base = base.where('stars', '>', 0);
-    if (q) {
-      const token = q.split(/\s+/).filter((w) => w.length >= 2)[0];
-      if (token) base = base.where('search_terms', 'array-contains', token);
-    }
-    const allSnap = await base.get();
-    let docs = sortDocs(allSnap.docs.filter((d: any) => d.data().type !== 'game'));
-    const total = docs.length;
-    docs = docs.slice(offset, offset + limit);
-    const apps = docs.map((d: any) => {
-      const a = appPublic(d);
-      return { ...a, icon_url: icon_url((d.data() as App).icon_key, c.env), feature_url: feature_url((d.data() as App).feature_key, c.env) };
-    });
-    c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
-    return c.json({ apps, total });
+  // Fetch all apps from Firestore (no composite index needed)
+  let allDocs: any[];
+  try {
+    const allSnap = await db.collection('apps').get();
+    allDocs = allSnap.docs;
+  } catch (err: any) {
+    console.error('[apps] firestore read failed:', err?.message || err);
+    return c.json({ error: 'firestore_error', message: err?.message || String(err) }, 500);
   }
 
-  let query: any = db.collection('apps');
-  if (category) query = query.where('category', '==', category);
-  if (gameOnly) query = query.where('type', '==', 'game');
-  if (starredOnly) query = query.where('stars', '>', 0);
+  let docs = allDocs;
+
+  // Filter by type
+  if (gameOnly) {
+    docs = docs.filter((d: any) => (d.data() as any).type === 'game');
+  } else if (excludeGames) {
+    docs = docs.filter((d: any) => (d.data() as any).type !== 'game');
+  }
+
+  // Filter by category
+  if (category) {
+    docs = docs.filter((d: any) => (d.data() as any).category === category);
+  }
+
+  // Filter by stars
+  if (starredOnly) {
+    docs = docs.filter((d: any) => ((d.data() as any).stars || 0) > 0);
+  }
+
+  // Filter by search query
   if (q) {
     const token = q.split(/\s+/).filter((w) => w.length >= 2)[0];
-    if (token) query = query.where('search_terms', 'array-contains', token);
-  }
-
-  if (sort === 'popular') query = query.orderBy('downloads', 'desc');
-  else if (sort === 'stars' || sort === 'rating') query = query.orderBy('rating', 'desc');
-  else if (sort === 'name') query = query.orderBy('name_lower', 'asc');
-  else query = query.orderBy('created_at', 'desc');
-
-  let total: number;
-  let snap: any;
-  try {
-    total = (await query.count().get()).data().count;
-    snap = await query.limit(limit).offset(offset).get();
-  } catch (err: any) {
-    if (err?.code === 9 || err?.code === 3 || /index/i.test(err?.message ?? '')) {
-      let fallback: any = db.collection('apps');
-      if (category) fallback = fallback.where('category', '==', category);
-      if (gameOnly) fallback = fallback.where('type', '==', 'game');
-      if (starredOnly) fallback = fallback.where('stars', '>', 0);
-      if (q) {
-        const token = q.split(/\s+/).filter((w) => w.length >= 2)[0];
-        if (token) fallback = fallback.where('search_terms', 'array-contains', token);
-      }
-      const allSnap = await fallback.get();
-      let docs = sortDocs(allSnap.docs);
-      total = docs.length;
-      docs = docs.slice(offset, offset + limit);
-      snap = { docs };
-    } else {
-      throw err;
+    if (token) {
+      docs = docs.filter((d: any) => {
+        const terms = (d.data() as any).search_terms;
+        return Array.isArray(terms) && terms.includes(token);
+      });
     }
   }
-  const apps = snap.docs.map((d: any) => {
+
+  // Sort in memory
+  if (sort === 'popular') {
+    docs.sort((a: any, b: any) => {
+      const diff = ((b.data().downloads || 0) - (a.data().downloads || 0));
+      if (diff !== 0) return diff;
+      return ratingAverage(b.data()) - ratingAverage(a.data());
+    });
+  } else if (sort === 'stars' || sort === 'rating') {
+    docs.sort((a: any, b: any) => {
+      const diff = ratingAverage(b.data()) - ratingAverage(a.data());
+      if (diff !== 0) return diff;
+      return ((b.data().rating_count || 0) - (a.data().rating_count || 0));
+    });
+  } else if (sort === 'name') {
+    docs.sort((a: any, b: any) =>
+      (a.data().name_lower || '').localeCompare(b.data().name_lower || '')
+    );
+  } else {
+    docs.sort((a: any, b: any) =>
+      (b.data().created_at || 0) - (a.data().created_at || 0)
+    );
+  }
+
+  const total = docs.length;
+  const paginatedDocs = docs.slice(offset, offset + limit);
+
+  const apps = paginatedDocs.map((d: any) => {
     const a = appPublic(d);
-    return { ...a, icon_url: icon_url((d.data() as App).icon_key, c.env), feature_url: feature_url((d.data() as App).feature_key, c.env) };
+    return {
+      ...a,
+      icon_url: icon_url((d.data() as App).icon_key, c.env),
+      feature_url: feature_url((d.data() as App).feature_key, c.env),
+    };
   });
+
   c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
   return c.json({ apps, total });
 });

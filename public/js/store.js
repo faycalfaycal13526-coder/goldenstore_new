@@ -38,7 +38,7 @@ applyTheme(currentTheme());
 function isNativeApp() {
   return typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 }
-const STORE_API_ORIGIN = 'https://goldenstore-new.vercel.app';
+const STORE_API_ORIGIN = 'https://api.goldenstore.online';
 
 function apiBaseUrl() {
   if (!isNativeApp()) return '';

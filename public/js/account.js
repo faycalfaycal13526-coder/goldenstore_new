@@ -357,7 +357,6 @@
           el('div', { class: 'nm' }, (user && user.displayName) || t('مستخدم') + ' Golden Store'),
           el('div', { class: 'acct-email-row' },
             el('div', { class: 'em acct-email', 'data-noi18n': '' }, (user && user.email) || ''),
-            accountSwitcher(user),
           ),
         ),
       ),
@@ -392,130 +391,6 @@
 
 
     renderSettings();
-  }
-
-  function accountSwitcher(user) {
-    const currentEmail = String((user && user.email) || '').trim();
-    const root = el('div', { class: 'account-switcher' });
-    const trigger = el('button', {
-      type: 'button',
-      class: 'account-switcher-trigger',
-      'aria-label': t('تبديل الحساب'),
-      title: t('تبديل الحساب'),
-      'aria-expanded': 'false',
-      'aria-haspopup': 'dialog',
-      'aria-controls': 'savedAccountsPanel',
-    }, ico('accountSwitch', 'icon'));
-    const panel = el('div', {
-      id: 'savedAccountsPanel',
-      class: 'account-switcher-popover',
-      role: 'dialog',
-      'aria-label': t('الحسابات المحفوظة'),
-    });
-
-    function close() {
-      root.classList.remove('open');
-      trigger.setAttribute('aria-expanded', 'false');
-    }
-
-    function renderAccounts() {
-      panel.innerHTML = '';
-      let accounts = S.getSavedAccounts ? S.getSavedAccounts() : [];
-      if (currentEmail && !accounts.some((account) => account.email.toLowerCase() === currentEmail.toLowerCase())) {
-        accounts = [{ email: currentEmail, displayName: (user && user.displayName) || '', lastUsedAt: 0 }, ...accounts];
-      }
-
-      panel.append(
-        el('div', { class: 'account-switcher-heading' },
-          ico('users', 'icon'),
-          el('strong', null, t('الحسابات المحفوظة')),
-        ),
-        el('p', { class: 'account-switcher-intro' },
-          t('حسابات Google التي استُخدمت سابقاً على هذا الجهاز.'),
-        ),
-      );
-
-      const otherAccounts = accounts.filter((account) => account.email.toLowerCase() !== currentEmail.toLowerCase());
-      if (!otherAccounts.length) {
-        panel.append(el('p', { class: 'account-switcher-empty' }, t('لا توجد حسابات أخرى محفوظة بعد.')));
-      }
-
-      accounts.forEach((account) => {
-        const isCurrent = account.email.toLowerCase() === currentEmail.toLowerCase();
-        const initial = String(account.displayName || account.email).trim().charAt(0).toUpperCase() || '?';
-        const accountButton = el('button', {
-          type: 'button',
-          class: `account-switcher-account${isCurrent ? ' is-current' : ''}`,
-          disabled: isCurrent || !S.switchAccount,
-          'aria-current': isCurrent ? 'true' : null,
-          onclick: () => {
-            if (!isCurrent && S.switchAccount) {
-              close();
-              S.switchAccount(account.email);
-            }
-          },
-        },
-          el('span', { class: 'account-switcher-avatar', 'aria-hidden': 'true' }, initial),
-          el('span', { class: 'account-switcher-address', dir: 'ltr', 'data-noi18n': '' },
-            el('strong', null, account.email),
-            account.displayName ? el('small', null, account.displayName) : null,
-          ),
-          isCurrent ? el('span', { class: 'account-switcher-current' }, t('مستخدم الآن')) : null,
-        );
-        const row = el('div', { class: `account-switcher-row${isCurrent ? ' is-current' : ''}` }, accountButton);
-        if (!isCurrent && S.removeSavedAccount) {
-          row.append(el('button', {
-            type: 'button',
-            class: 'account-switcher-remove',
-            title: t('إزالة الحساب المحفوظ'),
-            'aria-label': t('إزالة الحساب المحفوظ') + ' ' + account.email,
-            onclick: (event) => {
-              event.stopPropagation();
-              S.removeSavedAccount(account.email);
-              renderAccounts();
-              trigger.focus();
-            },
-          }, ico('close', 'icon')));
-        }
-        panel.append(row);
-      });
-
-      panel.append(
-        el('p', { class: 'account-switcher-security' },
-          t('البريد تلميح لاختيار الحساب فقط؛ وقد يطلب Google تأكيد هويتك.'),
-        ),
-        el('button', {
-          type: 'button',
-          class: 'account-switcher-other',
-          onclick: (event) => {
-            event.stopPropagation();
-            close();
-            if (S.switchAccount) S.switchAccount('');
-          },
-        }, ico('plus', 'icon'), t('استخدام حساب Google آخر')),
-      );
-    }
-
-    trigger.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (root.classList.contains('open')) {
-        close();
-      } else {
-        renderAccounts();
-        root.classList.add('open');
-        trigger.setAttribute('aria-expanded', 'true');
-      }
-    });
-    document.addEventListener('click', (event) => { if (!root.contains(event.target)) close(); });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && root.classList.contains('open')) {
-        close();
-        trigger.focus();
-      }
-    });
-
-    root.append(trigger, panel);
-    return root;
   }
 
   function subscriptionCard(user) {

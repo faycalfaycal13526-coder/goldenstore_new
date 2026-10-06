@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
-import { firestore, getFieldValue, verifyFirebaseToken, messaging, getAuthAdmin } from '../lib/firebase.js';
+import { firestore, getFieldValue, verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
 import {
   r2PresignPut,
   r2PresignGet,
@@ -418,6 +418,30 @@ async function sendPushToRegistered(
     result.failure = Math.max(1, registered);
     result.errors.push('topic_send_failed: ' + (err?.message || String(err)));
   }
+
+  // Web Push (browsers) — sent alongside the Android topic send so both
+  // platforms are notified together. This path only runs through
+  // addNotification, so the admin "notify on publish" toggle
+  // (store_settings/general.notify_new_publications) skips BOTH the Android
+  // topic send and this web send when disabled.
+  try {
+    const web = await sendWebPush(env, n.title, n.body || '', {
+      type: n.type,
+      app_slug: n.app_slug || '',
+      notification_id: n.id,
+      image: n.image || '',
+      store_logo: storeLogoUrl(env),
+    });
+    result.targeted += web.targeted;
+    result.success += web.success;
+    result.failure += web.failure;
+    for (const webError of web.errors) {
+      if (result.errors.length < 8) result.errors.push(webError);
+    }
+  } catch (err: any) {
+    console.error('[fcm] web push failed:', err?.message || err);
+    result.errors.push('web_push_failed: ' + (err?.message || String(err)));
+  }
   return result;
 }
 
@@ -552,6 +576,30 @@ app.post('/notifications/register-token', async (c) => {
     uid: user.uid,
     platform: String(body.platform || 'android').slice(0, 20),
     updated_at: nowSec(),
+  });
+  return c.json({ ok: true });
+});
+
+// Web Push token registration (browser clients only — the Capacitor app uses
+// /notifications/register-token with its native FCM device token).
+// The Firebase ID token is verified via Identity Toolkit accounts:lookup
+// (requireFirebaseUser → verifyFirebaseToken → getAuthAdmin().verifyIdToken).
+// One document per user (web_tokens/{uid}) so a rotated browser token
+// replaces the previous one instead of accumulating stale entries.
+app.post('/notifications/register-web', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'reg-web-token', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({} as any));
+  const token = String(body.token || '').trim();
+  if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
+  const db = await firestore(c.env);
+  await db.collection('web_tokens').doc(user.uid).set({
+    token,
+    platform: 'web',
+    userAgent: String(c.req.header('user-agent') || '').slice(0, 300),
+    updatedAt: nowSec(),
   });
   return c.json({ ok: true });
 });

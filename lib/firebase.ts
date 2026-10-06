@@ -927,3 +927,102 @@ export async function messaging(env: Env) {
     },
   };
 }
+
+export type WebPushResult = {
+  targeted: number;
+  success: number;
+  failure: number;
+  errors: string[];
+};
+
+const WEB_PUSH_TTL_SECONDS = 24 * 60 * 60;
+
+function isWebTokenGone(status: number, payload: any): boolean {
+  if (status === 404) return true;
+  const err = payload && typeof payload === 'object' ? (payload as any).error : null;
+  if (!err) return false;
+  if (String(err.status || '') === 'NOT_FOUND') return true;
+  const codes: string[] = Array.isArray(err.details)
+    ? err.details.map((detail: any) => String(detail?.errorCode || ''))
+    : [];
+  return codes.some((code) => code.includes('UNREGISTERED'));
+}
+
+// Web Push (browser) delivery. Reads every document in the `web_tokens`
+// collection (written by POST /api/notifications/register-web), then sends the
+// message to each token individually through FCM HTTP v1 using the service
+// account access token. Tokens reported as UNREGISTERED / 404 are deleted so
+// the collection self-cleans.
+//
+// Messages are data-only on purpose: public/firebase-messaging-sw.js renders
+// them in onBackgroundMessage, which lets the service worker control the icon,
+// RTL direction, and the click-through URL (app page vs home).
+export async function sendWebPush(
+  env: Env,
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+): Promise<WebPushResult> {
+  const result: WebPushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
+
+  const db = await firestore(env);
+  let docs: any[] = [];
+  try {
+    const snap = await db.collection('web_tokens').get();
+    docs = snap.docs;
+  } catch (error: any) {
+    console.error('[fcm] web_tokens read failed:', error?.message || error);
+    result.errors.push('web_tokens_read_failed: ' + (error?.message || String(error)));
+    return result;
+  }
+
+  const entries = docs
+    .map((doc) => ({ id: doc.id, token: String(doc.data()?.token || '') }))
+    .filter((entry) => entry.token.length > 0);
+  result.targeted = entries.length;
+  if (!entries.length) return result;
+
+  const credentials = getCredentials(env);
+  const accessToken = await getAccessToken(env, FCM_SCOPE);
+  const endpoint = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}/messages:send`;
+  const payloadData: Record<string, string> = { title, body: body || '', ...(data || {}) };
+
+  for (const entry of entries) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: {
+            token: entry.token,
+            data: payloadData,
+            webpush: { headers: { TTL: String(WEB_PUSH_TTL_SECONDS) } },
+          },
+        }),
+      });
+      if (response.ok) {
+        result.success++;
+        continue;
+      }
+      const payload = (await response.json().catch(() => ({}))) as any;
+      result.failure++;
+      if (result.errors.length < 5) {
+        const detail = String(payload?.error?.message || response.statusText || 'unknown error');
+        result.errors.push(`web_send_failed(${response.status}): ${detail}`);
+      }
+      if (isWebTokenGone(response.status, payload)) {
+        await db.collection('web_tokens').doc(entry.id).delete().catch(() => {});
+      }
+    } catch (error: any) {
+      result.failure++;
+      if (result.errors.length < 5) {
+        result.errors.push('web_send_exception: ' + (error?.message || String(error)));
+      }
+    }
+  }
+
+  return result;
+}

@@ -513,10 +513,10 @@
   function contactCard() {
     const links = [
       { icon: 'facebook',  label: 'Facebook',  href: 'https://www.facebook.com/F.Pony.Z', fill: true },
-      { icon: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/goldenstore_19?stkn=MTAwODRuYmV3Z3ZsNw==', fill: true },
-      { icon: 'telegram',  label: 'Telegram',  href: 'https://t.me/goldenstore_10', fill: true },
-      { icon: 'tiktok',  label: 'Tiktok',  href: 'https://www.tiktok.com/@goldenstore_10?_r=1&_t=ZS-9ALWcGZk5Nk', fill: true },
-      { icon: 'youtube',  label: 'youtube',  href: 'https://youtube.com/@goldenstore_10?si=-y8ZBoMDLxg39LVt', fill: true },
+      { icon: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/goldenstore_19?stkn=MTAwODRuYmV3Z3ZsNw==', fill: False },
+      { icon: 'telegram',  label: 'Telegram',  href: 'https://t.me/goldenstore_10', fill: False },
+      { icon: 'tiktok',  label: 'Tiktok',  href: 'https://www.tiktok.com/@goldenstore_10?_r=1&_t=ZS-9ALWcGZk5Nk', fill: False },
+      { icon: 'youtube',  label: 'youtube',  href: 'https://youtube.com/@goldenstore_10?si=-y8ZBoMDLxg39LVt', fill: False },
     ];
     const list = el('div', { class: 'acct-list contact-list' });
     links.forEach((l) => {

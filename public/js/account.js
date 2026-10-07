@@ -515,6 +515,7 @@
       { icon: 'facebook',  label: 'Facebook',  href: 'https://www.facebook.com/F.Pony.Z', fill: true },
       { icon: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/faycalzaouani', fill: false },
       { icon: 'telegram',  label: 'Telegram',  href: 'https://t.me/goldenstore_10', fill: true },
+      { icon: 'tiktok',  label: 'Tiktok',  href: 'https://t.me/goldenstore_10', fill: true },
     ];
     const list = el('div', { class: 'acct-list contact-list' });
     links.forEach((l) => {

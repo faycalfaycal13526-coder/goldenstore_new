@@ -1414,7 +1414,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .contact-row .brand-facebook { color: #1877f2; }
 .contact-row .brand-instagram { color: #e1306c; }
 .contact-row .brand-telegram { color: #229ed9; }
-.contact-row .brand-tiktok { color: #25f4ee; }
+.contact-row .brand-tiktok { color: #ffffff; }
 .contact-row .brand-youtube { color: #ff0000; }
 .contact-row .label { flex: 1; }
 .contact-row > .icon-sm { margin-inline-start: auto; color: var(--text-3); }

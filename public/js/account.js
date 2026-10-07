@@ -516,7 +516,7 @@
       { icon: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/goldenstore_19?stkn=MTAwODRuYmV3Z3ZsNw==', fill: false },
       { icon: 'telegram',  label: 'Telegram',  href: 'https://t.me/goldenstore_10', fill: true },
       { icon: 'tiktok',  label: 'Tiktok',  href: 'https://www.tiktok.com/@goldenstore_10?_r=1&_t=ZS-9ALWcGZk5Nk', fill: true },
-      { icon: 'youtub',  label: 'Tiktok',  href: 'https://youtube.com/@goldenstore_10?si=-y8ZBoMDLxg39LVt', fill: true },
+      { icon: 'youtube',  label: 'youtube',  href: 'https://youtube.com/@goldenstore_10?si=-y8ZBoMDLxg39LVt', fill: true },
     ];
     const list = el('div', { class: 'acct-list contact-list' });
     links.forEach((l) => {

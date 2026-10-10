@@ -481,14 +481,23 @@ async function sendPushToRegistered(
 // Public routes
 // ============================================================
 
+
+
+
+
+
+
 app.get('/store', (c) => {
+  c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+  return c.json({
+    name: c.env.STORE_NAME || 'Goldenstore',
+    domain: c.env.STORE_DOMAIN || 'goldenstore.online',
+  });
+});
 
-
-
-
-
-
-
+// ============================================================
+// D1 Test Route (TEMPORARY - remove after verification)
+// ============================================================
 app.get('/db-test', async (c) => {
   try {
     const result = await c.env.DB.prepare('SELECT 1 as ok').first();
@@ -511,18 +520,6 @@ app.get('/db-test', async (c) => {
 
 
 
-
-
-
-
-
-  
-  c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
-  return c.json({
-    name: c.env.STORE_NAME || 'Goldenstore',
-    domain: c.env.STORE_DOMAIN || 'goldenstore.online',
-  });
-});
 
 const CURRENT_RELEASE = {
   version_name: '1.18',

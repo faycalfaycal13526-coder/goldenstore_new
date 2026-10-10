@@ -1960,7 +1960,7 @@ app.delete('/admin/apps/:id', async (c) => {
 // ============================================================
 // TEMPORARY: Import apps from Firestore to D1
 // ============================================================
-app.post('/admin/import-apps', async (c) => {
+app.post('/import-apps-temp', async (c) => {
   try {
     const db = await firestore(c.env);
     const snap = await db.collection('apps').get();

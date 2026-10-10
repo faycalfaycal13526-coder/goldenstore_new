@@ -29,28 +29,12 @@ const app = new Hono<{ Bindings: Env }>().basePath('/api');
 // ============================================================
 // CACHE (in-memory per Worker isolate)
 // ============================================================
-const appsCache: { docs: any[] | null; ts: number } = { docs: null, ts: 0 };
-const APPS_CACHE_TTL = 300; // 5 minutes
-
 const categoriesCache: { data: Record<string, number> | null; ts: number } = { data: null, ts: 0 };
 const CATEGORIES_CACHE_TTL = 3600; // 1 hour
 
 function invalidateAppsCache() {
-  appsCache.docs = null;
-  appsCache.ts = 0;
   categoriesCache.data = null;
   categoriesCache.ts = 0;
-}
-
-async function getAppsCached(db: any): Promise<any[]> {
-  const now = Date.now();
-  if (appsCache.docs && (now - appsCache.ts) < APPS_CACHE_TTL * 1000) {
-    return appsCache.docs;
-  }
-  const snap = await db.collection('apps').get();
-  appsCache.docs = snap.docs;
-  appsCache.ts = now;
-  return appsCache.docs;
 }
 
 // ============================================================
@@ -802,7 +786,7 @@ app.get('/categories', async (c) => {
 });
 
 // ============================================================
-// Apps list (NOW USES D1)
+// Apps list (USES D1 with SQL filtering)
 // ============================================================
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase();
@@ -813,82 +797,42 @@ app.get('/apps', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') || '24') || 24, 60);
   const offset = Math.max(Number(c.req.query('offset') || '0') || 0, 0);
 
-  const gameOnly = type === 'game';
-  const excludeGames = type === 'app';
-
-  let allApps: any[];
+  let result: { apps: any[]; total: number };
   try {
-    allApps = await listApps(c.env);
+    result = await listApps(c.env, { q, category, type, sort, starredOnly, limit, offset });
   } catch (err: any) {
     console.error('[apps] D1 read failed:', err?.message || err);
     return c.json({ error: 'd1_error', message: err?.message || String(err) }, 500);
   }
 
-  let docs = allApps.map((a) => ({
+  const apps = result.apps.map((a) => ({
     id: a.id,
-    data: () => a,
+    slug: a.slug,
+    name: a.name,
+    name_lower: a.name_lower,
+    search_terms: a.search_terms,
+    package_name: a.package_name,
+    short_description: a.short_description,
+    description: a.description,
+    category: a.category,
+    type: a.type,
+    developer: a.developer,
+    version_name: a.version_name,
+    version_code: a.version_code,
+    min_sdk: a.min_sdk,
+    size_bytes: a.size_bytes,
+    rating: a.rating,
+    rating_count: a.rating_count,
+    stars: a.stars,
+    downloads: a.downloads,
+    created_at: a.created_at,
+    updated_at: a.updated_at,
+    icon_url: icon_url(a.icon_key, c.env),
+    feature_url: feature_url(a.feature_key, c.env),
   }));
 
-  if (gameOnly) {
-    docs = docs.filter((d: any) => (d.data() as any).type === 'game');
-  } else if (excludeGames) {
-    docs = docs.filter((d: any) => (d.data() as any).type !== 'game');
-  }
-
-  if (category) {
-    docs = docs.filter((d: any) => (d.data() as any).category === category);
-  }
-
-  if (starredOnly) {
-    docs = docs.filter((d: any) => ((d.data() as any).stars || 0) > 0);
-  }
-
-  if (q) {
-    const token = q.split(/\s+/).filter((w) => w.length >= 2)[0];
-    if (token) {
-      docs = docs.filter((d: any) => {
-        const terms = (d.data() as any).search_terms;
-        return Array.isArray(terms) && terms.includes(token);
-      });
-    }
-  }
-
-  if (sort === 'popular') {
-    docs.sort((a: any, b: any) => {
-      const diff = ((b.data().downloads || 0) - (a.data().downloads || 0));
-      if (diff !== 0) return diff;
-      return ratingAverage(b.data()) - ratingAverage(a.data());
-    });
-  } else if (sort === 'stars' || sort === 'rating') {
-    docs.sort((a: any, b: any) => {
-      const diff = ratingAverage(b.data()) - ratingAverage(a.data());
-      if (diff !== 0) return diff;
-      return ((b.data().rating_count || 0) - (a.data().rating_count || 0));
-    });
-  } else if (sort === 'name') {
-    docs.sort((a: any, b: any) =>
-      (a.data().name_lower || '').localeCompare(b.data().name_lower || '')
-    );
-  } else {
-    docs.sort((a: any, b: any) =>
-      (b.data().created_at || 0) - (a.data().created_at || 0)
-    );
-  }
-
-  const total = docs.length;
-  const paginatedDocs = docs.slice(offset, offset + limit);
-
-  const apps = paginatedDocs.map((d: any) => {
-    const a = appPublic(d);
-    return {
-      ...a,
-      icon_url: icon_url((d.data() as App).icon_key, c.env),
-      feature_url: feature_url((d.data() as App).feature_key, c.env),
-    };
-  });
-
   c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
-  return c.json({ apps, total });
+  return c.json({ apps, total: result.total });
 });
 
 // ============================================================

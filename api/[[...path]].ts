@@ -1948,6 +1948,107 @@ app.delete('/admin/apps/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+
+
+
+
+
+
+
+
+
+// ============================================================
+// TEMPORARY: Import apps from Firestore to D1
+// ============================================================
+app.post('/admin/import-apps', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    const snap = await db.collection('apps').get();
+
+    const results: any[] = [];
+    const stmts: any[] = [];
+
+    for (const doc of snap.docs) {
+      const d = doc.data() as any;
+
+      const apk_key = d['مفتاح APK'] || d.apk_key || '';
+      const icon_key = d['مفتاح الأيقونة'] || d.icon_key || null;
+      const feature_key = d['مفتاح المميزة'] || d.feature_key || null;
+      const category = d['فئة'] || d.category || 'other';
+      const description = d['وصف'] || d.description || null;
+      const short_description = d['وصف مختصر'] || d.short_description || null;
+      const developer = d['المطور'] || d.developer || null;
+      const downloads = d['التنزيلات'] || d.downloads || 0;
+      const created_at = d['تاريخ الإنشاء'] || d.created_at || 0;
+      const updated_at = d['تم التحديث في'] || d.updated_at || 0;
+      const name = d['اسم'] || d.name || '';
+      const name_lower = d.name_lower || name.toLowerCase();
+      const package_name = d['اسم الحزمة'] || d.package_name || '';
+      const version_code = d['رمز الإصدار'] || d.version_code || 0;
+      const version_name = d['اسم الإصدار'] || d.version_name || null;
+      const size_bytes = d['الحجم بالبايت'] || d.size_bytes || 0;
+      const stars = d['نجوم'] || d.stars || 0;
+      const rating_count = d['عدد التقييمات'] || d.rating_count || 0;
+      const rating_sum = d['مجموع التقييم'] || d.rating_sum || 0;
+      const rating = rating_count > 0 ? Math.round((rating_sum / rating_count) * 10) / 10 : 0;
+      const type = d['نوع'] || d.type || 'app';
+      const search_terms = d.search_terms || [];
+
+      if (!apk_key || !name || !package_name) {
+        results.push({ id: doc.id, error: 'missing_required_fields' });
+        continue;
+      }
+
+      stmts.push(
+        c.env.DB.prepare(`
+          INSERT OR REPLACE INTO apps (
+            id, slug, name, name_lower, search_terms, package_name,
+            short_description, description, category, type, developer,
+            version_name, version_code, min_sdk, size_bytes,
+            apk_key, icon_key, feature_key, stars, rating_sum,
+            rating_count, rating, downloads, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          doc.id, d.slug || '', name, name_lower,
+          JSON.stringify(search_terms), package_name,
+          short_description, description, category, type, developer,
+          version_name, version_code, d.min_sdk || null, size_bytes,
+          apk_key, icon_key, feature_key, stars, rating_sum,
+          rating_count, rating, downloads, created_at, updated_at
+        )
+      );
+    }
+
+    await c.env.DB.batch(stmts);
+
+    return c.json({
+      ok: true,
+      total: snap.size,
+      imported: stmts.length,
+      failed: results.length,
+      errors: results,
+    });
+  } catch (err: any) {
+    console.error('[import-apps] failed:', err?.message || err);
+    return c.json({ error: 'import_failed', message: err?.message || String(err) }, 500);
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => {
   console.error('[api error]', err);

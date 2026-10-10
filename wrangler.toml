@@ -23,3 +23,11 @@ R2_BUCKET = "goldenstore-apks"
 R2_ACCOUNT_ID = "3d6027f4b14f48a62a2dba1db3f8d082"
 R2_PUBLIC_URL = "https://cdn.goldenstore.online"
 FIREBASE_PROJECT_ID = "golden-store-40dd6"
+
+# ============================================================
+# D1 Database Binding
+# ============================================================
+[[d1_databases]]
+binding = "DB"
+database_name = "goldenstore-db"
+database_id = "9c6add06-82cd-4c99-9c1d-907a9aa9957e"

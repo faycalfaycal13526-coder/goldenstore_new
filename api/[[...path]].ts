@@ -482,6 +482,41 @@ async function sendPushToRegistered(
 // ============================================================
 
 app.get('/store', (c) => {
+
+
+
+
+
+
+
+app.get('/db-test', async (c) => {
+  try {
+    const result = await c.env.DB.prepare('SELECT 1 as ok').first();
+    return c.json({ d1_works: true, result });
+  } catch (err: any) {
+    return c.json({ d1_works: false, error: err?.message || String(err) }, 500);
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
   c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   return c.json({
     name: c.env.STORE_NAME || 'Goldenstore',

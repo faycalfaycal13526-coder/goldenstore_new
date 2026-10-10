@@ -1,9 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { firestore, getFieldValue, verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
-
 import { listApps } from '../lib/d1.js';
-
 import {
   r2PresignPut,
   r2PresignGet,
@@ -415,7 +413,6 @@ async function sendPushToRegistered(
   let registered = 0;
   let tokensSnap: any;
   try {
-    // OPTIMIZATION: limit token read, we only need count for the response
     tokensSnap = await db.collection('fcm_tokens').limit(1000).get();
     registered = (tokensSnap.docs || []).filter((d: any) => String(d.data()?.token || '').length > 0).length;
   } catch (err: any) {
@@ -483,13 +480,6 @@ async function sendPushToRegistered(
 // ============================================================
 // Public routes
 // ============================================================
-
-
-
-
-
-
-
 app.get('/store', (c) => {
   c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   return c.json({
@@ -509,20 +499,6 @@ app.get('/db-test', async (c) => {
     return c.json({ d1_works: false, error: err?.message || String(err) }, 500);
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 const CURRENT_RELEASE = {
   version_name: '1.18',
@@ -819,7 +795,6 @@ app.get('/categories', async (c) => {
     counts = categoriesCache.data;
   } else {
     const db = await firestore(c.env);
-    // OPTIMIZATION: read once, cache for 1 hour
     const snap = await db.collection('apps').select('category').get();
     counts = {};
     snap.forEach((d: any) => {
@@ -839,7 +814,7 @@ app.get('/categories', async (c) => {
 });
 
 // ============================================================
-// Apps list (CACHED + filter/sort/paginate in memory)
+// Apps list (NOW USES D1)
 // ============================================================
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase();
@@ -853,18 +828,20 @@ app.get('/apps', async (c) => {
   const gameOnly = type === 'game';
   const excludeGames = type === 'app';
 
-  const db = await firestore(c.env);
-
-  let allDocs: any[];
+  let allApps: any[];
   try {
-    // OPTIMIZATION: cache apps list for 5 minutes
-    allDocs = await getAppsCached(db);
+    // ✅ الآن من D1، وليس من Firestore
+    allApps = await listApps(c.env);
   } catch (err: any) {
-    console.error('[apps] firestore read failed:', err?.message || err);
-    return c.json({ error: 'firestore_error', message: err?.message || String(err) }, 500);
+    console.error('[apps] D1 read failed:', err?.message || err);
+    return c.json({ error: 'd1_error', message: err?.message || String(err) }, 500);
   }
 
-  let docs = allDocs;
+  // نحوّل النتائج إلى شكل يشبه "docs" القديم
+  let docs = allApps.map((a) => ({
+    id: a.id,
+    data: () => a,
+  }));
 
   if (gameOnly) {
     docs = docs.filter((d: any) => (d.data() as any).type === 'game');
@@ -1146,7 +1123,6 @@ app.get('/apps/:slug/reviews', async (c) => {
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
 
-  // OPTIMIZATION: only fetch recent reviews, not all
   const votesSnap = await doc.ref.collection('star_votes')
     .orderBy('ts', 'desc')
     .limit(limit * 2)
@@ -1979,6 +1955,3 @@ app.onError((err, c) => {
 });
 
 export default app;
-
-
-

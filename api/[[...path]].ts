@@ -25,7 +25,36 @@ import type { Env } from '../lib/env.js';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
-// --- Security: CORS is read from the Worker binding for each request. ---
+// ============================================================
+// CACHE (in-memory per Worker isolate)
+// ============================================================
+const appsCache: { docs: any[] | null; ts: number } = { docs: null, ts: 0 };
+const APPS_CACHE_TTL = 300; // 5 minutes
+
+const categoriesCache: { data: Record<string, number> | null; ts: number } = { data: null, ts: 0 };
+const CATEGORIES_CACHE_TTL = 3600; // 1 hour
+
+function invalidateAppsCache() {
+  appsCache.docs = null;
+  appsCache.ts = 0;
+  categoriesCache.data = null;
+  categoriesCache.ts = 0;
+}
+
+async function getAppsCached(db: any): Promise<any[]> {
+  const now = Date.now();
+  if (appsCache.docs && (now - appsCache.ts) < APPS_CACHE_TTL * 1000) {
+    return appsCache.docs;
+  }
+  const snap = await db.collection('apps').get();
+  appsCache.docs = snap.docs;
+  appsCache.ts = now;
+  return appsCache.docs;
+}
+
+// ============================================================
+// Security: CORS
+// ============================================================
 app.use('*', async (c, next) => {
   const origin = c.req.header('origin') || '';
   const allowedOrigins = (c.env.ALLOWED_ORIGINS || '')
@@ -50,7 +79,9 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// --- Security: rate limiter (in-memory, per IP) ---
+// ============================================================
+// Security: rate limiter
+// ============================================================
 const rateLimits = new Map<string, { count: number; reset: number }>();
 let rateLimitCalls = 0;
 function rateLimit(ip: string, key: string, maxRequests: number, windowSec: number): boolean {
@@ -76,7 +107,9 @@ function getClientIp(c: any): string {
     c.req.header('x-real-ip') || 'unknown';
 }
 
-// --- Security: add security headers to all responses ---
+// ============================================================
+// Security headers
+// ============================================================
 app.use('*', async (c, next) => {
   await next();
   c.header('X-Content-Type-Options', 'nosniff');
@@ -87,7 +120,9 @@ app.use('*', async (c, next) => {
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
 });
 
-// --- Security: body size limit (1MB) ---
+// ============================================================
+// Body size limit
+// ============================================================
 const MAX_BODY_SIZE = 1024 * 1024;
 app.use('*', async (c, next) => {
   const cl = c.req.header('content-length');
@@ -97,7 +132,9 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// --- Security: validate slug/id params (no path traversal, max length) ---
+// ============================================================
+// Slug validation
+// ============================================================
 function isValidSlug(s: string): boolean {
   if (!s || s.length > 200) return false;
   if (/[\/\\<>\x00-\x1f]/.test(s)) return false;
@@ -115,8 +152,9 @@ app.use('/apps/:slug', async (c, next) => {
   await next();
 });
 
-// ---------------- helpers ----------------
-
+// ============================================================
+// Helpers
+// ============================================================
 async function requireAdmin(c: any, next: any) {
   let token = getCookie(c, COOKIE_NAME);
   const authHeader = c.req.header('authorization') || '';
@@ -374,7 +412,8 @@ async function sendPushToRegistered(
   let registered = 0;
   let tokensSnap: any;
   try {
-    tokensSnap = await db.collection('fcm_tokens').get();
+    // OPTIMIZATION: limit token read, we only need count for the response
+    tokensSnap = await db.collection('fcm_tokens').limit(1000).get();
     registered = (tokensSnap.docs || []).filter((d: any) => String(d.data()?.token || '').length > 0).length;
   } catch (err: any) {
     console.error('[fcm] failed to read tokens:', err?.message || err);
@@ -438,7 +477,9 @@ async function sendPushToRegistered(
   return result;
 }
 
-// ---------------- public ----------------
+// ============================================================
+// Public routes
+// ============================================================
 
 app.get('/store', (c) => {
   c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
@@ -448,7 +489,6 @@ app.get('/store', (c) => {
   });
 });
 
-// Fallback only — used when Firestore has no app_updates/current document.
 const CURRENT_RELEASE = {
   version_name: '1.18',
   version_code: 19,
@@ -461,7 +501,6 @@ app.get('/app-update', async (c) => {
     const db = await firestore(c.env);
     const doc = await db.collection('app_updates').doc('current').get();
 
-    // No Firestore document → return the hardcoded fallback.
     if (!doc.exists) {
       return c.json({
         version_name: CURRENT_RELEASE.version_name,
@@ -485,7 +524,6 @@ app.get('/app-update', async (c) => {
       });
     }
 
-    // Firestore is the source of truth — no version_code sanity check.
     const d = doc.data() || {};
     const version_code = safeInt(d.version_code, 0, 999999999);
     const apk_url = sanitizeUrl(d.apk_url) || sanitizeUrl(d.url) || CURRENT_RELEASE.apk_url;
@@ -661,6 +699,9 @@ app.post('/notifications/self-test', async (c) => {
   return c.json({ ok: true, push });
 });
 
+// ============================================================
+// Translation
+// ============================================================
 const SUPPORTED_TL = new Set(['en', 'fr', 'es']);
 const memTranslate = new Map<string, string>();
 
@@ -730,23 +771,41 @@ app.post('/translate', async (c) => {
   return c.json({ t: out });
 });
 
+// ============================================================
+// Categories (CACHED)
+// ============================================================
 app.get('/categories', async (c) => {
   const type = (c.req.query('type') || '').trim();
-  const db = await firestore(c.env);
-  const snap = await db.collection('apps').select('category').get();
-  const counts: Record<string, number> = {};
-  snap.forEach((d: any) => {
-    const cat = (d.data() as any).category || 'other';
-    counts[cat] = (counts[cat] || 0) + 1;
-  });
+  const now = Date.now();
+
+  let counts: Record<string, number>;
+
+  if (categoriesCache.data && (now - categoriesCache.ts) < CATEGORIES_CACHE_TTL * 1000) {
+    counts = categoriesCache.data;
+  } else {
+    const db = await firestore(c.env);
+    // OPTIMIZATION: read once, cache for 1 hour
+    const snap = await db.collection('apps').select('category').get();
+    counts = {};
+    snap.forEach((d: any) => {
+      const cat = (d.data() as any).category || 'other';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    categoriesCache.data = counts;
+    categoriesCache.ts = now;
+  }
+
   const source = type === 'app' ? APP_CATEGORIES
     : type === 'game' ? GAME_CATEGORIES
     : DEFAULT_CATEGORIES;
-  const categories: Category[] = source.map((c) => ({ ...c, count: counts[c.slug] || 0 }));
+  const categories: Category[] = source.map((cat) => ({ ...cat, count: counts[cat.slug] || 0 }));
   c.header('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   return c.json({ categories });
 });
 
+// ============================================================
+// Apps list (CACHED + filter/sort/paginate in memory)
+// ============================================================
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase();
   const category = (c.req.query('category') || '').trim();
@@ -763,8 +822,8 @@ app.get('/apps', async (c) => {
 
   let allDocs: any[];
   try {
-    const allSnap = await db.collection('apps').get();
-    allDocs = allSnap.docs;
+    // OPTIMIZATION: cache apps list for 5 minutes
+    allDocs = await getAppsCached(db);
   } catch (err: any) {
     console.error('[apps] firestore read failed:', err?.message || err);
     return c.json({ error: 'firestore_error', message: err?.message || String(err) }, 500);
@@ -834,6 +893,9 @@ app.get('/apps', async (c) => {
   return c.json({ apps, total });
 });
 
+// ============================================================
+// App detail
+// ============================================================
 app.get('/apps/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = await firestore(c.env);
@@ -859,6 +921,9 @@ app.get('/apps/:slug', async (c) => {
   });
 });
 
+// ============================================================
+// App download
+// ============================================================
 app.get('/apps/:slug/download', async (c) => {
   const ip = getClientIp(c);
   const slug = c.req.param('slug');
@@ -898,6 +963,9 @@ app.get('/apps/:slug/download', async (c) => {
   return c.redirect(url);
 });
 
+// ============================================================
+// Star / reviews
+// ============================================================
 function serverFingerprint(c: any): string {
   const ip =
     c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -985,6 +1053,8 @@ app.post('/apps/:slug/star', async (c) => {
     return { rating: avg, rating_count: newCount };
   });
 
+  invalidateAppsCache();
+
   const review = (comment || name)
     ? { name: name || 'مستخدم', rating, comment, photo_url: photo_url || null, ts: nowSec() }
     : null;
@@ -1041,7 +1111,12 @@ app.get('/apps/:slug/reviews', async (c) => {
   if (snap.empty) return c.json({ error: 'not_found' }, 404);
   const doc = snap.docs[0];
 
-  const votesSnap = await doc.ref.collection('star_votes').get();
+  // OPTIMIZATION: only fetch recent reviews, not all
+  const votesSnap = await doc.ref.collection('star_votes')
+    .orderBy('ts', 'desc')
+    .limit(limit * 2)
+    .get();
+
   const dist: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
   const reviews: { name: string; rating: number; comment: string; photo_url: string | null; ts: number }[] = [];
   votesSnap.forEach((v: any) => {
@@ -1072,6 +1147,9 @@ app.get('/apps/:slug/reviews', async (c) => {
   });
 });
 
+// ============================================================
+// Request update / report
+// ============================================================
 app.post('/apps/:slug/request-update', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'req-update', 5, 300)) {
@@ -1129,6 +1207,9 @@ app.post('/apps/:slug/report', async (c) => {
   return c.json({ ok: true });
 });
 
+// ============================================================
+// Auth (admin)
+// ============================================================
 function isSecureRequest(c: any): boolean {
   const proto = c.req.header('x-forwarded-proto');
   if (proto) return proto.split(',')[0].trim() === 'https';
@@ -1211,8 +1292,9 @@ app.post('/setup-r2-cors', async (c) => {
   }
 });
 
-// ---------------- admin ----------------
-
+// ============================================================
+// Admin
+// ============================================================
 app.use('/admin/*', requireAdmin);
 
 app.get('/admin/settings', async (c) => {
@@ -1286,6 +1368,7 @@ app.post('/admin/migrate-types', async (c) => {
     if (pending >= 400) { await batch.commit(); batch = db.batch(); pending = 0; }
   }
   if (pending > 0) await batch.commit();
+  invalidateAppsCache();
   return c.json({ ok: true, updated, total: snap.size });
 });
 
@@ -1392,7 +1475,7 @@ app.get('/admin/push/status', async (c) => {
   const platforms: Record<string, number> = {};
   const tokens: any[] = [];
   try {
-    const snap = await db.collection('fcm_tokens').get();
+    const snap = await db.collection('fcm_tokens').limit(500).get();
     count = snap.size;
     snap.forEach((d: any) => {
       const data = d.data() || {};
@@ -1614,6 +1697,8 @@ app.post('/admin/apps', async (c) => {
   const db = await firestore(c.env);
   const ref = await db.collection('apps').add(docData as unknown as Record<string, unknown>);
 
+  invalidateAppsCache();
+
   try {
     const settings = await getStoreSettings(db);
     if (settings.notify_new_publications) {
@@ -1687,6 +1772,8 @@ app.patch('/admin/apps/:id', async (c) => {
     ('version_code' in update && Number(update.version_code ?? 0) !== Number(old.version_code ?? 0));
 
   await ref.update(update as any);
+  invalidateAppsCache();
+
   if (versionChanged) {
     try {
       const merged = { ...old, ...update };
@@ -1724,6 +1811,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
     version_code: body.version_code != null ? Number(body.version_code) : old.version_code,
     updated_at: nowSec(),
   });
+  invalidateAppsCache();
 
   if (old.apk_key && old.apk_key !== newKey) {
     await r2Delete(c.env, old.apk_key).catch(() => {});
@@ -1757,6 +1845,7 @@ app.post('/admin/apps/:id/icon', async (c) => {
   const old = snap.data() as App;
 
   await ref.update({ icon_key: newKey, updated_at: nowSec() });
+  invalidateAppsCache();
 
   if (old.icon_key && old.icon_key !== newKey) {
     await r2Delete(c.env, old.icon_key).catch(() => {});
@@ -1778,6 +1867,7 @@ app.post('/admin/apps/:id/feature', async (c) => {
   const old = snap.data() as App;
 
   await ref.update({ feature_key: newKey, updated_at: nowSec() });
+  invalidateAppsCache();
 
   if (old.feature_key && old.feature_key !== newKey) {
     await r2Delete(c.env, old.feature_key).catch(() => {});
@@ -1843,6 +1933,7 @@ app.delete('/admin/apps/:id', async (c) => {
   if (a.icon_key) await r2Delete(c.env, a.icon_key).catch(() => {});
   if (a.feature_key) await r2Delete(c.env, a.feature_key).catch(() => {});
   await ref.delete();
+  invalidateAppsCache();
   return c.json({ ok: true });
 });
 

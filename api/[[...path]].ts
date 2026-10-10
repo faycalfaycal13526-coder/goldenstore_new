@@ -492,6 +492,34 @@ app.get('/store', (c) => {
 // D1 Test Route (TEMPORARY - remove after verification)
 // ============================================================
 app.get('/db-test', async (c) => {
+
+
+
+
+// ============================================================
+// DEBUG: Test listApps directly
+// ============================================================
+app.get('/debug-apps', async (c) => {
+  try {
+    const { listApps } = await import('../lib/d1.js');
+    const apps = await listApps(c.env);
+    return c.json({
+      ok: true,
+      count: apps.length,
+      first_app: apps[0] || null,
+    });
+  } catch (err: any) {
+    return c.json({
+      ok: false,
+      error: err?.message || String(err),
+      stack: err?.stack || null,
+    }, 500);
+  }
+});
+
+
+
+  
   try {
     const result = await c.env.DB.prepare('SELECT 1 as ok').first();
     return c.json({ d1_works: true, result });

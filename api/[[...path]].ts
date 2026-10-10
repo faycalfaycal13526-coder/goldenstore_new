@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { firestore, getFieldValue, verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
+
+import { listApps } from '../lib/d1.js';
+
 import {
   r2PresignPut,
   r2PresignGet,

@@ -762,6 +762,32 @@ app.post('/import-screenshots-temp', async (c) => {
   }
 });
 
+app.post('/import-votes-temp', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    const appsSnap = await db.collection('apps').get();
+    const stmts: any[] = [];
+    let total = 0;
+
+    for (const appDoc of appsSnap.docs) {
+      const votesSnap = await appDoc.ref.collection('star_votes').get();
+      for (const voteDoc of votesSnap.docs) {
+        const d = voteDoc.data() as any;
+        if (!d.rating) continue;
+        
+        stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO star_votes (id, app_id, hash, server_hash, uid, rating, comment, name, photo_url, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .bind(voteDoc.id, appDoc.id, d.hash || '', d.server_hash || '', d.uid || null, d.rating, d.comment || '', d.name || '', d.photo_url || null, d.ts || 0));
+        total++;
+      }
+    }
+    
+    if (stmts.length > 0) await c.env.DB.batch(stmts);
+    return c.json({ ok: true, imported: total });
+  } catch (e: any) { 
+    return c.json({ error: e.message }, 500); 
+  }
+});
+
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => { console.error('[api error]', err); return c.json({ error: 'internal_error' }, 500); });
 

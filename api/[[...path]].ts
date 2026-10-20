@@ -220,11 +220,19 @@ app.get('/app-update/download', async (c) => {
 });
 
 app.get('/auth/token', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'auth-token', 20, 60)) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
   try {
     const uid = 'gs_' + randomId();
     const auth = await getAuthAdmin(c.env);
-    return c.json({ token: await auth.createCustomToken(uid), uid });
-  } catch { return c.json({ error: 'token_creation_failed' }, 500); }
+    const token = await auth.createCustomToken(uid);
+    return c.json({ token, uid });
+  } catch (err: any) {
+    console.error('[auth/token] failed:', err?.message || err);
+    return c.json({ error: 'token_creation_failed' }, 500);
+  }
 });
 
 app.get('/notifications', async (c) => {
@@ -241,9 +249,13 @@ async function requireFirebaseUser(c: any) {
 }
 
 app.post('/notifications/register-token', async (c) => {
-  const user = await requireFirebaseUser(c); if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'reg-token', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
   const body = await c.req.json().catch(() => ({}));
-  const token = String(body.token || '').trim(); if (!token) return c.json({ error: 'invalid_token' }, 400);
+  const token = String(body.token || '').trim();
+  if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
   const docId = await sha256Hex(token);
   await c.env.DB.prepare(`INSERT OR REPLACE INTO fcm_tokens (id, token, uid, platform, updated_at) VALUES (?, ?, ?, ?, ?)`)
     .bind(docId, token, user.uid, body.platform || 'android', nowSec()).run();
@@ -251,9 +263,13 @@ app.post('/notifications/register-token', async (c) => {
 });
 
 app.post('/notifications/register-web', async (c) => {
-  const user = await requireFirebaseUser(c); if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'reg-web-token', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
   const body = await c.req.json().catch(() => ({}));
-  const token = String(body.token || '').trim(); if (!token) return c.json({ error: 'invalid_token' }, 400);
+  const token = String(body.token || '').trim();
+  if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
   await c.env.DB.prepare(`INSERT OR REPLACE INTO web_tokens (uid, token, platform, userAgent, updatedAt) VALUES (?, ?, ?, ?, ?)`)
     .bind(user.uid, token, 'web', String(c.req.header('user-agent')).slice(0,300), nowSec()).run();
   return c.json({ ok: true });
@@ -453,15 +469,11 @@ function isSecureRequest(c: any): boolean { return c.req.header('x-forwarded-pro
 app.post('/login', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   
-  // الواجهة ترسل كلمة المرور فقط
   const providedPass = String(body.password || body.pass || '');
-  
-  // كلمة المرور (من إعدادات كلاود فلير أو "admin" افتراضياً)
   const adminPass = String(c.env.ADMIN_PASSWORD || 'admin');
   const adminUser = c.env.ADMIN_USERNAME || 'admin';
   const secret = c.env.JWT_SECRET || 'secret-key-for-goldenstore';
 
-  // التحقق من كلمة المرور فقط
   if (providedPass !== adminPass) {
     return c.json({ error: 'invalid_credentials', hint: 'Password mismatch' }, 401);
   }
@@ -805,6 +817,25 @@ app.post('/import-updates-temp', async (c) => {
       .bind(d.version_name || '', d.version_code || 0, d.apk_url || '', d.apk_key || null, d.notes || '', d.force ? 1 : 0, d.size_bytes || 0, d.downloads || 0, d.created_at || 0).run();
       
     return c.json({ ok: true, imported: 1 });
+  } catch (e: any) { 
+    return c.json({ error: e.message }, 500); 
+  }
+});
+
+app.post('/import-notifications-temp', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    const snap = await db.collection('notifications').orderBy('created_at', 'desc').get();
+    const stmts: any[] = [];
+    
+    for (const doc of snap.docs) {
+      const d = doc.data() as any;
+      stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO notifications (id, title, body, type, app_slug, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .bind(doc.id, d.title || '', d.body || '', d.type || 'announcement', d.app_slug || '', d.data ? JSON.stringify(d.data) : null, d.created_at || 0));
+    }
+    
+    if (stmts.length > 0) await c.env.DB.batch(stmts);
+    return c.json({ ok: true, imported: stmts.length });
   } catch (e: any) { 
     return c.json({ error: e.message }, 500); 
   }

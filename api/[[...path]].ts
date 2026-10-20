@@ -468,7 +468,6 @@ function isSecureRequest(c: any): boolean { return c.req.header('x-forwarded-pro
 
 app.post('/login', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  
   const providedPass = String(body.password || body.pass || '');
   const adminPass = String(c.env.ADMIN_PASSWORD || 'admin');
   const adminUser = c.env.ADMIN_USERNAME || 'admin';
@@ -836,6 +835,41 @@ app.post('/import-notifications-temp', async (c) => {
     
     if (stmts.length > 0) await c.env.DB.batch(stmts);
     return c.json({ ok: true, imported: stmts.length });
+  } catch (e: any) { 
+    return c.json({ error: e.message }, 500); 
+  }
+});
+
+app.post('/import-tokens-temp', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    let imported = 0;
+
+    // 1. Android FCM Tokens
+    const fcmSnap = await db.collection('fcm_tokens').get();
+    const fcmStmts: any[] = [];
+    for (const doc of fcmSnap.docs) {
+      const d = doc.data() as any;
+      if (!d.token) continue;
+      fcmStmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO fcm_tokens (id, token, uid, platform, updated_at) VALUES (?, ?, ?, ?, ?)`)
+        .bind(doc.id, d.token, d.uid || '', d.platform || 'android', d.updated_at || 0));
+      imported++;
+    }
+    if (fcmStmts.length > 0) await c.env.DB.batch(fcmStmts);
+
+    // 2. Web Tokens
+    const webSnap = await db.collection('web_tokens').get();
+    const webStmts: any[] = [];
+    for (const doc of webSnap.docs) {
+      const d = doc.data() as any;
+      if (!d.token) continue;
+      webStmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO web_tokens (uid, token, platform, userAgent, updatedAt) VALUES (?, ?, ?, ?, ?)`)
+        .bind(doc.id, d.token, d.platform || 'web', d.userAgent || '', d.updatedAt || 0));
+      imported++;
+    }
+    if (webStmts.length > 0) await c.env.DB.batch(webStmts);
+
+    return c.json({ ok: true, imported });
   } catch (e: any) { 
     return c.json({ error: e.message }, 500); 
   }

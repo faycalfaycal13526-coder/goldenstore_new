@@ -845,7 +845,6 @@ app.post('/import-tokens-temp', async (c) => {
     const db = await firestore(c.env);
     let imported = 0;
 
-    // 1. Android FCM Tokens
     const fcmSnap = await db.collection('fcm_tokens').get();
     const fcmStmts: any[] = [];
     for (const doc of fcmSnap.docs) {
@@ -857,7 +856,6 @@ app.post('/import-tokens-temp', async (c) => {
     }
     if (fcmStmts.length > 0) await c.env.DB.batch(fcmStmts);
 
-    // 2. Web Tokens
     const webSnap = await db.collection('web_tokens').get();
     const webStmts: any[] = [];
     for (const doc of webSnap.docs) {
@@ -870,6 +868,25 @@ app.post('/import-tokens-temp', async (c) => {
     if (webStmts.length > 0) await c.env.DB.batch(webStmts);
 
     return c.json({ ok: true, imported });
+  } catch (e: any) { 
+    return c.json({ error: e.message }, 500); 
+  }
+});
+
+app.post('/import-requests-temp', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    const snap = await db.collection('app_requests').get();
+    const stmts: any[] = [];
+    
+    for (const doc of snap.docs) {
+      const d = doc.data() as any;
+      stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO app_requests (id, type, slug, app_name, current_version, new_version, source, reason, details, status, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(doc.id, d.type || 'update', d.slug || '', d.app_name || '', d.current_version || null, d.new_version || null, d.source || null, d.reason || null, d.details || null, d.status || 'new', d.ts || 0));
+    }
+    
+    if (stmts.length > 0) await c.env.DB.batch(stmts);
+    return c.json({ ok: true, imported: stmts.length });
   } catch (e: any) { 
     return c.json({ error: e.message }, 500); 
   }

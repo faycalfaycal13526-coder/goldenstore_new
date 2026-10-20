@@ -203,7 +203,7 @@ const CURRENT_RELEASE = { version_name: '1.18', version_code: 19, apk_url: 'http
 app.get('/app-update', async (c) => {
   try {
     const row: any = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").first();
-    if (!row) return c.json({ version_name: CURRENT_RELEASE.version_name, version_code: CURRENT_RELEASE.version_code, apk_url: CURRENT_RELEASE.apk_url, url: CURRENT_RELEASE.apk_url, notes: CURRENT_RELEASE.notes, force: false });
+    if (!row) return c.json({ version_name: CURRENT_RELEASE.version_name, version_code: CURRENT_RELEASE.version_code, apk_url: CURRENT_RELEASE.apk_url, url: CURRENT_RELEASE.apk_url, notes: CURRENT_RELEASE.notes, force: false, downloads: 0 });
     const out = { version_name: row.version_name || CURRENT_RELEASE.version_name, version_code: row.version_code || 0, apk_url: row.apk_url || CURRENT_RELEASE.apk_url, url: row.apk_url || CURRENT_RELEASE.apk_url, notes: row.notes || CURRENT_RELEASE.notes, force: row.force === 1, downloads: row.downloads || 0 };
     return c.json({ ...out, update: { ...out } });
   } catch { return c.json({}); }
@@ -783,6 +783,22 @@ app.post('/import-votes-temp', async (c) => {
     
     if (stmts.length > 0) await c.env.DB.batch(stmts);
     return c.json({ ok: true, imported: total });
+  } catch (e: any) { 
+    return c.json({ error: e.message }, 500); 
+  }
+});
+
+app.post('/import-updates-temp', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    const doc = await db.collection('app_updates').doc('current').get();
+    if (!doc.exists) return c.json({ ok: true, message: 'no_update_doc_in_firestore' });
+    
+    const d = doc.data() as any;
+    await c.env.DB.prepare(`INSERT OR REPLACE INTO app_updates (id, version_name, version_code, apk_url, apk_key, notes, force, size_bytes, downloads, created_at) VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(d.version_name || '', d.version_code || 0, d.apk_url || '', d.apk_key || null, d.notes || '', d.force ? 1 : 0, d.size_bytes || 0, d.downloads || 0, d.created_at || 0).run();
+      
+    return c.json({ ok: true, imported: 1 });
   } catch (e: any) { 
     return c.json({ error: e.message }, 500); 
   }

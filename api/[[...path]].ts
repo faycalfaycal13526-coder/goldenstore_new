@@ -452,12 +452,18 @@ function isSecureRequest(c: any): boolean { return c.req.header('x-forwarded-pro
 
 app.post('/login', async (c) => {
   const body = await c.req.json().catch(() => ({}));
+  
+  // الواجهة ترسل كلمة المرور فقط
+  const providedPass = String(body.password || body.pass || '');
+  
+  // كلمة المرور (من إعدادات كلاود فلير أو "admin" افتراضياً)
+  const adminPass = String(c.env.ADMIN_PASSWORD || 'admin');
   const adminUser = c.env.ADMIN_USERNAME || 'admin';
-  const adminPass = c.env.ADMIN_PASSWORD || 'admin';
   const secret = c.env.JWT_SECRET || 'secret-key-for-goldenstore';
 
-  if (String(body.username || '') !== String(adminUser) || String(body.password || '') !== String(adminPass)) {
-    return c.json({ error: 'invalid_credentials' }, 401);
+  // التحقق من كلمة المرور فقط
+  if (providedPass !== adminPass) {
+    return c.json({ error: 'invalid_credentials', hint: 'Password mismatch' }, 401);
   }
   
   const token = await signJwt({ sub: adminUser, role: 'admin' }, secret);

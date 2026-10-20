@@ -565,7 +565,7 @@ app.get('/admin/apps/:id', async (c) => {
   return c.json({ app: { ...appPublic(doc, true), icon_url: icon_url(doc.icon_key, c.env), feature_url: feature_url(doc.feature_key, c.env) }, screenshots: (ss.results || []).map((s: any) => ({ ...s, url: icon_url(s.r2_key, c.env) })) });
 });
 
-// Uploads (R2) - نفس المنطق
+// Uploads (R2)
 app.post('/admin/upload-url', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
@@ -711,7 +711,7 @@ app.delete('/admin/apps/:id', async (c) => {
 });
 
 // ============================================================
-// مسار مؤقت لنقل التطبيقات من Firestore إلى D1
+// مسارات مؤقتة لنقل البيانات من Firestore إلى D1
 // ============================================================
 app.post('/import-apps-temp', async (c) => {
   try {
@@ -730,6 +730,33 @@ app.post('/import-apps-temp', async (c) => {
     
     if (stmts.length > 0) await c.env.DB.batch(stmts);
     return c.json({ ok: true, imported: stmts.length });
+  } catch (e: any) { 
+    return c.json({ error: e.message }, 500); 
+  }
+});
+
+app.post('/import-screenshots-temp', async (c) => {
+  try {
+    const db = await firestore(c.env);
+    const appsSnap = await db.collection('apps').get();
+    const stmts: any[] = [];
+    let total = 0;
+
+    for (const appDoc of appsSnap.docs) {
+      const ssSnap = await appDoc.ref.collection('screenshots').get();
+      for (const ssDoc of ssSnap.docs) {
+        const d = ssDoc.data() as any;
+        const r2_key = d.r2_key || d['مفتاح'] || '';
+        if (!r2_key) continue;
+        
+        stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(ssDoc.id, appDoc.id, r2_key, d.position || 0, d.created_at || 0));
+        total++;
+      }
+    }
+    
+    if (stmts.length > 0) await c.env.DB.batch(stmts);
+    return c.json({ ok: true, imported: total });
   } catch (e: any) { 
     return c.json({ error: e.message }, 500); 
   }

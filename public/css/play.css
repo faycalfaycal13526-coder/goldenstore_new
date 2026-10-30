@@ -570,6 +570,9 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 
 
+
+
+
 /* screenshots */
 .shots {
   display: flex;
@@ -582,25 +585,18 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .shots::-webkit-scrollbar { display: none; }
 .shots img {
-  height: 340px;         /* الطول الكبير المناسب */
-  width: auto;           /* العرض يتحدد تلقائياً حسب الصورة */
-  max-width: 90vw;       /* أقصى عرض مسموح */
+  height: 340px;         /* الارتفاع الكبير والموحد */
+  width: auto;           /* العرض يتبع شكل الصورة (أفقية تبقى عريضة، وعمودية تبقى طويلة) */
+  max-width: 90vw;       
   min-width: 150px;
   flex: 0 0 auto;
   border-radius: 14px;
-  background: var(--surface-2);
-  object-fit: contain;   /* 👈 هذه الكلمة هي السر: تمنع القص نهائياً */
+  background: transparent; /* 👈 إزالة اللون الرمادي من خلفية الصورة */
+  object-fit: contain;   
   cursor: pointer;
   border: 1px solid var(--line);
   scroll-snap-align: center;
 }
-
-
-
-
-
-
-
 
 
 

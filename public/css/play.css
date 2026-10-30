@@ -579,26 +579,31 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   padding: 4px 16px;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  touch-action: pan-x pan-y;
 }
 .shots::-webkit-scrollbar { display: none; }
 .shots img {
-  /* الحل السحري: نحدد العرض والارتفاع بـ auto مع حدود قصوى متساوية */
-  width: auto;
-  height: auto;
-  max-height: 400px; /* ارتفاع كبير جداً للصور العمودية */
-  max-width: 85vw;   /* عرض كبير جداً للصور الأفقية */
-  min-width: 200px;  /* يمنع الصور العمودية من أن تصبح نحيلة جداً */
-  min-height: 200px; 
+  height: 340px;         /* الطول الكبير المناسب */
+  width: auto;           /* العرض يتحدد تلقائياً حسب الصورة */
+  max-width: 90vw;       /* أقصى عرض مسموح */
+  min-width: 150px;
   flex: 0 0 auto;
   border-radius: 14px;
   background: var(--surface-2);
-  object-fit: contain; /* يضمن عدم القص إطلاقاً */
+  object-fit: contain;   /* 👈 هذه الكلمة هي السر: تمنع القص نهائياً */
   cursor: pointer;
   border: 1px solid var(--line);
-  scroll-snap-align: start;
+  scroll-snap-align: center;
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1242,13 +1247,6 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   .shots {
     padding: 4px 4px;
   }
-  .shots img {
-    max-height: 480px; /* أطول على الكمبيوتر */
-    max-width: min(60vw, 720px); /* أعرض على الكمبيوتر */
-    min-width: 240px;
-    border-radius: 18px;
-  }
-
 
 
 

@@ -923,6 +923,15 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 /* ====================================================================
    DESKTOP — Professional sidebar layout (≥ 960px)
    ==================================================================== */
+
+
+
+
+
+
+
+
+
 @media (min-width: 960px) {
   :root {
     --maxw: 100%;
@@ -1216,12 +1225,48 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     line-height: 1.9;
     max-width: 700px;
   }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   .shots {
+    padding: 4px 4px;
+  }
   .shots img {
-    max-height: 340px;
-    max-width: min(46vw, 560px);
+    height: 360px;
+    min-width: 220px;
+    max-width: min(60vw, 720px);
     border-radius: 18px;
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
   /* --- Login gate desktop --- */
   .gate .logo {
     width: 120px;

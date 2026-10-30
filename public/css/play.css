@@ -1239,18 +1239,15 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 
 
-
-   .shots {
+  .shots {
     padding: 4px 4px;
   }
   .shots img {
-    height: 360px;
-    min-width: 220px;
-    max-width: min(60vw, 720px);
+    max-height: 480px; /* أطول على الكمبيوتر */
+    max-width: min(60vw, 720px); /* أعرض على الكمبيوتر */
+    min-width: 240px;
     border-radius: 18px;
   }
-
-
 
 
 

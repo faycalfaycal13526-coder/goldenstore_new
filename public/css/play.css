@@ -1532,11 +1532,53 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 /* image modal */
 .modal { position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; padding: 24px; }
+
+
+
+
+
+
+
+
+
+
+
 .modal img {
-  max-width: min(94vw, 860px); max-height: 80vh; width: auto; height: auto;
-  object-fit: contain; border-radius: 12px; background: var(--surface-2);
-  box-shadow: 0 12px 60px rgba(0,0,0,.55); cursor: zoom-out;
+  width: auto;
+  height: auto;
+  max-width: 95vw;   /* تأخذ عرض الشاشة بالكامل */
+  max-height: 90vh;  /* تأخذ طول الشاشة بالكامل */
+  object-fit: contain; 
+  border-radius: 12px;
+  background: var(--surface-2);
+  cursor: zoom-out;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 .modal .close { position: absolute; top: 16px; inset-inline-end: 16px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; color: #fff; }
 
 .hidden { display: none !important; }

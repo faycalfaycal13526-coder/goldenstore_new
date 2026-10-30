@@ -584,20 +584,21 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .shots::-webkit-scrollbar { display: none; }
 .shots img {
-  height: 320px;
+  /* الحل السحري: نحدد العرض والارتفاع بـ auto مع حدود قصوى متساوية */
   width: auto;
-  min-width: 180px;
-  max-width: min(85vw, 560px);
+  height: auto;
+  max-height: 400px; /* ارتفاع كبير جداً للصور العمودية */
+  max-width: 85vw;   /* عرض كبير جداً للصور الأفقية */
+  min-width: 200px;  /* يمنع الصور العمودية من أن تصبح نحيلة جداً */
+  min-height: 200px; 
   flex: 0 0 auto;
   border-radius: 14px;
   background: var(--surface-2);
-  object-fit: cover;
-  object-position: center;
+  object-fit: contain; /* يضمن عدم القص إطلاقاً */
   cursor: pointer;
   border: 1px solid var(--line);
   scroll-snap-align: start;
 }
-
 
 
 

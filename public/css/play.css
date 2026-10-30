@@ -284,7 +284,7 @@ input, select { font-family: inherit; }
 
 /* "See all" header (Google Play style): the whole row is a link and the chevron
    at its end is the visible button. Padding + negative margins enlarge the touch
-   target (≈44px tall) without moving anything on the page. */
+   target (˜44px tall) without moving anything on the page. */
 a.section-link {
   color: inherit; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -559,58 +559,26 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* screenshots */
-.shots {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding: 4px 16px;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-}
+.shots { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 4px 0; }
 .shots::-webkit-scrollbar { display: none; }
 .shots img {
-  height: 340px;         /* الارتفاع الكبير والموحد */
-  width: auto;           /* العرض يتبع شكل الصورة (أفقية تبقى عريضة، وعمودية تبقى طويلة) */
-  max-width: 90vw;       
-  min-width: 150px;
+  /* Orientation-aware sizing: auto dimensions + max constraints let the
+     browser fit ANY aspect ratio (portrait 9:16, landscape 16:9, square…)
+     with zero cropping or distortion. Portrait shots use the full row
+     height; landscape shots use the full allowed width. */
+  width: auto; height: auto;
+  max-height: 280px;
+  max-width: min(72vw, 480px);
+  min-width: 96px;   /* loading placeholder before intrinsic size is known */
+  min-height: 96px;
   flex: 0 0 auto;
   border-radius: 14px;
-  background: transparent; /* 👈 إزالة اللون الرمادي من خلفية الصورة */
-  object-fit: contain;   
+  background: var(--surface-2);
+  object-fit: contain;  /* protective: never stretch if a bound ever clamps */
   cursor: pointer;
   border: 1px solid var(--line);
-  scroll-snap-align: center;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 .d-section { margin-top: 28px; }
 .d-section h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
@@ -923,17 +891,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 
 /* ====================================================================
-   DESKTOP — Professional sidebar layout (≥ 960px)
+   DESKTOP — Professional sidebar layout (= 960px)
    ==================================================================== */
-
-
-
-
-
-
-
-
-
 @media (min-width: 960px) {
   :root {
     --maxw: 100%;
@@ -1227,38 +1186,12 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     line-height: 1.9;
     max-width: 700px;
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-  .shots {
-    padding: 4px 4px;
+  .shots img {
+    max-height: 340px;
+    max-width: min(46vw, 560px);
+    border-radius: 18px;
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-   
   /* --- Login gate desktop --- */
   .gate .logo {
     width: 120px;
@@ -1359,7 +1292,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   }
 }
 
-/* Large desktop (≥ 1200px) */
+/* Large desktop (= 1200px) */
 @media (min-width: 1200px) {
   :root {
     --sidebar-w: 280px;
@@ -1418,7 +1351,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   }
 }
 
-/* Extra-large desktop (≥ 1600px) */
+/* Extra-large desktop (= 1600px) */
 @media (min-width: 1600px) {
   .content {
     max-width: 1600px;
@@ -1528,53 +1461,11 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 /* image modal */
 .modal { position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; padding: 24px; }
-
-
-
-
-
-
-
-
-
-
-
 .modal img {
-  width: auto;
-  height: auto;
-  max-width: 95vw;   /* تأخذ عرض الشاشة بالكامل */
-  max-height: 90vh;  /* تأخذ طول الشاشة بالكامل */
-  object-fit: contain; 
-  border-radius: 12px;
-  background: var(--surface-2);
-  cursor: zoom-out;
+  max-width: min(94vw, 860px); max-height: 80vh; width: auto; height: auto;
+  object-fit: contain; border-radius: 12px; background: var(--surface-2);
+  box-shadow: 0 12px 60px rgba(0,0,0,.55); cursor: zoom-out;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 .modal .close { position: absolute; top: 16px; inset-inline-end: 16px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; color: #fff; }
 
 .hidden { display: none !important; }
@@ -2088,7 +1979,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .install-group.split-active .download-cancel-btn::before,
 .install-group.split-active .install-cancel-btn::before {
-  content: '✕' !important;
+  content: '?' !important;
   display: block !important;
   font-size: 22px !important;
   font-weight: 400 !important;
@@ -2116,7 +2007,6 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .install-group:not(.split-active) .install-cancel-btn {
   display: none !important;
 }
-
 
 
 

@@ -559,56 +559,26 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
-
-
-
-
-
-
-
-
-
-
-
 /* screenshots */
-.shots {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding: 4px 16px;
-  -webkit-overflow-scrolling: touch;
-}
+.shots { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 4px 0; }
 .shots::-webkit-scrollbar { display: none; }
 .shots img {
-  /* هذا السطر هو السر: يثبت الطول ويترك العرض حراً */
-  height: 360px; 
-  width: auto;
-  max-width: 85vw; /* يمنع الصورة الأفقية من الخروج عن الشاشة */
+  /* Orientation-aware sizing: auto dimensions + max constraints let the
+     browser fit ANY aspect ratio (portrait 9:16, landscape 16:9, square…)
+     with zero cropping or distortion. Portrait shots use the full row
+     height; landscape shots use the full allowed width. */
+  width: auto; height: auto;
+  max-height: 280px;
+  max-width: min(72vw, 480px);
+  min-width: 96px;   /* loading placeholder before intrinsic size is known */
+  min-height: 96px;
   flex: 0 0 auto;
   border-radius: 14px;
-  background: transparent; /* إزالة أي خلفية سوداء */
-  object-fit: contain; /* يضمن عدم قص الصورة نهائياً */
+  background: var(--surface-2);
+  object-fit: contain;  /* protective: never stretch if a bound ever clamps */
   cursor: pointer;
   border: 1px solid var(--line);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 .d-section { margin-top: 28px; }
 .d-section h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
@@ -1216,7 +1186,11 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     line-height: 1.9;
     max-width: 700px;
   }
-
+  .shots img {
+    max-height: 340px;
+    max-width: min(46vw, 560px);
+    border-radius: 18px;
+  }
 
   /* --- Login gate desktop --- */
   .gate .logo {

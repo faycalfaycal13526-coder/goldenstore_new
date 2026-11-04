@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
-import { firestore, verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
+import { verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
 import { listApps, getAppBySlug, listScreenshots, listReviews, listNotifications, getStoreSettings } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -93,7 +93,11 @@ async function requireAdmin(c: any, next: any) {
   let token = getCookie(c, COOKIE_NAME);
   const authHeader = c.req.header('authorization') || '';
   if (!token && authHeader.toLowerCase().startsWith('bearer ')) token = authHeader.slice(7).trim();
-  const secret = c.env.JWT_SECRET || 'secret-key-for-goldenstore';
+  
+  // إزالة القيمة الافتراضية لسر JWT
+  const secret = c.env.JWT_SECRET;
+  if (!secret) return c.json({ error: 'server_misconfigured', message: 'JWT_SECRET is not set' }, 500);
+  
   if (!token) return c.json({ error: 'unauthorized' }, 401);
   const payload = await verifyJwt(token, secret);
   if (!payload || payload.role !== 'admin') return c.json({ error: 'unauthorized' }, 401);
@@ -114,15 +118,29 @@ function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
   return result;
 }
 
+// النطاق الديناميكي
+function storeDomain(env: Env): string { return env.STORE_DOMAIN || 'goldenstore.online'; }
+
+// دالة مساعدة لبناء روابط الصور
+function cdnImageUrl(key: string | undefined, env: Env, width: number): string | null {
+  if (!key) return null;
+  try { 
+    return `https://${storeDomain(env)}/cdn-cgi/image/width=${width},format=auto,quality=80/${r2PublicUrl(key, env)}`; 
+  } catch { return null; }
+}
+
 function feature_url(feature_key: string | undefined, env: Env, width: number = 800): string | null {
-  if (!feature_key) return null;
-  try { return `https://goldenstore.online/cdn-cgi/image/width=${width},format=auto,quality=80/${r2PublicUrl(feature_key, env)}`; } catch { return null; }
+  return cdnImageUrl(feature_key, env, width);
 }
 function icon_url(icon_key: string | undefined, env: Env, width: number = 200): string | null {
-  if (!icon_key) return null;
-  try { return `https://goldenstore.online/cdn-cgi/image/width=${width},format=auto,quality=80/${r2PublicUrl(icon_key, env)}`; } catch { return null; }
+  return cdnImageUrl(icon_key, env, width);
 }
-function storeLogoUrl(env: Env): string { return env.STORE_LOGO_URL || 'https://goldenstore.online/images/logo.png'; }
+// دالة جديدة لصور الشاشات بدقة 720
+function shot_url(shot_key: string | undefined, env: Env, width: number = 720): string | null {
+  return cdnImageUrl(shot_key, env, width);
+}
+
+function storeLogoUrl(env: Env): string { return env.STORE_LOGO_URL || `https://${storeDomain(env)}/images/logo.png`; }
 
 // Notifications Helper
 async function sendPushToTokens(tokens: string[], n: any, env: Env): Promise<any> {
@@ -356,7 +374,9 @@ app.get('/apps/:slug', async (c) => {
   if (!appData) return c.json({ error: 'not_found' }, 404);
   
   const screenshotsData = await listScreenshots(c.env, appData.id);
-  const screenshots = screenshotsData.map(s => ({ id: s.id, position: s.position, url: icon_url(s.r2_key, c.env) }));
+  // استخدام shot_url بدقة 720 لجلب صور الشاشات
+  const screenshots = screenshotsData.map(s => ({ id: s.id, position: s.position, url: shot_url(s.r2_key, c.env) }));
+  
   return c.json({ app: { ...appPublic(appData), icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env) }, screenshots });
 });
 
@@ -469,12 +489,18 @@ function isSecureRequest(c: any): boolean { return c.req.header('x-forwarded-pro
 app.post('/login', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const providedPass = String(body.password || body.pass || '');
-  const adminPass = String(c.env.ADMIN_PASSWORD || 'admin');
-  const adminUser = c.env.ADMIN_USERNAME || 'admin';
-  const secret = c.env.JWT_SECRET || 'secret-key-for-goldenstore';
+  const adminPass = c.env.ADMIN_PASSWORD;
+  const adminUser = String(c.env.ADMIN_USERNAME || 'store-admin');
+  const secret = c.env.JWT_SECRET;
 
-  if (providedPass !== adminPass) {
-    return c.json({ error: 'invalid_credentials', hint: 'Password mismatch' }, 401);
+  // التحقق من الإعدادات
+  if (!adminPass || !secret) {
+    return c.json({ error: 'server_misconfigured', message: 'ADMIN_PASSWORD and JWT_SECRET must be set' }, 500);
+  }
+
+  // استخدام المقارنة الآمنة
+  if (!constantTimeEqual(providedPass, adminPass)) {
+    return c.json({ error: 'invalid_credentials' }, 401);
   }
   
   const token = await signJwt({ sub: adminUser, role: 'admin' }, secret);
@@ -484,14 +510,17 @@ app.post('/login', async (c) => {
 
 app.post('/logout', (c) => { setCookie(c, COOKIE_NAME, '', { httpOnly: true, secure: isSecureRequest(c), sameSite: 'Lax', path: '/', maxAge: 0 }); return c.json({ ok: true }); });
 app.get('/me', async (c) => {
-  const token = getCookie(c, COOKIE_NAME), secret = c.env.JWT_SECRET || 'secret-key-for-goldenstore';
+  const token = getCookie(c, COOKIE_NAME), secret = c.env.JWT_SECRET;
+  if (!secret) return c.json({ error: 'server_misconfigured', message: 'JWT_SECRET is not set' }, 500);
   if (!token) return c.json({ authenticated: false });
   const payload = await verifyJwt(token, secret);
   return payload ? c.json({ authenticated: true, user: { username: payload.sub, role: payload.role } }) : c.json({ authenticated: false });
 });
 
 app.post('/setup-r2-cors', async (c) => {
-  if (String(c.req.header('x-admin-password') || '') !== String(c.env.ADMIN_PASSWORD || 'admin')) return c.json({ error: 'unauthorized' }, 401);
+  const setupPass = c.env.ADMIN_PASSWORD;
+  if (!setupPass) return c.json({ error: 'server_misconfigured', message: 'ADMIN_PASSWORD is not set' }, 500);
+  if (!constantTimeEqual(String(c.req.header('x-admin-password') || ''), setupPass)) return c.json({ error: 'unauthorized' }, 401);
   try {
     await r2ConfigureCors(c.env, (c.env.ALLOWED_ORIGINS || '').split(',').map(o=>o.trim()).filter(Boolean));
     return c.json({ ok: true });
@@ -639,6 +668,10 @@ app.post('/admin/apps', async (c) => {
   }
   
   if ((await getStoreSettings(c.env)).notify_new_publications) await addNotification(c.env, { type: 'new_app', title: body.name, body: '', app_slug: slug, created_at: now });
+  
+  // إبطال الكاش بعد الإضافة
+  invalidateAppsCache();
+  
   return c.json({ ok: true, id, slug });
 });
 
@@ -657,6 +690,10 @@ app.patch('/admin/apps/:id', async (c) => {
     .bind(name, name_lower, search_terms, body.package_name||old.package_name, body.short_description !== undefined ? sanitizeText(body.short_description, 500) : old.short_description, body.description !== undefined ? sanitizeText(body.description, 10000) : old.description, body.category||old.category, body.type ? (body.type==='game'?'game':'app') : old.type, body.developer !== undefined ? sanitizeText(body.developer, 120) : old.developer, body.version_name !== undefined ? sanitizeText(body.version_name, 60) : old.version_name, body.version_code !== undefined ? safeInt(body.version_code,0,999999999) : old.version_code, body.min_sdk !== undefined ? safeInt(body.min_sdk,1,99) : old.min_sdk, nowSec(), id).run();
 
   if (versionChanged) await addNotification(c.env, { type: 'update', title: name, body: `إصدار ${body.version_name||old.version_name}`, app_slug: old.slug, created_at: nowSec() });
+  
+  // إبطال الكاش بعد التعديل
+  invalidateAppsCache();
+  
   return c.json({ ok: true });
 });
 
@@ -724,172 +761,11 @@ app.delete('/admin/apps/:id', async (c) => {
   if (app.icon_key) await r2Delete(c.env, app.icon_key).catch(()=>{});
   if (app.feature_key) await r2Delete(c.env, app.feature_key).catch(()=>{});
   await c.env.DB.prepare('DELETE FROM apps WHERE id = ?').bind(id).run();
+  
+  // إبطال الكاش بعد الحذف
+  invalidateAppsCache();
+  
   return c.json({ ok: true });
-});
-
-// ============================================================
-// مسارات مؤقتة لنقل البيانات من Firestore إلى D1
-// ============================================================
-app.post('/import-apps-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    const snap = await db.collection('apps').get();
-    const stmts: any[] = [];
-    
-    for (const doc of snap.docs) {
-      const d = doc.data() as any;
-      const apk_key = d['مفتاح APK'] || d.apk_key || '';
-      if (!apk_key) continue;
-      
-      stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO apps (id, slug, name, name_lower, search_terms, package_name, short_description, description, category, type, developer, version_name, version_code, min_sdk, size_bytes, apk_key, icon_key, feature_key, stars, rating_sum, rating_count, rating, downloads, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(doc.id, d.slug||'', d['اسم']||d.name||'', d.name_lower||d.name?.toLowerCase()||'', JSON.stringify(d.search_terms||[]), d['اسم الحزمة']||d.package_name||'', d['وصف مختصر']||d.short_description||null, d['وصف']||d.description||null, d['فئة']||d.category||'other', d['نوع']||d.type||'app', d['المطور']||d.developer||null, d['اسم الإصدار']||d.version_name||null, d['رمز الإصدار']||d.version_code||0, d.min_sdk||21, d['الحجم بالبايت']||d.size_bytes||0, apk_key, d['مفتاح الأيقونة']||d.icon_key||null, d['مفتاح المميزة']||d.feature_key||null, d['نجوم']||d.stars||0, d['مجموع التقييم']||d.rating_sum||0, d['عدد التقييمات']||d.rating_count||0, d.rating||0, d['التنزيلات']||d.downloads||0, d['تاريخ الإنشاء']||d.created_at||0, d['تم التحديث في']||d.updated_at||0));
-    }
-    
-    if (stmts.length > 0) await c.env.DB.batch(stmts);
-    return c.json({ ok: true, imported: stmts.length });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
-});
-
-app.post('/import-screenshots-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    const appsSnap = await db.collection('apps').get();
-    const stmts: any[] = [];
-    let total = 0;
-
-    for (const appDoc of appsSnap.docs) {
-      const ssSnap = await appDoc.ref.collection('screenshots').get();
-      for (const ssDoc of ssSnap.docs) {
-        const d = ssDoc.data() as any;
-        const r2_key = d.r2_key || d['مفتاح'] || '';
-        if (!r2_key) continue;
-        
-        stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)`)
-          .bind(ssDoc.id, appDoc.id, r2_key, d.position || 0, d.created_at || 0));
-        total++;
-      }
-    }
-    
-    if (stmts.length > 0) await c.env.DB.batch(stmts);
-    return c.json({ ok: true, imported: total });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
-});
-
-app.post('/import-votes-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    const appsSnap = await db.collection('apps').get();
-    const stmts: any[] = [];
-    let total = 0;
-
-    for (const appDoc of appsSnap.docs) {
-      const votesSnap = await appDoc.ref.collection('star_votes').get();
-      for (const voteDoc of votesSnap.docs) {
-        const d = voteDoc.data() as any;
-        if (!d.rating) continue;
-        
-        stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO star_votes (id, app_id, hash, server_hash, uid, rating, comment, name, photo_url, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .bind(voteDoc.id, appDoc.id, d.hash || '', d.server_hash || '', d.uid || null, d.rating, d.comment || '', d.name || '', d.photo_url || null, d.ts || 0));
-        total++;
-      }
-    }
-    
-    if (stmts.length > 0) await c.env.DB.batch(stmts);
-    return c.json({ ok: true, imported: total });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
-});
-
-app.post('/import-updates-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    const doc = await db.collection('app_updates').doc('current').get();
-    if (!doc.exists) return c.json({ ok: true, message: 'no_update_doc_in_firestore' });
-    
-    const d = doc.data() as any;
-    await c.env.DB.prepare(`INSERT OR REPLACE INTO app_updates (id, version_name, version_code, apk_url, apk_key, notes, force, size_bytes, downloads, created_at) VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(d.version_name || '', d.version_code || 0, d.apk_url || '', d.apk_key || null, d.notes || '', d.force ? 1 : 0, d.size_bytes || 0, d.downloads || 0, d.created_at || 0).run();
-      
-    return c.json({ ok: true, imported: 1 });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
-});
-
-app.post('/import-notifications-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    const snap = await db.collection('notifications').orderBy('created_at', 'desc').get();
-    const stmts: any[] = [];
-    
-    for (const doc of snap.docs) {
-      const d = doc.data() as any;
-      stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO notifications (id, title, body, type, app_slug, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .bind(doc.id, d.title || '', d.body || '', d.type || 'announcement', d.app_slug || '', d.data ? JSON.stringify(d.data) : null, d.created_at || 0));
-    }
-    
-    if (stmts.length > 0) await c.env.DB.batch(stmts);
-    return c.json({ ok: true, imported: stmts.length });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
-});
-
-app.post('/import-tokens-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    let imported = 0;
-
-    const fcmSnap = await db.collection('fcm_tokens').get();
-    const fcmStmts: any[] = [];
-    for (const doc of fcmSnap.docs) {
-      const d = doc.data() as any;
-      if (!d.token) continue;
-      fcmStmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO fcm_tokens (id, token, uid, platform, updated_at) VALUES (?, ?, ?, ?, ?)`)
-        .bind(doc.id, d.token, d.uid || '', d.platform || 'android', d.updated_at || 0));
-      imported++;
-    }
-    if (fcmStmts.length > 0) await c.env.DB.batch(fcmStmts);
-
-    const webSnap = await db.collection('web_tokens').get();
-    const webStmts: any[] = [];
-    for (const doc of webSnap.docs) {
-      const d = doc.data() as any;
-      if (!d.token) continue;
-      webStmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO web_tokens (uid, token, platform, userAgent, updatedAt) VALUES (?, ?, ?, ?, ?)`)
-        .bind(doc.id, d.token, d.platform || 'web', d.userAgent || '', d.updatedAt || 0));
-      imported++;
-    }
-    if (webStmts.length > 0) await c.env.DB.batch(webStmts);
-
-    return c.json({ ok: true, imported });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
-});
-
-app.post('/import-requests-temp', async (c) => {
-  try {
-    const db = await firestore(c.env);
-    const snap = await db.collection('app_requests').get();
-    const stmts: any[] = [];
-    
-    for (const doc of snap.docs) {
-      const d = doc.data() as any;
-      stmts.push(c.env.DB.prepare(`INSERT OR REPLACE INTO app_requests (id, type, slug, app_name, current_version, new_version, source, reason, details, status, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(doc.id, d.type || 'update', d.slug || '', d.app_name || '', d.current_version || null, d.new_version || null, d.source || null, d.reason || null, d.details || null, d.status || 'new', d.ts || 0));
-    }
-    
-    if (stmts.length > 0) await c.env.DB.batch(stmts);
-    return c.json({ ok: true, imported: stmts.length });
-  } catch (e: any) { 
-    return c.json({ error: e.message }, 500); 
-  }
 });
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));

@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
-import { listApps, getAppBySlug, listScreenshots, listReviews, listNotifications, getStoreSettings } from '../lib/d1.js';
+import { 
+  listApps, getAppBySlug, listScreenshots, listReviews, listNotifications, getStoreSettings,
+  getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport 
+} from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
@@ -443,6 +446,7 @@ app.post('/apps/:slug/star-check', async (c) => {
   return c.json({ voted: false, rating: appData.rating, rating_count: appData.rating_count });
 });
 
+// --- مسار التعليقات (معدل لإرجاع الإعجابات) ---
 app.get('/apps/:slug/reviews', async (c) => {
   const appData = await getAppBySlug(c.env, c.req.param('slug'));
   if (!appData) return c.json({ error: 'not_found' }, 404);
@@ -454,10 +458,44 @@ app.get('/apps/:slug/reviews', async (c) => {
   const reviews = votes.filter(v => v.comment).map(v => {
     const r = Math.round(Number(v.rating) || 0);
     if (r >= 1 && r <= 5) dist[r as unknown as keyof typeof dist]++;
-    return { name: v.name || 'مستخدم', rating: r, comment: v.comment, photo_url: v.photo_url, ts: v.ts };
+    return { 
+      id: v.id, 
+      name: v.name || 'مستخدم', 
+      rating: r, 
+      comment: v.comment, 
+      photo_url: v.photo_url, 
+      ts: v.ts,
+      likes_count: Number(v.likes_count || 0) 
+    };
   }).sort((a, b) => b.ts - a.ts);
 
   return c.json({ reviews: reviews.slice(0, limit), total: reviews.length, dist, rating: appData.rating, rating_count: appData.rating_count });
+});
+
+// --- مسار الإعجاب بتعليق ---
+app.post('/apps/:slug/reviews/:reviewId/like', async (c) => {
+  const reviewId = c.req.param('reviewId');
+  const body = await c.req.json().catch(() => ({}));
+  const userId = String(body.userId || '').trim();
+  if (!userId) return c.json({ error: 'userId_required' }, 400);
+  const review = await getReviewById(c.env, reviewId);
+  if (!review) return c.json({ error: 'review_not_found' }, 404);
+  const result = await toggleReviewLike(c.env, reviewId, userId);
+  return c.json(result);
+});
+
+// --- مسار الإبلاغ عن تعليق ---
+app.post('/apps/:slug/reviews/:reviewId/report', async (c) => {
+  const appSlug = c.req.param('slug');
+  const reviewId = c.req.param('reviewId');
+  const body = await c.req.json().catch(() => ({}));
+  const userId = String(body.userId || '').trim();
+  const reason = String(body.reason || '').trim();
+  if (!userId || !reason) return c.json({ error: 'userId_and_reason_required' }, 400);
+  const review = await getReviewById(c.env, reviewId);
+  if (!review) return c.json({ error: 'review_not_found' }, 404);
+  await reportReview(c.env, reviewId, appSlug, userId, reason);
+  return c.json({ success: true });
 });
 
 // Requests (D1)
@@ -528,6 +566,25 @@ app.post('/setup-r2-cors', async (c) => {
 });
 
 app.use('/admin/*', requireAdmin);
+
+// --- مسارات إدارة البلاغات ---
+app.get('/admin/reports', async (c) => {
+  try {
+    const reports = await getAllReports(c.env);
+    return c.json({ reports });
+  } catch (err: any) {
+    return c.json({ error: 'fetch_reports_failed', message: err.message }, 500);
+  }
+});
+
+app.delete('/admin/reports/:id', async (c) => {
+  try {
+    await deleteReport(c.env, c.req.param('id'));
+    return c.json({ ok: true });
+  } catch (err: any) {
+    return c.json({ error: 'delete_report_failed', message: err.message }, 500);
+  }
+});
 
 app.get('/admin/settings', async (c) => c.json({ settings: await getStoreSettings(c.env) }));
 app.patch('/admin/settings', async (c) => {

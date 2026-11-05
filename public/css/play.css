@@ -562,7 +562,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 /* screenshots — portrait/square cards keep their shared height (220px mobile,
    270px desktop). Landscape is a fixed 1280 × 720 HD frame on DESKTOP, a
    viewport-fitting frame on tablets, and a Google Play-style responsive card
-   on PHONES (width: calc(100% - 40px), 16/9, cover, next card peeking). */
+   on PHONES (width: calc(100% - 24px), 16/9, cover, next card peeking). */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -2328,7 +2328,10 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
      The desktop 1280px width is completely unused here: every property that
      reads --landscape-w / --landscape-h is overridden below. */
   .shot-card.is-landscape {
-    width: calc(100% - 40px);   /* full image on screen + a peek of the next */
+    /* Slightly larger than calc(100% - 40px): ~5% wider/taller at every phone
+       width, still a visible ~22px peek of the next screenshot. Lower the 24px
+       value further to enlarge again; raise it to shrink. */
+    width: calc(100% - 24px);
     height: auto;               /* height comes from the aspect ratio */
     min-width: 0;               /* clear the desktop HD min-width */
     aspect-ratio: 16 / 9;

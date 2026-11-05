@@ -1574,7 +1574,7 @@ function onActiveDownloadsChange(fn) {
 })();
 
 window.Store = {
-  STORE, api, el, ico, t,
+  STORE, api, authedApi, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
   publicOrigin,
   posterCard, listRow, gridCard, featureCarousel, categoryName,

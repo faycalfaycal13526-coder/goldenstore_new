@@ -6,6 +6,8 @@ import {
   getRatingDistribution, listNotifications, getStoreSettings,
   getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport, deleteReview,
   searchApps, suggestApps,
+  createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
+  addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -712,9 +714,100 @@ app.post('/setup-r2-cors', async (c) => {
   } catch { return c.json({ error: 'failed' }, 500); }
 });
 
+
+/* ---------------------------- Support chat ---------------------------- */
+// Users authenticate with their Firebase ID token (Store.authedApi sends it).
+app.post('/support/threads', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'support-new', 8, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  const subject = sanitizeText(body.subject, 120) || 'رسالة دعم';
+  const message = sanitizeText(body.message, 2000);
+  if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
+  const { thread, messages } = await createSupportThread(c.env, {
+    uid: user.uid, email: user.email, name: user.name, subject, message,
+  });
+  c.header('Cache-Control', 'no-store');
+  return c.json({ thread: { ...thread, messages } }, 201);
+});
+
+app.get('/support/threads', async (c) => {
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const threads = await listUserSupportThreads(c.env, user.uid, 20);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ threads });
+});
+
+app.post('/support/threads/:id/messages', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'support-msg', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  const message = sanitizeText(body.message, 2000);
+  if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
+  const out = await addSupportMessage(c.env, c.req.param('id'), 'user', message, user.uid);
+  if (!out) return c.json({ error: 'thread_not_found_or_closed' }, 404);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ thread: out.thread, messages: out.messages }, 201);
+});
+
+app.post('/support/threads/:id/read', async (c) => {
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const found = await getSupportThread(c.env, c.req.param('id'));
+  if (!found || found.thread.uid !== user.uid) return c.json({ error: 'not_found' }, 404);
+  await markSupportThreadRead(c.env, found.thread.id, 'user');
+  return c.json({ ok: true });
+});
+
 app.use('/admin/*', requireAdmin);
 
 /* --------------------- Review reports (admin only) --------------------- */
+
+/* ---------------------- Support chat (admin) ---------------------- */
+app.get('/admin/support/threads', async (c) => {
+  const threads = await listAdminSupportThreads(c.env);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ threads });
+});
+
+app.get('/admin/support/threads/:id', async (c) => {
+  const found = await getSupportThread(c.env, c.req.param('id'));
+  if (!found) return c.json({ error: 'not_found' }, 404);
+  await markSupportThreadRead(c.env, found.thread.id, 'admin');
+  c.header('Cache-Control', 'no-store');
+  return c.json({ thread: found.thread, messages: found.messages });
+});
+
+app.post('/admin/support/threads/:id/messages', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const message = sanitizeText(body.message, 2000);
+  if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
+  const out = await addSupportMessage(c.env, c.req.param('id'), 'admin', message);
+  if (!out) return c.json({ error: 'not_found' }, 404);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ thread: out.thread, messages: out.messages }, 201);
+});
+
+app.patch('/admin/support/threads/:id', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const status = body.status === 'closed' ? 'closed' : body.status === 'open' ? 'open' : '';
+  if (!status) return c.json({ error: 'invalid_status' }, 400);
+  const ok = await setSupportThreadStatus(c.env, c.req.param('id'), status);
+  if (!ok) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true, status });
+});
+
+app.delete('/admin/support/threads/:id', async (c) => {
+  const ok = await deleteSupportThread(c.env, c.req.param('id'));
+  if (!ok) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true });
+});
+
 app.get('/admin/reports', async (c) => {
   try {
     const reports = await getAllReports(c.env);

@@ -1456,19 +1456,51 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .acct-setting .icon { width: 22px; height: 22px; color: var(--text-2); flex-shrink: 0; }
 .acct-setting .label { flex: 1; font-size: 15px; font-weight: 500; }
 .acct-setting .value { font-size: 13px; color: var(--text-3); }
-/* About collapsible (account settings) */
-.about-collapse { display: flex; flex-direction: column; }
-.about-trigger { width: 100%; border: none; background: transparent; font-family: inherit; cursor: pointer; }
-.about-trigger .value { margin-inline-start: auto; }
-.about-trigger .chevron { color: var(--text-3); transition: transform .2s ease; }
-.about-collapse.open .about-trigger .chevron { transform: rotate(180deg); }
-.about-body {
-  max-height: 0; overflow: hidden; opacity: 0;
-  transition: max-height .28s ease, opacity .2s ease, padding .2s ease;
-  padding: 0 12px;
-}
-.about-collapse.open .about-body { max-height: 600px; opacity: 1; padding: 4px 12px 14px; }
+/* Sign-out dialog copy (the "About Golden Store" accordion was removed). */
 .store-card-text { margin: 0; font-size: 13.5px; line-height: 1.9; color: var(--text-2); }
+
+/* Support chat (account settings) */
+.support-card { margin: 10px 0 16px; padding: 18px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); }
+.support-card-head { display: flex; align-items: center; gap: 10px; }
+.support-card-head h3 { color: var(--text); font-size: 16px; font-weight: 700; }
+.support-card-icon { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--primary); flex: 0 0 auto; }
+.support-card-icon .icon { width: 21px; height: 21px; }
+.support-card-text { margin: 10px 0 14px; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+.support-form { display: flex; flex-direction: column; gap: 10px; }
+.support-input {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 13.5px; line-height: 1.7; resize: vertical;
+}
+.support-input:focus { outline: none; border-color: var(--primary); }
+.support-input::placeholder { color: var(--text-3); }
+.support-send { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.support-threads-title { margin: 18px 0 8px; font-size: 14px; font-weight: 700; color: var(--text-2); }
+.support-threads { display: flex; flex-direction: column; gap: 12px; }
+.support-thread { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: var(--surface-2); }
+.support-thread-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.support-thread-head strong { flex: 1; min-width: 0; font-size: 14px; }
+.support-thread-date { color: var(--text-3); font-size: 11.5px; }
+.support-status { font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.support-status.is-open { color: #0d7a3d; background: rgba(37,211,102,.14); }
+.support-status.is-closed { color: var(--text-3); background: var(--surface-3); }
+.support-msgs { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-bottom: 10px; }
+.support-msg { padding: 9px 11px; border-radius: 12px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.support-msg-user { background: var(--surface-3); border-start-start-radius: 3px; }
+.support-msg-admin { background: rgba(34,158,233,.13); border-start-end-radius: 3px; }
+.support-msg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 11px; color: var(--text-3); }
+.support-msg-meta strong { color: var(--text-2); }
+.support-msg-body { color: var(--text); }
+.support-reply-form { display: flex; flex-direction: column; gap: 8px; }
+.support-reply-form .btn { align-self: flex-start; }
+.support-closed { color: var(--text-3); font-size: 12.5px; text-align: center; padding: 6px; }
+.support-empty, .support-error { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 13px; padding: 8px 0; }
+.support-empty .icon, .support-error .icon { width: 20px; height: 20px; }
+.support-error { color: #e5484d; }
+@media (max-width: 540px) {
+  .support-card { padding: 14px; }
+  .support-thread { padding: 10px; }
+}
 
 /* Language dropdown (account settings) */
 .lang-dropdown { position: relative; }

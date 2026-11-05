@@ -375,6 +375,7 @@
       tabBtn('new', 'plus', 'إضافة جديد'),
       tabBtn('requests', 'flag', 'الطلبات والبلاغات'),
       tabBtn('reports', 'message', t('بلاغات المراجعات')),
+      tabBtn('support', 'message', t('رسائل الدعم')),
       tabBtn('notifications', 'bell', 'الإشعارات'),
       tabBtn('app-update', 'download', 'رابط تحميل التطبيق'),
       tabBtn('settings', 'settings', 'إعدادات المتجر'),
@@ -392,6 +393,7 @@
     else if (activeTab === 'new') await renderNewApp(body);
     else if (activeTab === 'requests') await renderRequests(body);
     else if (activeTab === 'reports') await renderReports(body);
+    else if (activeTab === 'support') await renderSupport(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
     else if (activeTab === 'app-update') await renderAppUpdate(body);
     else if (activeTab === 'settings') await renderStoreSettings(body);
@@ -526,6 +528,180 @@
       body.innerHTML = '';
       body.append(emptyMsg(t('تعذّر تحميل البيانات'), e.message));
     }
+  }
+
+  // -------- support chat: user messages + admin replies --------
+  let supportAdminTimer = null;
+  let supportSelectedId = null;
+  const supportAdminDrafts = Object.create(null);
+
+  async function renderSupport(body) {
+    body.innerHTML = '';
+    if (supportAdminTimer) { clearInterval(supportAdminTimer); supportAdminTimer = null; }
+
+    const countEl = el('div', { class: 'support-admin-count' }, t('جارٍ تحميل رسائل الدعم…'));
+    const refreshBtn = el('button', {
+      class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => load(false),
+    }, ico('refresh', 'icon icon-sm'), t('تحديث القائمة'));
+    const listWrap = el('div', { class: 'support-admin-list' });
+    const chatWrap = el('div', { class: 'support-admin-chat' });
+    body.append(
+      el('div', { class: 'support-admin-toolbar' },
+        el('div', null, el('div', { class: 'support-admin-title' }, t('رسائل الدعم')), countEl),
+        refreshBtn),
+      el('div', { class: 'support-admin-layout' }, listWrap, chatWrap),
+    );
+
+    function captureDrafts() {
+      chatWrap.querySelectorAll('[data-draft]').forEach((n) => {
+        supportAdminDrafts[n.getAttribute('data-draft')] = n.value;
+      });
+    }
+    function restoreDrafts() {
+      chatWrap.querySelectorAll('[data-draft]').forEach((n) => {
+        const v = supportAdminDrafts[n.getAttribute('data-draft')];
+        if (typeof v === 'string') n.value = v;
+      });
+    }
+
+    function threadItem(th) {
+      return el('button', {
+        type: 'button',
+        class: 'support-admin-item' + (th.id === supportSelectedId ? ' active' : '') + (th.unread_admin ? ' unread' : ''),
+        onclick: () => { supportSelectedId = th.id; load(false); },
+      },
+        el('div', { class: 'support-admin-item-top' },
+          el('strong', null, th.subject || t('رسالة دعم')),
+          th.unread_admin ? el('span', { class: 'support-unread' }, formatNum(th.unread_admin)) : null),
+        el('div', { class: 'support-admin-item-user' }, th.user_name || th.user_email || th.uid || ''),
+        el('div', { class: 'support-admin-item-preview' }, th.last_message || ''),
+        el('div', { class: 'support-admin-item-meta' },
+          formatDate(th.last_message_at),
+          el('span', { class: 'support-status ' + (th.status === 'open' ? 'is-open' : 'is-closed') },
+            t(th.status === 'open' ? 'مفتوحة' : 'مغلقة'))),
+      );
+    }
+
+    async function openThread(id) {
+      let res;
+      try { res = await api('/api/admin/support/threads/' + encodeURIComponent(id)); }
+      catch (e) {
+        chatWrap.innerHTML = '';
+        chatWrap.append(emptyMsg(t('تعذّر تحميل رسائل الدعم'), e.message || t('حاول مجدداً')));
+        return;
+      }
+      captureDrafts();
+      const thread = res.thread || {};
+      const messages = Array.isArray(res.messages) ? res.messages : [];
+      chatWrap.innerHTML = '';
+
+      const toggleBtn = el('button', {
+        class: 'btn btn-secondary btn-sm', type: 'button', onclick: async () => {
+          const next = thread.status === 'open' ? 'closed' : 'open';
+          try {
+            await api('/api/admin/support/threads/' + encodeURIComponent(id), { method: 'PATCH', body: { status: next } });
+            await load(false, true);
+          } catch (e) { toast(t('تعذّر تحديث المحادثة'), 'error'); }
+        },
+      }, ico('refresh', 'icon icon-sm'), t(thread.status === 'open' ? 'إغلاق المحادثة' : 'إعادة فتح المحادثة'));
+
+      const deleteBtn = el('button', {
+        class: 'btn btn-danger btn-sm', type: 'button', onclick: async () => {
+          if (typeof window.confirm === 'function' && !window.confirm(t('تأكيد حذف المحادثة'))) return;
+          try {
+            await api('/api/admin/support/threads/' + encodeURIComponent(id), { method: 'DELETE' });
+            supportSelectedId = null;
+            delete supportAdminDrafts['admin:' + id];
+            toast(t('تم حذف المحادثة'), 'success');
+            await load(false, true);
+          } catch (e) { toast(t('تعذّر حذف المحادثة'), 'error'); }
+        },
+      }, ico('trash', 'icon icon-sm'), t('حذف المحادثة'));
+
+      chatWrap.append(
+        el('div', { class: 'support-chat-head' },
+          el('strong', null, thread.subject || t('رسالة دعم')),
+          el('span', { class: 'support-status ' + (thread.status === 'open' ? 'is-open' : 'is-closed') },
+            t(thread.status === 'open' ? 'مفتوحة' : 'مغلقة')),
+          el('div', { class: 'support-chat-user' },
+            [thread.user_name, thread.user_email].filter(Boolean).join(' · ') || thread.uid || '')),
+        el('div', { class: 'support-chat-actions' }, toggleBtn, deleteBtn),
+      );
+
+      const msgs = el('div', { class: 'support-chat-msgs' });
+      messages.forEach((m) => msgs.append(
+        el('div', { class: 'support-chat-msg ' + (m.sender === 'admin' ? 'admin' : 'user') },
+          el('div', { class: 'support-chat-meta' },
+            el('strong', null, m.sender === 'admin' ? t('فريق الدعم') : t('أنت')),
+            el('span', null, formatDate(m.created_at))),
+          el('div', null, m.body)),
+      ));
+      chatWrap.append(msgs);
+
+      const replyInput = el('textarea', {
+        rows: '3', maxlength: '2000', placeholder: t('اكتب الرد هنا…'),
+        'aria-label': t('الرد على المستخدم'), 'data-draft': 'admin:' + id,
+      });
+      const replyBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'submit' },
+        ico('send', 'icon icon-sm'), t('إرسال الرد'));
+      const replyForm = el('form', { class: 'support-chat-reply', onsubmit: async (e) => {
+        e.preventDefault();
+        const message = replyInput.value.trim();
+        if (message.length < 2) { replyInput.focus(); return; }
+        replyBtn.disabled = true;
+        try {
+          await api('/api/admin/support/threads/' + encodeURIComponent(id) + '/messages', {
+            method: 'POST', body: { message },
+          });
+          replyInput.value = '';
+          supportAdminDrafts['admin:' + id] = '';
+          toast(t('تم إرسال الرد'), 'success');
+          await load(false, true);
+        } catch (err) { toast(t('تعذّر إرسال الرد'), 'error'); }
+        finally { replyBtn.disabled = false; }
+      } }, replyInput, replyBtn);
+      chatWrap.append(thread.status === 'open'
+        ? replyForm
+        : el('div', { class: 'support-closed' }, t('المحادثة مغلقة')));
+      restoreDrafts();
+    }
+
+    let loading = false;
+    async function load(silent, force) {
+      if (!document.body.contains(body)) {
+        if (supportAdminTimer) { clearInterval(supportAdminTimer); supportAdminTimer = null; }
+        return;
+      }
+      if (loading && !force) return;
+      loading = true;
+      refreshBtn.disabled = true;
+      try {
+        const res = await api('/api/admin/support/threads');
+        const threads = Array.isArray(res.threads) ? res.threads : [];
+        const unread = threads.reduce((n, x) => n + (Number(x.unread_admin) || 0), 0);
+        countEl.textContent = `${formatNum(threads.length)} ${t('محادثة')}`
+          + (unread ? ` · ${formatNum(unread)} ${t('جديد')}` : '');
+        listWrap.innerHTML = '';
+        if (!threads.length) {
+          listWrap.append(emptyMsg(t('لا توجد رسائل دعم'), t('تظهر هنا رسائل المستخدمين ويمكنك الرد عليها مباشرة.')));
+          supportSelectedId = null;
+          chatWrap.innerHTML = '';
+          chatWrap.append(el('div', { class: 'support-chat-placeholder' }, t('اختر محادثة لعرض الرسائل')));
+        } else {
+          if (!threads.some((x) => x.id === supportSelectedId)) supportSelectedId = threads[0].id;
+          threads.forEach((th) => listWrap.append(threadItem(th)));
+          await openThread(supportSelectedId);
+        }
+      } catch (e) {
+        if (!silent) {
+          listWrap.innerHTML = '';
+          listWrap.append(emptyMsg(t('تعذّر تحميل رسائل الدعم'), e.message || t('حاول مجدداً')));
+        }
+      } finally { loading = false; refreshBtn.disabled = false; }
+    }
+
+    await load(false);
+    supportAdminTimer = setInterval(() => { if (!document.hidden) load(true); }, 20000);
   }
 
   // -------- review reports (review_reports) --------

@@ -478,3 +478,50 @@
 :root[data-theme="light"] .admin-topbar { background: rgba(255,255,255,.92); backdrop-filter: blur(10px); }
 :root[data-theme="light"] .admin-tabs { background: #ffffff; }
 @media (min-width: 960px) { :root[data-theme="light"] .admin-tabs { background: var(--surface); } }
+
+/* =====================================================================
+   Support chat (admin) — thread list + conversation, 2026-11.
+   ===================================================================== */
+.support-admin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.support-admin-title { font-size: 17px; font-weight: 800; }
+.support-admin-count { color: var(--text-3); font-size: 12.5px; margin-top: 4px; }
+.support-admin-layout { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.support-admin-list { display: flex; flex-direction: column; gap: 8px; max-height: 640px; overflow-y: auto; }
+.support-admin-item {
+  width: 100%; text-align: start; display: flex; flex-direction: column; gap: 4px;
+  padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+}
+.support-admin-item:hover { background: var(--surface-2); }
+.support-admin-item.active { border-color: var(--primary); background: var(--surface-2); }
+.support-admin-item.unread { border-inline-start: 3px solid var(--primary); }
+.support-admin-item-top { display: flex; align-items: center; gap: 8px; }
+.support-admin-item-top strong { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-unread { min-width: 20px; text-align: center; font-size: 11px; font-weight: 800; color: #fff; background: var(--primary); border-radius: 999px; padding: 2px 6px; }
+.support-admin-item-user { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-admin-item-preview { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-admin-item-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-3); }
+.support-admin-chat { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 14px; min-height: 260px; }
+.support-chat-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.support-chat-head strong { flex: 1; font-size: 15px; min-width: 0; }
+.support-chat-user { color: var(--text-3); font-size: 12px; width: 100%; direction: ltr; text-align: start; }
+.support-chat-actions { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
+.support-chat-msgs { display: flex; flex-direction: column; gap: 9px; max-height: 360px; overflow-y: auto; margin-bottom: 12px; }
+.support-chat-msg { padding: 9px 11px; border-radius: 12px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); }
+.support-chat-msg.user { background: var(--surface-2); }
+.support-chat-msg.admin { background: rgba(34,158,233,.13); border-color: rgba(34,158,233,.3); }
+.support-chat-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
+.support-chat-reply { display: flex; flex-direction: column; gap: 9px; }
+.support-chat-reply textarea {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 13.5px; resize: vertical; min-height: 90px;
+}
+.support-chat-reply textarea:focus { outline: none; border-color: var(--primary); }
+.support-chat-reply textarea::placeholder { color: var(--text-3); }
+.support-chat-reply .btn { align-self: flex-start; }
+.support-chat-placeholder { display: flex; align-items: center; justify-content: center; min-height: 220px; color: var(--text-3); font-size: 13.5px; text-align: center; }
+@media (max-width: 860px) {
+  .support-admin-layout { grid-template-columns: 1fr; }
+  .support-admin-list { max-height: 260px; }
+}

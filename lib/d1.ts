@@ -354,3 +354,225 @@ export async function deleteReview(env: Env, reviewId: string): Promise<{ delete
 
   return { deleted: true, likes, reports };
 }
+
+/* =========================================================================
+ * Support chat (2026-11) — user ↔ admin conversation stored in D1.
+ * Two tables: a thread per topic and an ordered list of messages. Both user
+ * and admin can append messages; polling on the account page picks up replies.
+ * ========================================================================= */
+
+export interface SupportThread {
+  id: string;
+  uid: string;
+  user_email: string;
+  user_name: string;
+  subject: string;
+  status: 'open' | 'closed';
+  created_at: number;
+  updated_at: number;
+  last_message_at: number;
+  last_message?: string;
+  message_count?: number;
+  unread_admin: number;
+  unread_user: number;
+  messages?: SupportMessage[];
+}
+
+export interface SupportMessage {
+  id: string;
+  thread_id: string;
+  sender: 'user' | 'admin';
+  body: string;
+  created_at: number;
+}
+
+const SUPPORT_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS support_threads (
+     id TEXT PRIMARY KEY,
+     uid TEXT NOT NULL,
+     user_email TEXT,
+     user_name TEXT,
+     subject TEXT NOT NULL,
+     status TEXT NOT NULL DEFAULT 'open',
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL,
+     last_message_at INTEGER NOT NULL,
+     unread_admin INTEGER NOT NULL DEFAULT 0,
+     unread_user INTEGER NOT NULL DEFAULT 0
+   )`,
+  `CREATE TABLE IF NOT EXISTS support_messages (
+     id TEXT PRIMARY KEY,
+     thread_id TEXT NOT NULL,
+     sender TEXT NOT NULL,
+     body TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_support_threads_uid ON support_threads(uid, last_message_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_threads_admin ON support_threads(last_message_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at)`,
+];
+
+// Remember which D1 binding already has the schema (per isolate / per test DB).
+const supportSchemaReady = new WeakSet<object>();
+
+export async function ensureSupportSchema(env: Env): Promise<void> {
+  const db: any = env.DB;
+  if (supportSchemaReady.has(db)) return;
+  for (const sql of SUPPORT_SCHEMA) await db.prepare(sql).run();
+  supportSchemaReady.add(db);
+}
+
+function supportThreadFromRow(r: any): SupportThread {
+  return {
+    id: String(r.id), uid: String(r.uid),
+    user_email: r.user_email || '', user_name: r.user_name || '',
+    subject: r.subject || '', status: r.status === 'closed' ? 'closed' : 'open',
+    created_at: Number(r.created_at) || 0, updated_at: Number(r.updated_at) || 0,
+    last_message_at: Number(r.last_message_at) || 0,
+    last_message: r.last_message || undefined,
+    message_count: r.message_count != null ? Number(r.message_count) : undefined,
+    unread_admin: Number(r.unread_admin) || 0, unread_user: Number(r.unread_user) || 0,
+  };
+}
+
+function supportMessageFromRow(r: any): SupportMessage {
+  return {
+    id: String(r.id), thread_id: String(r.thread_id),
+    sender: r.sender === 'admin' ? 'admin' : 'user',
+    body: String(r.body || ''), created_at: Number(r.created_at) || 0,
+  };
+}
+
+async function supportMessagesFor(env: Env, ids: string[]): Promise<Record<string, SupportMessage[]>> {
+  const out: Record<string, SupportMessage[]> = {};
+  if (!ids.length) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const res: any = await env.DB.prepare(
+    `SELECT id, thread_id, sender, body, created_at FROM support_messages
+     WHERE thread_id IN (${placeholders}) ORDER BY created_at ASC, rowid ASC`
+  ).bind(...ids).all();
+  for (const r of res.results || []) {
+    const m = supportMessageFromRow(r);
+    (out[m.thread_id] ||= []).push(m);
+  }
+  return out;
+}
+
+export async function createSupportThread(
+  env: Env,
+  input: { uid: string; email?: string; name?: string; subject: string; message: string },
+): Promise<{ thread: SupportThread; messages: SupportMessage[] }> {
+  await ensureSupportSchema(env);
+  const ts = nowSec();
+  const threadId = randomId();
+  const messageId = randomId();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO support_threads
+       (id, uid, user_email, user_name, subject, status, created_at, updated_at, last_message_at, unread_admin, unread_user)
+       VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, 0)`
+    ).bind(threadId, input.uid, input.email || '', input.name || '', input.subject, ts, ts, ts),
+    env.DB.prepare(
+      `INSERT INTO support_messages (id, thread_id, sender, body, created_at) VALUES (?, ?, 'user', ?, ?)`
+    ).bind(messageId, threadId, input.message, ts),
+  ]);
+  const thread: SupportThread = {
+    id: threadId, uid: input.uid, user_email: input.email || '', user_name: input.name || '',
+    subject: input.subject, status: 'open', created_at: ts, updated_at: ts, last_message_at: ts,
+    unread_admin: 1, unread_user: 0,
+  };
+  const messages: SupportMessage[] = [{ id: messageId, thread_id: threadId, sender: 'user', body: input.message, created_at: ts }];
+  return { thread, messages };
+}
+
+/** Threads belonging to one user, newest activity first, with all messages. */
+export async function listUserSupportThreads(env: Env, uid: string, limit = 20): Promise<SupportThread[]> {
+  await ensureSupportSchema(env);
+  const res: any = await env.DB.prepare(
+    `SELECT * FROM support_threads WHERE uid = ? ORDER BY last_message_at DESC, rowid DESC LIMIT ?`
+  ).bind(uid, Math.min(Math.max(limit, 1), 50)).all();
+  const threads: SupportThread[] = (res.results || []).map(supportThreadFromRow);
+  const map = await supportMessagesFor(env, threads.map((t: SupportThread) => t.id));
+  threads.forEach((t: SupportThread) => { t.messages = map[t.id] || []; t.message_count = (map[t.id] || []).length; });
+  return threads;
+}
+
+/** All threads for the admin panel, with a preview of the last message. */
+export async function listAdminSupportThreads(env: Env, limit = 100): Promise<SupportThread[]> {
+  await ensureSupportSchema(env);
+  const res: any = await env.DB.prepare(
+    `SELECT t.*,
+       (SELECT body FROM support_messages m WHERE m.thread_id = t.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_message,
+       (SELECT COUNT(*) FROM support_messages m WHERE m.thread_id = t.id) AS message_count
+     FROM support_threads t ORDER BY t.last_message_at DESC, t.rowid DESC LIMIT ?`
+  ).bind(Math.min(Math.max(limit, 1), 200)).all();
+  return (res.results || []).map(supportThreadFromRow);
+}
+
+export async function getSupportThread(env: Env, threadId: string): Promise<{ thread: SupportThread; messages: SupportMessage[] } | null> {
+  await ensureSupportSchema(env);
+  const r: any = await env.DB.prepare('SELECT * FROM support_threads WHERE id = ?').bind(threadId).first();
+  if (!r) return null;
+  const thread = supportThreadFromRow(r);
+  const map = await supportMessagesFor(env, [threadId]);
+  const messages = map[threadId] || [];
+  thread.messages = messages;
+  thread.message_count = messages.length;
+  return { thread, messages };
+}
+
+/** Append a message. `sender='user'` verifies ownership + open status. */
+export async function addSupportMessage(
+  env: Env,
+  threadId: string,
+  sender: 'user' | 'admin',
+  body: string,
+  uid = '',
+): Promise<{ thread: SupportThread; messages: SupportMessage[] } | null> {
+  await ensureSupportSchema(env);
+  const r: any = await env.DB.prepare('SELECT * FROM support_threads WHERE id = ?').bind(threadId).first();
+  if (!r) return null;
+  if (sender === 'user' && (String(r.uid) !== uid || r.status === 'closed')) return null;
+  const ts = nowSec();
+  const messageId = randomId();
+  const unreadAdmin = sender === 'user' ? 1 : 0;
+  const unreadUser = sender === 'admin' ? 1 : 0;
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO support_messages (id, thread_id, sender, body, created_at) VALUES (?, ?, ?, ?, ?)`
+    ).bind(messageId, threadId, sender, body, ts),
+    env.DB.prepare(
+      `UPDATE support_threads SET last_message_at = ?, updated_at = ?,
+         unread_admin = CASE WHEN ? = 1 THEN unread_admin + 1 ELSE 0 END,
+         unread_user  = CASE WHEN ? = 1 THEN unread_user + 1 ELSE 0 END
+       WHERE id = ?`
+    ).bind(ts, ts, unreadAdmin, unreadUser, threadId),
+  ]);
+  return getSupportThread(env, threadId);
+}
+
+export async function setSupportThreadStatus(env: Env, threadId: string, status: 'open' | 'closed'): Promise<boolean> {
+  await ensureSupportSchema(env);
+  const existing: any = await env.DB.prepare('SELECT id FROM support_threads WHERE id = ?').bind(threadId).first();
+  if (!existing) return false;
+  await env.DB.prepare('UPDATE support_threads SET status = ?, updated_at = ? WHERE id = ?')
+    .bind(status, nowSec(), threadId).run();
+  return true;
+}
+
+export async function markSupportThreadRead(env: Env, threadId: string, who: 'user' | 'admin'): Promise<void> {
+  await ensureSupportSchema(env);
+  const column = who === 'admin' ? 'unread_admin' : 'unread_user';
+  await env.DB.prepare(`UPDATE support_threads SET ${column} = 0 WHERE id = ?`).bind(threadId).run();
+}
+
+export async function deleteSupportThread(env: Env, threadId: string): Promise<boolean> {
+  await ensureSupportSchema(env);
+  const existing: any = await env.DB.prepare('SELECT id FROM support_threads WHERE id = ?').bind(threadId).first();
+  if (!existing) return false;
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM support_messages WHERE thread_id = ?').bind(threadId),
+    env.DB.prepare('DELETE FROM support_threads WHERE id = ?').bind(threadId),
+  ]);
+  return true;
+}

@@ -510,10 +510,14 @@
     'تم تعطيل الإشعارات التلقائية': { en: 'Automatic notifications disabled', fr: 'Notifications automatiques désactivées', es: 'Notificaciones automáticas desactivadas' },
     'تعذّر حفظ الإعداد': { en: 'Could not save setting', fr: 'Impossible d’enregistrer le paramètre', es: 'No se pudo guardar la configuración' },
     'تعذّر تسجيل الخروج، حاول مرة أخرى': { en: 'Could not sign out. Please try again.', fr: 'Impossible de vous déconnecter. Veuillez réessayer.', es: 'No se pudo cerrar la sesión. Inténtalo de nuevo.' },
-    // account / single Telegram contact CTA (2026-11)
-    'الاشتراك عبر تليجرام': { en: 'Subscribe via Telegram', fr: 'S’abonner via Telegram', es: 'Suscribirse por Telegram' },
-    'استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر تليجرام.': { en: 'Ask about available plans and confirm your subscription with the store team on Telegram.', fr: 'Renseignez-vous sur les offres et confirmez votre abonnement auprès de l’équipe via Telegram.', es: 'Consulta los planes disponibles y confirma tu suscripción con el equipo de la tienda por Telegram.' },
-    'راسلنا على تليجرام': { en: 'Message us on Telegram', fr: 'Écrivez-nous sur Telegram', es: 'Escríbenos por Telegram' },
+    // account / Telegram channel invite (2026-11) — join, not subscribe
+    'انضموا إلى قناتنا على تليجرام': { en: 'Join our Telegram channel', fr: 'Rejoignez notre chaîne Telegram', es: 'Únete a nuestro canal de Telegram' },
+    'تابع آخر التطبيقات والألعاب والتحديثات وأخبار المتجر على قناتنا في تليجرام.': {
+      en: 'Follow new apps and games, updates and store news on our Telegram channel.',
+      fr: 'Suivez les nouvelles apps et jeux, les mises à jour et les actualités du store sur notre chaîne Telegram.',
+      es: 'Sigue las novedades de apps y juegos, las actualizaciones y las noticias de la tienda en nuestro canal de Telegram.',
+    },
+    'انضم الى المجموعة': { en: 'Join the group', fr: 'Rejoindre le groupe', es: 'Únete al grupo' },
     'الحسابات المحفوظة': { en: 'Saved accounts', fr: 'Comptes enregistrés', es: 'Cuentas guardadas' },
     'حسابات Google التي استُخدمت سابقاً على هذا الجهاز.': { en: 'Google accounts previously used on this device.', fr: 'Comptes Google déjà utilisés sur cet appareil.', es: 'Cuentas de Google usadas anteriormente en este dispositivo.' },
     'لا توجد حسابات أخرى محفوظة بعد.': { en: 'No other accounts are saved yet.', fr: 'Aucun autre compte n’est encore enregistré.', es: 'Aún no hay otras cuentas guardadas.' },

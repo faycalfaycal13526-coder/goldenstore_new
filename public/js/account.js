@@ -6,7 +6,6 @@
   // Single contact CTA: Telegram only (social links were removed).
   // Declared before S.ready() because its callback may run synchronously.
   const TELEGRAM_URL = 'https://t.me/goldenstore_10';
-  const TELEGRAM_HANDLE = '@goldenstore_10';
 
   const isNativeApp = () => !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
 
@@ -384,7 +383,7 @@
           langSettingItem(),
           aboutDropdown(),
         ),
-        subscriptionCard(),
+        telegramCard(),
         legalLinksCard(),
         el('div', { class: 'account-actions' },
           el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
@@ -397,25 +396,25 @@
     renderSettings();
   }
 
-  // One button, no social-media list.
-  function subscriptionCard() {
-    return el('section', { class: 'subscription-card', 'aria-label': t('الاشتراك عبر تليجرام') },
-      el('div', { class: 'subscription-card-head' },
-        el('span', { class: 'subscription-card-icon' }, ico('telegram', 'icon')),
-        el('h3', null, t('الاشتراك عبر تليجرام')),
+  // One button, no social-media list: invite users to the Telegram channel.
+  // Copy invites users to join the channel only.
+  function telegramCard() {
+    return el('section', { class: 'telegram-card', 'aria-label': t('انضموا إلى قناتنا على تليجرام') },
+      el('div', { class: 'telegram-card-head' },
+        el('span', { class: 'telegram-card-icon' }, ico('telegram', 'icon')),
+        el('h3', null, t('انضموا إلى قناتنا على تليجرام')),
       ),
-      el('p', { class: 'subscription-card-text' },
-        t('استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر تليجرام.')),
+      el('p', { class: 'telegram-card-text' },
+        t('تابع آخر التطبيقات والألعاب والتحديثات وأخبار المتجر على قناتنا في تليجرام.')),
       el('a', {
-        class: 'subscription-telegram',
+        class: 'telegram-cta',
         href: TELEGRAM_URL,
         target: '_blank',
         rel: 'noopener noreferrer',
-        'aria-label': `${t('راسلنا على تليجرام')} ${TELEGRAM_HANDLE}`,
+        'aria-label': t('انضم الى المجموعة'),
       },
         ico('telegram', 'icon'),
-        el('span', { class: 'subscription-telegram-label' }, t('راسلنا على تليجرام')),
-        el('bdi', { class: 'subscription-handle', dir: 'ltr' }, TELEGRAM_HANDLE),
+        el('span', { class: 'telegram-cta-label' }, t('انضم الى المجموعة')),
       ),
     );
   }

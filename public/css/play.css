@@ -559,10 +559,10 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
-/* screenshots — one shared height for every orientation (220px mobile,
-   270px desktop, ~20% smaller than the previous build). Portrait widths scale
-   with it to keep the 9:16 ratio; landscape uses width: auto so its own aspect
-   ratio determines the width. object-fit: contain never crops or stretches. */
+/* screenshots — portrait/square cards keep their shared height (220px mobile,
+   270px desktop). Landscape screenshots are a fixed 1280 × 720 HD (16:9)
+   frame; the strip scrolls horizontally to reveal it. object-fit: contain
+   fills a 16:9 source exactly and never crops or stretches. */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -570,16 +570,24 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   scroll-snap-type: x mandatory; scrollbar-width: thin;
   padding: 6px 16px 16px;   /* identical side edges for every card */
 }
+/* A 1280px landscape card is far wider than the scrollport. Relax mandatory
+   snapping for strips that contain one, so touch, trackpad and wheel panning
+   stay smooth and never snap the user back. Portrait-only strips are unchanged. */
+.shots:has(.shot-card.is-landscape) {
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .shots::-webkit-scrollbar { height: 8px; }
 .shots::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
 .shot-card {
-  --shot-h: 220px;   /* ONE height value shared by portrait AND landscape */
+  --shot-h: 220px;   /* portrait / square cards (unchanged) */
   --shot-w: 124px;   /* scaled with the height: keeps the 9:16 card ratio */
   position: relative; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;  /* centered card */
   width: var(--shot-w); height: var(--shot-h);
   /* content-box keeps the 1px border outside the declared height, so the
-     image really is 220px / 270px tall for BOTH orientations. */
+     image really is 220px / 270px tall; the landscape frame is 1280 × 720. */
   box-sizing: content-box;
   padding: 0; border: 1px solid var(--line); border-radius: 20px;
   background: #08080a; overflow: hidden; cursor: zoom-in;
@@ -588,18 +596,24 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .shot-card:hover { transform: translateY(-3px); border-color: var(--nav); box-shadow: 0 14px 34px rgba(0,0,0,.45); }
 .shot-card:focus-visible { outline: 3px solid var(--nav); outline-offset: 3px; }
+/* Landscape: fixed HD 1280 × 720 (16:9). The 1px border sits outside the
+   declared size (content-box), so the IMAGE itself is exactly 1280 × 720. */
 .shot-card.is-landscape {
-  width: auto;                 /* card follows the image's aspect ratio */
-  height: var(--shot-h);       /* EXACT same height as the portrait cards */
-  min-width: calc(var(--shot-h) * 1.1);  /* stable card before the image loads */
-  scroll-snap-align: center;   /* keep a centered card with visible edges */
+  --landscape-w: 1280px;
+  --landscape-h: 720px;
+  width: var(--landscape-w);
+  height: var(--landscape-h);
+  min-width: var(--landscape-w);  /* flex must never shrink the HD frame */
+  flex: 0 0 auto;
+  scroll-snap-align: start;       /* rest at the left edge, not the middle */
+  scroll-snap-stop: normal;
 }
 .shot-card.is-landscape .shot-img {
-  width: auto;                 /* aspect ratio determines the width automatically */
-  height: var(--shot-h);       /* 220px mobile / 270px desktop — same as portrait */
-  max-width: none;             /* override the global img { max-width: 100% } */
+  width: var(--landscape-w);      /* exactly 1280px */
+  height: var(--landscape-h);     /* exactly 720px */
+  max-width: none;                /* override the global img { max-width: 100% } */
   flex: 0 0 auto;
-  object-fit: contain;         /* never crop, never stretch */
+  object-fit: contain;            /* 16:9 fills exactly; no crop, no stretch */
 }
 .shot-card.is-square { --shot-w: 220px; }
 .shot-img {
@@ -2299,7 +2313,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .applist > a.approw[href^="/search?category="] > .icon:last-child { display: none; }
 
 @media (max-width: 540px) {
-  /* portrait AND landscape both inherit --shot-h: 220px here */
+  /* portrait cards inherit --shot-h: 220px; landscape stays fixed 1280 × 720 */
   .lb-stage { padding: 68px 12px 8px; }
   .lb-footer { padding-bottom: 12px; }
   .lb-thumb { width: 52px; height: 52px; }

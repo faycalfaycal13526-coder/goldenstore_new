@@ -489,12 +489,28 @@ function emptyState(title, hint, icon = 'package') {
   return el('div', { class: 'empty' }, ico(icon, 'icon'), el('h3', null, title), hint ? el('p', null, hint) : null);
 }
 function errorState(err) {
-  if (err && (err.status === 0 || err.message === 'timeout'))
-    return emptyState(t('تعذّر الاتصال بالخادم'), t('تحقّق من اتصالك بالإنترنت ثمّ حدّث الصفحة.'), 'globe');
+  const offline = err && (err.status === 0 || err.message === 'timeout'
+    || (typeof navigator !== 'undefined' && navigator.onLine === false));
+  if (offline) {
+    return el('div', { class: 'gs-offline-wrap', 'data-noi18n': '' },
+      el('div', { class: 'gs-offline-card', role: 'alert', 'aria-live': 'assertive' },
+        el('div', { class: 'gs-offline-logo' },
+          el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
+        el('span', { class: 'gs-offline-badge' }, t('لا يوجد اتصال بالإنترنت')),
+        el('h3', { class: 'gs-offline-title' }, t('تعذّر الاتصال بالخادم')),
+        el('p', { class: 'gs-offline-hint' }, t('تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.')),
+        el('button', {
+          class: 'gs-offline-retry', type: 'button',
+          onclick: () => { try { location.reload(); } catch (e) {} },
+        }, ico('refresh', 'icon'), t('إعادة المحاولة')),
+      ),
+    );
+  }
   if (err && err.status >= 500)
     return emptyState(t('الخدمة غير متاحة مؤقتاً'), t('حاول لاحقاً بعد دقائق قليلة.'), 'info');
   return emptyState(t('تعذّر تحميل البيانات'), t('حدّث الصفحة وحاول مجدداً.'), 'info');
 }
+
 
 /* ----------------------------- Chrome ----------------------------- */
 function avatarEl(user) {
@@ -1017,22 +1033,21 @@ function showUpdateDialog(update) {
   if (existing) existing.remove();
 
   const overlay = el('div', {
-    id: 'gs-update-dialog',
-    style: {
-      position: 'fixed', inset: '0', zIndex: '300',
-      background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-    },
+    id: 'gs-update-dialog', class: 'gs-update-overlay', role: 'dialog',
+    'aria-modal': 'true', 'aria-labelledby': 'gs-update-title', 'data-noi18n': '',
   });
-  const card = el('div', {
-    style: {
-      background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '20px',
-      maxWidth: '420px', width: '100%', padding: '24px', textAlign: 'center', boxShadow: '0 24px 80px rgba(0,0,0,.4)',
-    },
-  },
-    el('div', { style: { fontSize: '48px', marginBottom: '10px' } }, '⬆'),
-    el('h2', { style: { fontSize: '20px', marginBottom: '8px' } }, t('تحديث جديد متاح')),
-    el('p', { style: { color: 'var(--text-2)', fontSize: '14px', lineHeight: '1.7', marginBottom: '18px' } },
-      update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.'),
+  const card = el('div', { class: 'gs-update-card', 'data-noi18n': '' },
+    el('div', { class: 'gs-update-logo' },
+      el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
+    el('div', { class: 'gs-update-head' },
+      el('span', { class: 'gs-update-badge' }, t('تحديث جديد متاح')),
+      el('span', { class: 'gs-update-version' }, t('الإصدار') + ' ' + (update.version_name || '—')),
+    ),
+    el('h2', { id: 'gs-update-title', class: 'gs-update-title' }, t('تحديث Golden Store')),
+    el('p', { class: 'gs-update-lead' }, t('نسخة جديدة من Golden Store جاهزة للتثبيت.')),
+    el('div', { class: 'gs-update-notes' },
+      el('span', { class: 'gs-update-notes-label' }, t('ما الجديد')),
+      el('p', null, update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.')),
     ),
   );
 
@@ -1042,7 +1057,9 @@ function showUpdateDialog(update) {
       const filename = 'goldenstore-' + (update.version_name || 'update') + '.apk';
       try {
         android.downloadApk(update.apk_url, filename, 'app-update', 'com.goldenstore.app');
-        card.innerHTML = '<div style="font-size:48px;margin-bottom:10px">⬇</div><h2 style="font-size:20px;margin-bottom:8px">' + t('جارٍ التحميل…') + '</h2><p style="color:var(--text-2);font-size:14px;line-height:1.7">' + t('سيتم التثبيت تلقائياً عند اكتمال التحميل.') + '</p>';
+        card.innerHTML = '<div class="gs-update-state"><div class="gs-update-state-icon">⬇</div>'
+          + '<h2 class="gs-update-state-title">' + t('جارٍ التحميل…') + '</h2>'
+          + '<p class="gs-update-state-text">' + t('سيتم التثبيت تلقائياً عند اكتمال التحميل.') + '</p></div>';
         return;
       } catch (e) {}
     }
@@ -1050,14 +1067,14 @@ function showUpdateDialog(update) {
     setTimeout(() => overlay.remove(), 200);
   }
 
-  const actions = el('div', { style: { display: 'flex', gap: '10px', flexDirection: 'column' } },
+  const actions = el('div', { class: 'gs-update-actions' },
     el('button', {
-      class: 'btn btn-primary btn-lg',
+      class: 'btn btn-primary btn-lg gs-update-primary',
       type: 'button',
       onclick: startDownload,
     }, ico('download'), t('تحميل الآن')),
     update.force ? null : el('button', {
-      class: 'btn btn-secondary',
+      class: 'btn btn-secondary gs-update-later',
       type: 'button',
       onclick: () => {
         try { const d = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}'); d[update.version_name] = Date.now(); localStorage.setItem(APP_UPDATE_DISMISS_KEY, JSON.stringify(d)); } catch (e) {}
@@ -1071,6 +1088,7 @@ function showUpdateDialog(update) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay && !update.force) overlay.remove(); });
   document.body.append(overlay);
 }
+
 
 window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
   try {
@@ -1137,7 +1155,9 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
     };
     toast(map[message] || t('فشل التحميل'), 'error');
     const card = document.querySelector('#gs-update-dialog .gs-update-card');
-    if (card) card.innerHTML = '<div style="font-size:48px;margin-bottom:10px">⚠</div><h2 style="font-size:20px;margin-bottom:8px">' + t('فشل التحديث') + '</h2><p style="color:var(--text-2);font-size:14px;line-height:1.7">' + (map[message] || t('تعذّر تحديث التطبيق. حاول إلغاء التثبيت وإعادة المحاولة.')) + '</p>';
+    if (card) card.innerHTML = '<div class="gs-update-state gs-update-state-error"><div class="gs-update-state-icon">⚠</div>'
+      + '<h2 class="gs-update-state-title">' + t('فشل التحديث') + '</h2>'
+      + '<p class="gs-update-state-text">' + (map[message] || t('تعذّر تحديث التطبيق. حاول إلغاء التثبيت وإعادة المحاولة.')) + '</p></div>';
   } else if (status === 'installed') {
     toast(t('تم التحديث بنجاح'), 'success');
     setTimeout(() => { try { location.reload(); } catch (e) {} }, 500);

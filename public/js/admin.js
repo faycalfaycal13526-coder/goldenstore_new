@@ -726,7 +726,7 @@
         const replyBtn = el('button', {
           class: 'wa-send', type: 'submit',
           'aria-label': t('إرسال الرد'), title: t('إرسال الرد'),
-        }, ico('plane', 'icon'));
+        }, ico('send', 'icon fill'));
         let sendingReply = false;
         const doReply = async () => {
           if (sendingReply) return;

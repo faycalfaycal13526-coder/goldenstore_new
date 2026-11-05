@@ -110,7 +110,7 @@
     sendBtn = el('button', {
       class: 'wa-send', type: 'submit',
       'aria-label': t('إرسال'), title: t('إرسال'),
-    }, ico('plane', 'icon'));
+    }, ico('send', 'icon fill'));
     const form = el('form', {
       class: 'wa-compose', onsubmit: (e) => { e.preventDefault(); send(); },
     },

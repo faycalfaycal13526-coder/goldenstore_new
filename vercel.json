@@ -47,6 +47,18 @@
             "destination": "/gs-admin-c0d982f8.html"
         },
         {
+            "source": "/about",
+            "destination": "/about.html"
+        },
+        {
+            "source": "/privacy",
+            "destination": "/privacy.html"
+        },
+        {
+            "source": "/terms",
+            "destination": "/terms.html"
+        },
+        {
             "source": "/api/:path*",
             "destination": "https://api.goldenstore.online/api/:path*"
         },

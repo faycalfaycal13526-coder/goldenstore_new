@@ -382,6 +382,7 @@
         ),
         subscriptionCard(user),
         contactCard(),
+        legalLinksCard(),
         el('div', { class: 'account-actions' },
           el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
             ico('logout', 'icon icon-sm'), t('تسجيل الخروج')),
@@ -508,6 +509,27 @@
     trigger.onclick = () => wrap.classList.toggle('open');
     wrap.append(trigger, body);
     return wrap;
+  }
+
+  // Legal pages: also reachable from the site footer on every store page.
+  function legalLinksCard() {
+    const links = [
+      { icon: 'info',      label: 'من نحن',          href: '/about' },
+      { icon: 'shield',    label: 'سياسة الخصوصية',   href: '/privacy' },
+      { icon: 'clipboard', label: 'شروط الخدمة',      href: '/terms' },
+    ];
+    const list = el('div', { class: 'acct-list legal-list' });
+    links.forEach((l) => {
+      list.append(el('a', { class: 'acct-setting', href: l.href },
+        ico(l.icon, 'icon'),
+        el('span', { class: 'label' }, t(l.label)),
+        ico('external', 'icon icon-sm'),
+      ));
+    });
+    return el('div', null,
+      el('div', { class: 'page-title', style: { padding: '8px 16px 0', fontSize: '15px' } }, t('الصفحات القانونية')),
+      list,
+    );
   }
 
   function contactCard() {

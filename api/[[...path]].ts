@@ -271,6 +271,41 @@ app.get('/app-update/download', async (c) => {
   } catch { return c.json({ error: 'not_found' }, 404); }
 });
 
+/* ---- Legal consent (defence in depth) -----------------------------------
+   Google sign-in itself is handled entirely by Firebase Auth in the browser,
+   so there is no Hono "login" endpoint to gate. This endpoint validates the
+   consent payload server-side and issues a signed, httpOnly consent receipt
+   that can later be checked by any endpoint (or moved into a D1 audit table).
+   The UI checkbox in login.js / store.js remains the actual blocking gate. */
+const LEGAL_VERSION = '2026-11-05';
+
+function legalConsentFromRequest(c: any): { ok: boolean; at: number } {
+  const raw = getCookie(c, 'gs_legal_consent') || '';
+  const parts = raw.split('.');
+  if (parts.length !== 2 || parts[0] !== LEGAL_VERSION) return { ok: false, at: 0 };
+  const at = Number(parts[1]);
+  return { ok: Number.isFinite(at) && at > 0, at };
+}
+
+app.post('/legal/consent', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'legal-consent', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const body: any = await c.req.json().catch(() => ({}));
+  if (body?.accepted !== true || body?.version !== LEGAL_VERSION) {
+    return c.json({ error: 'consent_required', version: LEGAL_VERSION }, 400);
+  }
+  const at = nowSec();
+  setCookie(c, 'gs_legal_consent', LEGAL_VERSION + '.' + at, {
+    path: '/api', httpOnly: true, secure: true, sameSite: 'Lax', maxAge: 31536000,
+  });
+  return c.json({ ok: true, version: LEGAL_VERSION, acceptedAt: at });
+});
+
+app.get('/legal/consent', async (c) => {
+  const consent = legalConsentFromRequest(c);
+  return c.json({ accepted: consent.ok, version: LEGAL_VERSION, acceptedAt: consent.at || null });
+});
+
 app.get('/auth/token', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'auth-token', 20, 60)) {

@@ -212,6 +212,9 @@ function renderFooter() {
     ),
     el('div', { class: 'footer-links' },
       el('span', null, 'جميع الحقوق محفوظة'),
+      el('a', { href: '/about' }, 'من نحن'),
+      el('a', { href: '/privacy' }, 'سياسة الخصوصية'),
+      el('a', { href: '/terms' }, 'شروط الخدمة'),
     ),
   );
   f.append(inner);

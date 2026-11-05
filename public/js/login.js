@@ -9,6 +9,8 @@
   var btn = document.getElementById('signin');
   var errBox = document.getElementById('error');
   var label = btn ? btn.querySelector('.gbtn-label') : null;
+  var consent = document.getElementById('consent');
+  var consentMsg = T('يجب الموافقة على شروط الخدمة وسياسة الخصوصية قبل المتابعة.');
   var navigated = false;
   var params = new URLSearchParams(location.search);
   var isAccountSwitch = params.get('switch') === '1';
@@ -65,6 +67,31 @@
     setLoading(false);
   }
 
+  /* ---- Mandatory legal consent (Terms + Privacy) --------------------------
+     The checkbox is built by /js/legal.js into #consent. No Firebase/Google
+     sign-in request is sent until the user explicitly ticks it. */
+  function consentBox() {
+    return consent ? consent.querySelector('input[type="checkbox"]') : null;
+  }
+  function consentOk() {
+    var box = consentBox();
+    return !!(box && box.checked);
+  }
+  function requireConsent() {
+    if (consentOk()) return true;
+    if (consent) consent.classList.add('consent-error');
+    showError(consentMsg);
+    var box = consentBox();
+    if (box) { try { box.focus(); } catch (e) {} }
+    return false;
+  }
+  if (consent) {
+    consent.addEventListener('change', function () {
+      if (consentOk()) consent.classList.remove('consent-error');
+      if (errBox) errBox.classList.add('hidden');
+    });
+  }
+
   function errorMessage(e) {
     var code = e && e.code;
     switch (code) {
@@ -105,6 +132,8 @@
   }
 
   function startAccountSwitch() {
+    // Never auto-start Google sign-in before the user accepts the terms.
+    if (!consentOk()) { showButton(); return; }
     var alreadyStarted = false;
     try { alreadyStarted = sessionStorage.getItem(switchAutoKey) === '1'; } catch (e) {}
     if (alreadyStarted) { showButton(); return; }
@@ -136,6 +165,7 @@
 
   if (btn) {
     btn.addEventListener('click', function () {
+      if (!requireConsent()) return;   // required checkbox — no request without it
       if (errBox) errBox.classList.add('hidden');
       setLoading(true);
       var timeout = setTimeout(function () { setLoading(false); }, 15000);

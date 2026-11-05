@@ -662,6 +662,61 @@ const NAV_ITEMS_RAW = [
   { key: 'library', label: 'مكتبتي', icon: 'download', href: '/account?tab=library' },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];
+/* ---------------- Legal pages, footer & sign-in consent ------------------ */
+const LEGAL_LINKS = [
+  { href: '/about',   label: 'من نحن' },
+  { href: '/privacy', label: 'سياسة الخصوصية' },
+  { href: '/terms',   label: 'شروط الخدمة' },
+];
+const CONSENT_MSG = 'يجب الموافقة على شروط الخدمة وسياسة الخصوصية قبل المتابعة.';
+
+function consentRow(id) {
+  // Links are siblings of <label>, never inside it: clicking a policy link
+  // must navigate, not toggle the checkbox.
+  const row = el('div', { class: 'legal-consent', 'data-noi18n': '' },
+    el('input', { type: 'checkbox', id: id, class: 'legal-consent-box',
+                  required: 'required', 'aria-required': 'true' }),
+    el('label', { for: id, class: 'legal-consent-label' }, t('أوافق على')),
+    el('a', { class: 'legal-link', href: '/terms', target: '_blank', rel: 'noopener noreferrer' }, t('شروط الخدمة')),
+    el('span', { class: 'legal-consent-and' }, t('و')),
+    el('a', { class: 'legal-link', href: '/privacy', target: '_blank', rel: 'noopener noreferrer' }, t('سياسة الخصوصية')),
+  );
+  row.addEventListener('change', () => {
+    if (!consentAccepted(row)) return;
+    try {
+      if (window.GSLegal && window.GSLegal.recordConsent) window.GSLegal.recordConsent();
+      else fetch('/api/legal/consent', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accepted: true, version: '2026-11-05' }) }).catch(() => {});
+    } catch (e) {}
+  });
+  return row;
+}
+
+function consentAccepted(row) {
+  const box = row && row.querySelector('input[type="checkbox"]');
+  return !!(box && box.checked);
+}
+
+function renderSiteFooter() {
+  if (document.querySelector('.site-footer')) return;
+  const shell = document.querySelector('.shell') || document.body;
+  const nav = el('nav', { class: 'legal-links', 'aria-label': t('روابط قانونية'), 'data-noi18n': '' },
+    ...LEGAL_LINKS.map((l) => el('a', { class: 'legal-link', href: l.href }, t(l.label))));
+  const f = el('footer', { class: 'site-footer', 'data-noi18n': '' },
+    el('div', { class: 'site-footer-inner' },
+      el('div', { class: 'site-footer-brand' }, '© Golden Store — ' + t('جميع الحقوق محفوظة')),
+      nav,
+      el('div', { class: 'site-footer-site' },
+        t('الموقع الرسمي') + ': ',
+        el('a', { class: 'legal-link', href: 'https://goldenstore.online', target: '_blank',
+                  rel: 'noopener noreferrer', dir: 'ltr' }, 'goldenstore.online'),
+      ),
+    ),
+  );
+  shell.append(f);
+}
+
 function bottomNav(active) {
   const brand = el('a', { href: '/', class: 'sidebar-brand', 'aria-label': 'Golden Store' },
     el('img', { src: '/images/logo.png', alt: 'Golden Store' }),
@@ -692,6 +747,7 @@ function bottomNav(active) {
     ),
   );
   document.body.append(nav);
+  renderSiteFooter();
 }
 
 /* --------------------------- Auth gate --------------------------- */
@@ -760,13 +816,20 @@ function requireAuth() {
   return new Promise((resolve, reject) => {
     const overlay = el('div', { class: 'dialog-overlay auth-required-overlay' });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); reject(new Error('cancelled')); } });
+    const authConsent = consentRow('gs-auth-consent');
     const card = el('div', { class: 'dialog-card auth-required-card' },
       el('div', { class: 'auth-required-header' },
         el('img', { src: '/images/logo.png', alt: 'Golden Store', class: 'auth-logo' }),
         el('h2', { class: 'auth-title' }, t('تسجيل الدخول مطلوب')),
         el('p', { class: 'auth-desc' }, t('سجّل الدخول بحساب Google لتتمكن من تنزيل التطبيقات والتقييم والمزيد.')),
       ),
+      authConsent,
       el('button', { class: 'gbtn auth-google-btn', type: 'button', html: '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span class="gbtn-label">' + t('متابعة باستخدام Google') + '</span>', onclick: async () => {
+        if (!consentAccepted(authConsent)) {
+          authConsent.classList.add('consent-error');
+          toast(t(CONSENT_MSG), 'error');
+          return;                       // no Firebase request without consent
+        }
         try {
           const user = await window.GAuth.signInWithGoogle();
           if (user) {
@@ -785,6 +848,9 @@ function requireAuth() {
       } }),
       el('button', { class: 'btn btn-secondary auth-cancel-btn', type: 'button', onclick: () => { overlay.remove(); reject(new Error('cancelled')); } }, t('إلغاء')),
     );
+    authConsent.addEventListener('change', () => {
+      if (consentAccepted(authConsent)) authConsent.classList.remove('consent-error');
+    });
     overlay.append(card);
     document.body.append(overlay);
   });
@@ -801,10 +867,12 @@ function goToLogin() {
 function showAuthGate() {
   if (document.getElementById('gs-auth-gate')) return;
   const gate = el('div', { id: 'gs-auth-gate', class: 'gate' });
+  const gateConsent = consentRow('gs-gate-consent');
   const inner = el('div', null,
     el('div', { class: 'logo' }, el('img', { src: '/images/logo.png', alt: 'Golden Store' })),
     el('h1', null, 'Golden', el('b', null, 'Store')),
     el('p', null, t('سجّل الدخول بحساب Google للوصول إلى المتجر وتطبيقاته وإشعاراته.')),
+    gateConsent,
     el('button', { class: 'gbtn auth-google-btn', type: 'button', html: '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span class="gbtn-label">' + t('متابعة باستخدام Google') + '</span>' }),
     el('div', { class: 'gate-spinner hidden' }, el('div', { class: 'spinner' })),
     el('div', { class: 'gate-error hidden' }),
@@ -832,7 +900,16 @@ function showAuthGate() {
     if (code === 'auth/popup-blocked') return t('المتصفّح حظر النافذة المنبثقة. اسمح بها ثم حاول مجدداً.');
     return t('تعذّر تسجيل الدخول. حاول مجدداً.');
   }
+  gateConsent.addEventListener('change', () => {
+    if (consentAccepted(gateConsent)) gateConsent.classList.remove('consent-error');
+    if (errBox) errBox.classList.add('hidden');
+  });
   if (btn) btn.addEventListener('click', async () => {
+    if (!consentAccepted(gateConsent)) {
+      gateConsent.classList.add('consent-error');
+      setError(t(CONSENT_MSG));
+      return;                       // no Firebase request without consent
+    }
     if (errBox) errBox.classList.add('hidden');
     if (btn) btn.disabled = true;
     if (spin) spin.classList.remove('hidden');
@@ -1490,7 +1567,7 @@ window.Store = {
   publicOrigin,
   posterCard, listRow, gridCard, featureCarousel, categoryName,
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
-  topbarSearch, topbarNav, bottomNav, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
+  topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications,
   ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,

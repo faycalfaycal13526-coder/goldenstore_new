@@ -244,6 +244,23 @@
     'جار تسجيل الدخول…': { en: 'Signing in…', fr: 'Connexion…', es: 'Iniciando sesión…' },
     'حسابك': { en: 'Your account', fr: 'Votre compte', es: 'Tu cuenta' },
 
+    // legal pages / mandatory consent (2026-11)
+    'من نحن': { en: 'About us', fr: 'À propos', es: 'Sobre nosotros' },
+    'سياسة الخصوصية': { en: 'Privacy Policy', fr: 'Politique de confidentialité', es: 'Política de privacidad' },
+    'شروط الخدمة': { en: 'Terms of Service', fr: 'Conditions d’utilisation', es: 'Términos del servicio' },
+    'الصفحات القانونية': { en: 'Legal', fr: 'Mentions légales', es: 'Información legal' },
+    'روابط قانونية': { en: 'Legal links', fr: 'Liens légaux', es: 'Enlaces legales' },
+    'الموقع الرسمي': { en: 'Official website', fr: 'Site officiel', es: 'Sitio oficial' },
+    'جميع الحقوق محفوظة': { en: 'All rights reserved', fr: 'Tous droits réservés', es: 'Todos los derechos reservados' },
+    'آخر تحديث': { en: 'Last updated', fr: 'Dernière mise à jour', es: 'Última actualización' },
+    'أوافق على': { en: 'I agree to the', fr: 'J’accepte les', es: 'Acepto los' },
+    'و': { en: 'and', fr: 'et', es: 'y' },
+    'يجب الموافقة على شروط الخدمة وسياسة الخصوصية قبل المتابعة.': {
+      en: 'You must accept the Terms of Service and Privacy Policy to continue.',
+      fr: 'Vous devez accepter les conditions d’utilisation et la politique de confidentialité pour continuer.',
+      es: 'Debes aceptar los Términos del servicio y la Política de privacidad para continuar.',
+    },
+
     // account / library
     'تطبيق في مكتبتك': { en: 'app in your library', fr: 'app dans votre bibliothèque', es: 'app en tu biblioteca' },
     'حذف سجل التحميلات بالكامل؟': { en: 'Clear entire download history?', fr: 'Effacer tout l’historique ?', es: '¿Borrar todo el historial de descargas?' },

@@ -562,7 +562,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 /* screenshots — portrait/square cards keep their shared height (220px mobile,
    270px desktop). Landscape screenshots are a fixed 1280 × 720 HD (16:9)
    frame on desktop, scaled down to fit phones/tablets via the media query
-   below. object-fit: contain fills a 16:9 source exactly, never crops. */
+   below (a little smaller still). object-fit: contain fills 16:9 exactly. */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -616,12 +616,14 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   object-fit: contain;            /* 16:9 fills exactly; no crop, no stretch */
 }
 /* Phones / tablets: 1280px is far too wide, so scale the frame down to fit the
-   viewport while keeping the exact 16:9 ratio. Both the card and the image read
-   these two variables, so only the variables need overriding. Desktop (>=960px)
-   keeps the full HD 1280 × 720 frame; the strip still scrolls horizontally. */
+   viewport while keeping the exact 16:9 ratio. Trimmed a further ~10% so it
+   feels less dominant on a phone: 640px -> 576px cap, and (100vw - 40px)
+   -> (90vw - 36px), which is exactly 0.9 x the previous width at every size.
+   Both the card and the image read these two variables, so only the variables
+   need overriding. Desktop (>=960px) keeps the full HD 1280 × 720 frame. */
 @media (max-width: 959px) {
   .shot-card.is-landscape {
-    --landscape-w: min(640px, calc(100vw - 40px));
+    --landscape-w: min(576px, calc(90vw - 36px));
     --landscape-h: calc(var(--landscape-w) * 9 / 16);
   }
 }

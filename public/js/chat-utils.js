@@ -164,13 +164,17 @@
 
     const preview = el('div', { class: 'wa-attach-preview' });
     const status = el('span', { class: 'wa-attach-status', 'aria-live': 'polite' });
+    const offscreen = {
+      position: 'absolute', left: '-9999px', width: '1px', height: '1px',
+      opacity: '0', border: '0', padding: '0', margin: '0',
+    };
     const galleryInput = el('input', {
       type: 'file', accept: 'image/*', multiple: 'multiple',
-      class: 'wa-file-input', hidden: 'hidden',
+      class: 'wa-file-input', tabindex: '-1', 'aria-hidden': 'true', style: offscreen,
     });
     const cameraInput = el('input', {
       type: 'file', accept: 'image/*', capture: 'environment',
-      class: 'wa-file-input', hidden: 'hidden',
+      class: 'wa-file-input', tabindex: '-1', 'aria-hidden': 'true', style: offscreen,
     });
     const galleryBtn = toolButton('image', t('إرسال صورة'), () => galleryInput.click());
     const cameraBtn = toolButton('camera', t('التقاط صورة'), () => cameraInput.click());

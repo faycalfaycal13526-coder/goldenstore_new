@@ -562,8 +562,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 /* screenshots — portrait/square cards use 124 × 220 (151 × 270 on desktop),
    slightly bigger (132 × 234) with 8px corners on PHONES. Landscape is a fixed
    1280 × 720 HD frame on DESKTOP, a viewport-fitting frame on tablets, and a
-   Google Play-style responsive card on PHONES (calc(100% - 24px), 16/9.5,
-   cover, 8px corners, next card peeking). */
+   Google Play-style responsive card on PHONES (calc(100% - 24px), exact 16/9,
+   cover, no fixed height, no inner padding/frame, next card peeking). */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -2325,6 +2325,50 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .applist > a.approw[href^="/search?category="] > .icon:last-child { display: none; }
 
 @media (max-width: 540px) {
+  /* ---- Mobile layout hardening (app details glitch) ----------------------
+     (3) Install / download controls stay in normal flow with clear spacing.
+         The only absolutely positioned pieces are the INNER progress fill and
+         the upward-opening dropdown menu — never the buttons themselves. */
+  .d-actions {
+    position: relative !important;
+    float: none !important;
+    clear: both !important;
+    margin-block: 20px 18px !important;
+  }
+  .d-actions .install-group,
+  .install-group,
+  .install-btn,
+  .install-caret,
+  .download-cancel-btn {
+    position: relative !important;
+    float: none !important;
+  }
+  .d-note { margin-block: 10px 18px !important; }
+  .d-section:has(.shots) { margin-top: 24px !important; max-width: 100%; }
+
+  /* (4) The slider is exactly as wide as its container, never the viewport+,
+         and scrolls inside itself. Cards clip their own content. */
+  .shots {
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+  }
+
+  /* (2) No CSS frame and no inner gaps: the artwork fills its card edge to edge.
+         The pink/green borders visible in some Play Store assets are baked into
+         the IMAGE files themselves, not produced by these rules. */
+  .shot-card {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+  .shot-card.is-error { background: var(--surface-2); }
+  .shot-img { display: block; }
+
   /* Portrait / square cards: a little bigger (~6%) with small corners, matching
      the landscape treatment below. Widths scale with the height so the 9:16
      portrait box and the 1:1 square box keep their ratios — object-fit: contain
@@ -2340,14 +2384,17 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   /* Google Play-style landscape screenshots on PHONES ONLY.
      The desktop 1280px width is completely unused here: every property that
      reads --landscape-w / --landscape-h is overridden below. */
+  /* (1) Landscape: width 100%, height auto from an exact 16 / 9, object-fit
+         cover. No fixed height, min-height or max-height can stretch/crop it.
+         A true 16:9 source now fills the box pixel for pixel with ZERO crop
+         (the previous 16/9.5 box made cover shave ~5% off the sides). */
   .shot-card.is-landscape {
-    /* Slightly larger than calc(100% - 40px): ~5% wider/taller at every phone
-       width, still a visible ~22px peek of the next screenshot. Lower the 24px
-       value further to enlarge again; raise it to shrink. */
     width: calc(100% - 24px);
-    height: auto;               /* height comes from the aspect ratio */
-    min-width: 0;               /* clear the desktop HD min-width */
-    aspect-ratio: 16 / 9.5;    /* a little taller than 16/9 (~+5.6% height) */
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+    aspect-ratio: 16 / 9;
     align-self: center;         /* .shots is align-items:stretch — don't stretch */
     flex: 0 0 auto;
     scroll-snap-align: start;
@@ -2356,9 +2403,11 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   .shot-card.is-landscape .shot-img {
     width: 100%;
     height: auto;
-    aspect-ratio: 16 / 9.5;    /* keep the image box in sync with the card */
+    min-height: 0;
+    max-height: none;
+    aspect-ratio: 16 / 9;
     max-width: none;            /* override global img { max-width: 100% } */
-    object-fit: cover;          /* fills the card exactly, no letterboxing */
+    object-fit: cover;          /* fills the 16:9 card exactly, no stretch */
   }
   /* Swiping is only for moving to the next screenshot, never for panning
      inside one. Snap to each card's start, aligned with the strip's padding. */

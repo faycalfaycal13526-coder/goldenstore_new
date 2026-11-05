@@ -2688,41 +2688,51 @@ html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); 
    Standalone chat UI — shared by /support and the admin Support tab.
    ===================================================================== */
 :root {
-  --wa-bg: #0b141a;
-  --wa-head: #1f2c34;
-  --wa-compose: #1f2c34;
-  --wa-input: #2a3942;
-  --wa-in: #202c33;
-  --wa-out: #005c4b;
-  --wa-text: #e9edef;
-  --wa-sub: #aebac1;
-  --wa-accent: #00a884;
-  --wa-pattern: rgba(255,255,255,.035);
-  --wa-day-bg: rgba(255,255,255,.08);
-  --wa-day-text: #d6dde0;
-  --wa-notice: rgba(255,255,255,.07);
-  --wa-notice-text: #d6dde0;
-  --wa-shadow: 0 1px .5px rgba(0,0,0,.18);
+  /* Golden chat palette (dark) */
+  --wa-bg: #14110a;
+  --wa-head: #241e0e;
+  --wa-compose: #241e0e;
+  --wa-input: #322a14;
+  --wa-in: #26210f;
+  --wa-out: #7a5c08;
+  --wa-out-text: #fff6d8;
+  --wa-text: #f3ead3;
+  --wa-sub: #c3b283;
+  --wa-accent: var(--gold);
+  --wa-accent-ink: var(--gold-ink);
+  --wa-tick: var(--gold-2);
+  --wa-line: rgba(244,192,31,.16);
+  --wa-pattern: rgba(244,192,31,.06);
+  --wa-day-bg: rgba(244,192,31,.14);
+  --wa-day-text: #f0dba2;
+  --wa-notice: rgba(244,192,31,.12);
+  --wa-notice-text: #f0dba2;
+  --wa-shadow: 0 1px .5px rgba(0,0,0,.28);
 }
 :root[data-theme="light"] {
-  --wa-bg: #efe7de;
-  --wa-head: #f6f5f3;
-  --wa-compose: #f6f5f3;
+  /* Golden chat palette (light) */
+  --wa-bg: #f7efdc;
+  --wa-head: #fffaf0;
+  --wa-compose: #fffaf0;
   --wa-input: #ffffff;
   --wa-in: #ffffff;
-  --wa-out: #d9fdd3;
-  --wa-text: #111b21;
-  --wa-sub: #667781;
-  --wa-accent: #00a884;
-  --wa-pattern: rgba(17,27,33,.035);
-  --wa-day-bg: rgba(17,27,33,.08);
-  --wa-day-text: #42525b;
-  --wa-notice: rgba(17,27,33,.06);
-  --wa-notice-text: #42525b;
-  --wa-shadow: 0 1px .5px rgba(0,0,0,.12);
+  --wa-out: #ffe9a8;
+  --wa-out-text: #332700;
+  --wa-text: #2a2208;
+  --wa-sub: #7d6b3c;
+  --wa-accent: #c79a06;
+  --wa-accent-ink: #ffffff;
+  --wa-tick: #a87f00;
+  --wa-line: rgba(199,154,6,.22);
+  --wa-pattern: rgba(160,124,10,.07);
+  --wa-day-bg: rgba(199,154,6,.18);
+  --wa-day-text: #6b5713;
+  --wa-notice: rgba(199,154,6,.15);
+  --wa-notice-text: #6b5713;
+  --wa-shadow: 0 1px .5px rgba(90,70,0,.14);
 }
-body.wa-page { margin: 0; overflow: hidden; background: #0d141a; }
-:root[data-theme="light"] body.wa-page { background: #d9dbd4; }
+body.wa-page { margin: 0; overflow: hidden; background: #0f0d07; }
+:root[data-theme="light"] body.wa-page { background: #e8dcbd; }
 .wa-app {
   position: fixed; inset: 0; z-index: 1;
   display: flex; flex-direction: column;
@@ -2734,7 +2744,8 @@ body.wa-page { margin: 0; overflow: hidden; background: #0d141a; }
     top: 24px; bottom: 24px; left: 50%; right: auto;
     width: min(480px, calc(100% - 48px));
     transform: translateX(-50%);
-    border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    border-radius: 18px; border: 1px solid var(--wa-line);
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
   }
 }
 
@@ -2742,7 +2753,7 @@ body.wa-page { margin: 0; overflow: hidden; background: #0d141a; }
   display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
   padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
   background: var(--wa-head); color: var(--wa-text);
-  border-bottom: 1px solid rgba(255,255,255,.06);
+  border-bottom: 1px solid var(--wa-line);
 }
 .wa-back {
   width: 38px; height: 38px; flex: 0 0 auto;
@@ -2750,14 +2761,14 @@ body.wa-page { margin: 0; overflow: hidden; background: #0d141a; }
   border: 0; border-radius: 50%; background: transparent;
   color: var(--wa-text); text-decoration: none; cursor: pointer;
 }
-.wa-back:hover { background: rgba(255,255,255,.08); }
+.wa-back:hover { background: var(--wa-day-bg); }
 .wa-back .icon { width: 22px; height: 22px; }
 html[dir="ltr"] .wa-back .icon,
 html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
 .wa-avatar {
   width: 40px; height: 40px; flex: 0 0 auto;
   border-radius: 50%; display: grid; place-items: center;
-  background: var(--wa-accent); color: #fff;
+  background: var(--wa-accent); color: var(--wa-accent-ink);
 }
 .wa-avatar .icon { width: 22px; height: 22px; }
 .wa-head-info { flex: 1; min-width: 0; }
@@ -2786,7 +2797,7 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
   box-shadow: var(--wa-shadow); color: var(--wa-text);
 }
 .wa-bubble.in { background: var(--wa-in); border-start-start-radius: 4px; }
-.wa-bubble.out { background: var(--wa-out); border-start-end-radius: 4px; }
+.wa-bubble.out { background: var(--wa-out); color: var(--wa-out-text); border-start-end-radius: 4px; }
 .wa-bubble::after {
   content: ''; position: absolute; top: 0; width: 0; height: 0;
   border: 8px solid transparent;
@@ -2807,7 +2818,7 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
   display: flex; align-items: center; justify-content: flex-end; gap: 4px;
   margin-top: 3px; font-size: 10.5px; color: var(--wa-sub);
 }
-.wa-ticks { color: #53bdeb; font-size: 12px; letter-spacing: -3px; padding-inline-end: 3px; }
+.wa-ticks { color: var(--wa-tick); font-size: 12px; letter-spacing: -3px; padding-inline-end: 3px; }
 .wa-day {
   align-self: center; margin: 8px 0; padding: 5px 12px;
   border-radius: 999px; background: var(--wa-day-bg);
@@ -2825,13 +2836,13 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
   background: var(--wa-notice); color: var(--wa-notice-text);
   font-size: 13px; text-align: center;
 }
-.wa-error { color: #ffb4ab; }
+.wa-error { color: #e5484d; background: rgba(229,72,77,.12); }
 
 .wa-compose,
 .wa-admin-compose {
   flex: 0 0 auto; display: flex; align-items: flex-end; gap: 8px;
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-  background: var(--wa-compose); border-top: 1px solid var(--line);
+  background: var(--wa-compose); border-top: 1px solid var(--wa-line);
 }
 .wa-input-wrap {
   flex: 1; min-width: 0; min-height: 44px;
@@ -2851,7 +2862,7 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
   width: 46px; height: 46px; flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: 50%; background: var(--wa-accent);
-  color: #fff; cursor: pointer; transition: filter .15s, transform .1s;
+  color: var(--wa-accent-ink); cursor: pointer; transition: filter .15s, transform .1s;
 }
 .wa-send:hover { filter: brightness(1.07); }
 .wa-send:active { transform: scale(.96); }

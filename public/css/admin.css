@@ -506,7 +506,7 @@
   text-align: start; cursor: pointer;
 }
 .wa-admin-item:hover { background: var(--surface-2); }
-.wa-admin-item.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--primary); }
+.wa-admin-item.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--wa-accent); }
 .wa-admin-item.unread .wa-admin-item-name { font-weight: 800; }
 .wa-admin-avatar {
   width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%;
@@ -523,7 +523,7 @@
 .wa-admin-item-time { flex: 0 0 auto; font-size: 10.5px; color: var(--text-3); }
 .wa-admin-unread {
   min-width: 20px; padding: 1px 6px; border-radius: 999px;
-  background: var(--primary); color: #fff; font-size: 10.5px; font-weight: 800; text-align: center;
+  background: var(--wa-accent); color: var(--wa-accent-ink); font-size: 10.5px; font-weight: 800; text-align: center;
 }
 .wa-admin-status-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; }
 .wa-admin-status-dot.is-open { background: var(--wa-accent); }
@@ -537,7 +537,7 @@
 .wa-admin-head {
   flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 10px 12px; background: var(--wa-head); color: var(--wa-text);
-  border-bottom: 1px solid rgba(255,255,255,.06);
+  border-bottom: 1px solid var(--wa-line);
 }
 .wa-admin-back { display: none; width: 36px; height: 36px; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: var(--wa-text); cursor: pointer; }
 .wa-admin-back .icon { width: 20px; height: 20px; }

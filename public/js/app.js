@@ -294,10 +294,13 @@
      keep working while lang.js stays untouched.
      =================================================================== */
   const GALLERY_I18N = {
-    'الصورة السابقة': { en: 'Previous screenshot', fr: 'Capture précédente', es: 'Captura anterior' },
-    'الصورة التالية': { en: 'Next screenshot', fr: 'Capture suivante', es: 'Captura siguiente' },
     'معرض لقطات الشاشة': { en: 'Screenshots', fr: 'Captures d’écran', es: 'Capturas de pantalla' },
     'تعذّر تحميل الصورة': { en: 'Could not load image', fr: 'Impossible de charger l’image', es: 'No se pudo cargar la imagen' },
+    'اسحب للتنقل بين الصور': {
+      en: 'Swipe or drag to browse',
+      fr: 'Glissez ou faites glisser pour parcourir',
+      es: 'Desliza o arrastra para navegar',
+    },
   };
   function gt(ar) {
     let lang = 'ar';
@@ -317,39 +320,33 @@
     const prevFocus = document.activeElement;
     const prevOverflow = document.body.style.overflow;
     let closed = false;
+    // Mouse-drag state. lastDragAt suppresses the synthetic click browsers
+    // fire after a drag, so a swipe never accidentally closes the lightbox.
+    let dragStartX = null, dragStartY = null, dragged = false, lastDragAt = 0;
 
     const img = el('img', { class: 'lb-image', alt: '', draggable: 'false' });
     const errLine = el('div', { class: 'lb-error' });
     const stage = el('div', { class: 'lb-stage' }, img, errLine);
     const counter = el('div', { class: 'lb-counter', 'aria-live': 'polite' });
     const thumbs = el('div', { class: 'lb-thumbs' });
+    const hint = el('div', { class: 'lb-hint' }, gt('اسحب للتنقل بين الصور'));
     const closeBtn = el('button', {
       class: 'lb-close', type: 'button',
       'aria-label': t('إغلاق'), title: t('إغلاق'),
       onclick: () => close(),
     }, ico('close', 'icon'));
-    const prevBtn = el('button', {
-      class: 'lb-nav lb-prev', type: 'button',
-      'aria-label': gt('الصورة السابقة'), title: gt('الصورة السابقة'),
-      onclick: (e) => { e.stopPropagation(); go(-1); },
-    }, ico('arrowLeft', 'icon'));
-    const nextBtn = el('button', {
-      class: 'lb-nav lb-next', type: 'button',
-      'aria-label': gt('الصورة التالية'), title: gt('الصورة التالية'),
-      onclick: (e) => { e.stopPropagation(); go(1); },
-    }, ico('arrowRight', 'icon'));
-
     const overlay = el('div', {
       class: 'gs-lightbox', role: 'dialog', 'aria-modal': 'true',
       'aria-label': gt('معرض لقطات الشاشة'), tabindex: '-1',
-      onclick: (e) => { if (e.target === overlay || e.target === stage) close(); },
+      onclick: (e) => {
+        if (Date.now() - lastDragAt < 300) return;
+        if (e.target === overlay || e.target === stage) close();
+      },
     },
       closeBtn,
       el('div', { class: 'lb-topbar' }, counter),
       stage,
-      prevBtn,
-      nextBtn,
-      el('div', { class: 'lb-footer' }, thumbs),
+      el('div', { class: 'lb-footer' }, hint, thumbs),
     );
 
     const thumbNodes = list.map((url, i) => {
@@ -392,9 +389,8 @@
         else n.removeAttribute('aria-current');
       });
       const single = list.length < 2;
-      prevBtn.hidden = single;
-      nextBtn.hidden = single;
       thumbs.hidden = single;
+      hint.hidden = single;
       if (thumbNodes[index] && typeof thumbNodes[index].scrollIntoView === 'function') {
         try { thumbNodes[index].scrollIntoView({ block: 'nearest', inline: 'center' }); } catch {}
       }
@@ -408,7 +404,7 @@
       else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
       else if (e.key === 'Tab') {
-        const focusables = [closeBtn, prevBtn, nextBtn, ...thumbNodes].filter((n) => !n.hidden);
+        const focusables = [closeBtn, ...thumbNodes].filter((n) => !n.hidden);
         if (!focusables.length) return;
         const first = focusables[0], last = focusables[focusables.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -429,6 +425,33 @@
       sx = null; sy = null;
       if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) go(dx < 0 ? 1 : -1);
     }, { passive: true });
+
+    // Desktop: a normal press-and-drag with the mouse navigates images.
+    // Touch/pen pointers are left to the touch handlers above (no double nav).
+    stage.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' || (e.button != null && e.button !== 0)) return;
+      dragStartX = e.clientX; dragStartY = e.clientY; dragged = false;
+      stage.classList.add('is-dragging');
+      if (e.pointerId != null && typeof stage.setPointerCapture === 'function') {
+        try { stage.setPointerCapture(e.pointerId); } catch {}
+      }
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (dragStartX == null) return;
+      if (Math.abs(e.clientX - dragStartX) > 8) dragged = true;
+    });
+    stage.addEventListener('pointerup', (e) => {
+      if (dragStartX == null) return;
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      dragStartX = null; dragStartY = null;
+      stage.classList.remove('is-dragging');
+      if (dragged) lastDragAt = Date.now();
+      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) go(dx < 0 ? 1 : -1);
+    });
+    stage.addEventListener('pointercancel', () => {
+      dragStartX = null; dragStartY = null; stage.classList.remove('is-dragging');
+    });
 
     function close() {
       if (closed) return;
@@ -481,36 +504,6 @@
       shots.append(card);
     });
     return el('div', { class: 'd-section' }, shots);
-  }
-
-  async function loadCategories(app, container) {
-    const section = el('div', { class: 'd-section gs-cats-section' });
-    container.append(section);
-    const type = app && app.type === 'game' ? 'game' : 'app';
-    let cats = [];
-    try {
-      const res = await api(`/api/categories?type=${encodeURIComponent(type)}`);
-      cats = Array.isArray(res && res.categories) ? res.categories : [];
-    } catch { cats = []; }
-    const items = cats.filter((c) => c && (c.slug || c.name)).slice(0, 12);
-    if (!items.length) { section.remove(); return; }
-    const track = el('div', { class: 'gs-cats', role: 'list' });
-    items.forEach((c) => {
-      const slug = String(c.slug || c.name || '');
-      const name = (typeof S.categoryName === 'function' && S.categoryName(slug)) || c.name || slug || '—';
-      const count = Number(c.count || 0);
-      const card = el('a', {
-        class: 'gs-cat', role: 'listitem',
-        href: `/search?category=${encodeURIComponent(slug)}`, title: name,
-      },
-        el('span', { class: 'gs-cat-icon', 'aria-hidden': 'true' }, ico(c.icon || 'grid', 'icon')),
-        el('span', { class: 'gs-cat-name' }, name),
-        el('span', { class: 'gs-cat-count' }, `${formatNum(count)} ${t(type === 'game' ? 'لعبة' : 'تطبيق')}`),
-      );
-      if (app && app.category === slug) card.classList.add('is-active');
-      track.append(card);
-    });
-    section.append(el('div', { class: 'gs-cats-head' }, el('h3', null, t('الفئات'))), track);
   }
 
   async function getFingerprint() {
@@ -605,7 +598,6 @@
 
     content.append(ratingSection(app));
 
-    loadCategories(app, content);
     loadSimilar(app, content);
 
     function stat(value, label) {

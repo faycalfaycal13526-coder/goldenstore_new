@@ -562,7 +562,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 /* screenshots — portrait/square cards keep their shared height (220px mobile,
    270px desktop). Landscape is a fixed 1280 × 720 HD frame on DESKTOP, a
    viewport-fitting frame on tablets, and a Google Play-style responsive card
-   on PHONES (width: calc(100% - 24px), 16/9, cover, next card peeking). */
+   on PHONES (width: calc(100% - 24px), slightly taller 16/9.5, cover, small
+   corners, next card peeking). */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -2334,7 +2335,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     width: calc(100% - 24px);
     height: auto;               /* height comes from the aspect ratio */
     min-width: 0;               /* clear the desktop HD min-width */
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 16 / 9.5;    /* a little taller than 16/9 (~+5.6% height) */
+    border-radius: 8px;        /* smaller, Google Play-style corners (was 20px) */
     align-self: center;         /* .shots is align-items:stretch — don't stretch */
     flex: 0 0 auto;
     scroll-snap-align: start;
@@ -2343,9 +2345,9 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   .shot-card.is-landscape .shot-img {
     width: 100%;
     height: auto;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 16 / 9.5;    /* keep the image box in sync with the card */
     max-width: none;            /* override global img { max-width: 100% } */
-    object-fit: cover;          /* fills the 16:9 card exactly, no letterbox */
+    object-fit: cover;          /* fills the card exactly, no letterboxing */
   }
   /* Swiping is only for moving to the next screenshot, never for panning
      inside one. Snap to each card's start, aligned with the strip's padding. */

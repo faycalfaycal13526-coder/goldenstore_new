@@ -367,6 +367,7 @@
       tabBtn('games', 'gamepad', 'الألعاب'),
       tabBtn('new', 'plus', 'إضافة جديد'),
       tabBtn('requests', 'flag', 'الطلبات والبلاغات'),
+      tabBtn('reports', 'message', 'بلاغات المراجعات'),
       tabBtn('notifications', 'bell', 'الإشعارات'),
       tabBtn('app-update', 'download', 'رابط تحميل التطبيق'),
       tabBtn('settings', 'settings', 'إعدادات المتجر'),
@@ -383,6 +384,7 @@
     else if (activeTab === 'games') await renderAppsList(body, 'game');
     else if (activeTab === 'new') await renderNewApp(body);
     else if (activeTab === 'requests') await renderRequests(body);
+    else if (activeTab === 'reports') await renderReports(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
     else if (activeTab === 'app-update') await renderAppUpdate(body);
     else if (activeTab === 'settings') await renderStoreSettings(body);
@@ -517,6 +519,134 @@
       body.innerHTML = '';
       body.append(emptyMsg(t('تعذّر تحميل البيانات'), e.message));
     }
+  }
+
+  // -------- review reports (review_reports) --------
+  async function renderReports(body) {
+    body.innerHTML = '';
+    const countEl = el('div', { class: 'reports-count' }, t('جارٍ التحميل…'));
+    const listWrap = el('div', { class: 'reports-list' });
+    const refreshBtn = el('button', {
+      class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => load(),
+    }, ico('refresh', 'icon icon-sm'), t('تحديث'));
+    body.append(
+      el('div', { class: 'reports-toolbar' },
+        el('div', null,
+          el('div', { class: 'reports-title' }, t('بلاغات المراجعات')),
+          countEl,
+        ),
+        refreshBtn,
+      ),
+      listWrap,
+    );
+
+    async function load() {
+      listWrap.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+      refreshBtn.disabled = true;
+      try {
+        const res = await api('/api/admin/reports');
+        const reports = Array.isArray(res.reports) ? res.reports : [];
+        countEl.textContent = `${formatNum(reports.length)} ${t('بلاغ')}`;
+        listWrap.innerHTML = '';
+        if (!reports.length) {
+          listWrap.append(emptyMsg(
+            t('لا توجد بلاغات على المراجعات'),
+            t('تظهر هنا البلاغات التي يرسلها المستخدمون على التعليقات.'),
+          ));
+          return;
+        }
+        const tbody = el('tbody');
+        reports.forEach((r) => tbody.append(reportRow(r, load)));
+        const table = el('table', { class: 'table reports-table' },
+          el('thead', null,
+            el('tr', null,
+              el('th', { scope: 'col' }, t('اسم التطبيق')),
+              el('th', { scope: 'col' }, t('نص المراجعة')),
+              el('th', { scope: 'col' }, t('السبب')),
+              el('th', { scope: 'col' }, t('التاريخ')),
+              el('th', { scope: 'col' }, t('إجراء')),
+            ),
+          ),
+          tbody,
+        );
+        listWrap.append(el('div', { class: 'table-wrap' }, table));
+      } catch (e) {
+        listWrap.innerHTML = '';
+        listWrap.append(emptyMsg(t('تعذّر تحميل البلاغات'), e.message || t('حاول مجدداً')));
+      } finally {
+        refreshBtn.disabled = false;
+      }
+    }
+
+    await load();
+  }
+
+  function reportRow(r, refresh) {
+    const row = el('tr');
+    const appName = r.app_name || r.app_slug || '—';
+    const reviewText = String(r.review_text || '');
+
+    const appCell = el('td', null,
+      el('div', { class: 'report-app' },
+        r.app_slug
+          ? el('a', {
+            href: `/app?slug=${encodeURIComponent(r.app_slug)}`,
+            target: '_blank', rel: 'noopener noreferrer',
+            title: t('فتح صفحة التطبيق'),
+          }, appName)
+          : el('strong', null, appName),
+        r.app_slug ? el('small', null, r.app_slug) : null,
+      ),
+    );
+
+    const reviewCell = el('td', null,
+      el('div', { class: 'report-review', title: reviewText },
+        reviewText || t('نص المراجعة غير متوفر'),
+        r.review_author ? el('small', null, `${t('بواسطة')}: ${r.review_author}`) : null,
+      ),
+    );
+    const reasonCell = el('td', null,
+      el('span', { class: 'report-reason-badge' }, r.reason || t('بدون سبب')),
+    );
+    const dateCell = el('td', { class: 'report-date' }, r.created_at ? formatDate(r.created_at) : '—');
+
+    const actionsCell = el('td', { class: 'report-actions' });
+    const deleteBtn = el('button', {
+      class: 'btn btn-danger btn-sm btn-delete-report', type: 'button',
+      'aria-label': t('حذف البلاغ'),
+    }, ico('trash', 'icon icon-sm'), t('حذف البلاغ'));
+
+    function showDefault() {
+      actionsCell.innerHTML = '';
+      actionsCell.append(deleteBtn);
+    }
+    function showConfirm() {
+      actionsCell.innerHTML = '';
+      actionsCell.append(
+        el('div', { class: 'report-confirm' },
+          el('span', { class: 'report-confirm-text' }, t('تأكيد الحذف؟')),
+          el('button', { class: 'btn btn-danger btn-sm', type: 'button', onclick: removeReport }, t('نعم، احذف')),
+          el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: showDefault }, t('إلغاء')),
+        ),
+      );
+    }
+    async function removeReport() {
+      const confirmBtn = actionsCell.querySelector('.btn-danger');
+      if (confirmBtn) confirmBtn.disabled = true;
+      try {
+        await api(`/api/admin/reports/${encodeURIComponent(String(r.id))}`, { method: 'DELETE' });
+        toast(t('تم حذف البلاغ'), 'success');
+        await refresh();
+      } catch (e) {
+        showDefault();
+        toast(e.message || t('تعذّر حذف البلاغ'), 'error');
+      }
+    }
+    deleteBtn.addEventListener('click', showConfirm);
+    showDefault();
+
+    row.append(appCell, reviewCell, reasonCell, dateCell, actionsCell);
+    return row;
   }
 
   // -------- requests & reports --------

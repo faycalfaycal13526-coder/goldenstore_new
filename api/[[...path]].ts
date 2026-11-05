@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
-import { 
-  listApps, getAppBySlug, listScreenshots, listReviews, listNotifications, getStoreSettings,
-  getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport 
+import {
+  listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
+  getRatingDistribution, listNotifications, getStoreSettings,
+  getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -119,6 +120,36 @@ function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
   };
   if (includeInternalKeys) { result.apk_key = d.apk_key; result.icon_key = d.icon_key; result.feature_key = d.feature_key; }
   return result;
+}
+
+// Accepted report reasons are stable codes. The human-readable label is what
+// gets stored in review_reports.reason so the admin table is self-explanatory.
+const REVIEW_REPORT_REASONS: Record<string, string> = {
+  spam: 'رسائل مزعجة أو إعلانات',
+  harassment: 'إساءة أو تحرش',
+  hate: 'خطاب كراهية',
+  inappropriate: 'محتوى غير لائق',
+  misleading: 'معلومات مضللة أو احتيال',
+  off_topic: 'محتوى خارج عن الموضوع',
+  other: 'سبب آخر',
+};
+function reportReasonLabel(value: unknown): string {
+  const key = String(value ?? '').trim().toLowerCase();
+  if (REVIEW_REPORT_REASONS[key]) return REVIEW_REPORT_REASONS[key];
+  // Backwards compatibility: accept an already-labelled reason from older clients.
+  const labels = Object.values(REVIEW_REPORT_REASONS);
+  return labels.includes(String(value ?? '').trim()) ? String(value).trim() : '';
+}
+
+/** Validate a review id and confirm it belongs to the app in the URL. */
+async function resolveReview(c: any, slug: string, reviewId: string): Promise<any | null> {
+  if (!reviewId || reviewId.length > 128 || !/^[A-Za-z0-9_-]+$/.test(reviewId)) return null;
+  const [appData, review] = await Promise.all([
+    getAppBySlug(c.env, slug),
+    getReviewById(c.env, reviewId),
+  ]);
+  if (!appData || !review || String(review.app_id) !== String(appData.id)) return null;
+  return review;
 }
 
 // النطاق الديناميكي
@@ -420,8 +451,9 @@ app.post('/apps/:slug/star', async (c) => {
   
   if (existing) return c.json({ error: 'already_voted', rating: appData.rating, rating_count: appData.rating_count }, 409);
 
+  const voteId = randomId();
   await c.env.DB.prepare(`INSERT INTO star_votes (id, app_id, hash, server_hash, uid, rating, comment, name, photo_url, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(randomId(), appData.id, voteHash, await sha256Hex(serverFingerprint(c)), uid||null, rating, sanitizeText(body.comment, 2000), sanitizeText(body.name, 60), sanitizeUrl(body.photo_url)||null, nowSec()).run();
+    .bind(voteId, appData.id, voteHash, await sha256Hex(serverFingerprint(c)), uid||null, rating, sanitizeText(body.comment, 2000), sanitizeText(body.name, 60), sanitizeUrl(body.photo_url)||null, nowSec()).run();
 
   const newCount = appData.rating_count + 1;
   const newSum = appData.rating_sum + rating;
@@ -429,7 +461,11 @@ app.post('/apps/:slug/star', async (c) => {
   await c.env.DB.prepare('UPDATE apps SET rating = ?, rating_count = ?, rating_sum = ?, stars = ? WHERE id = ?')
     .bind(newAvg, newCount, newSum, newCount, appData.id).run();
 
-  return c.json({ ok: true, rating: newAvg, rating_count: newCount, review: { name: body.name || 'مستخدم', rating, comment: body.comment, photo_url: body.photo_url, ts: nowSec() } });
+  const ts = nowSec();
+  return c.json({
+    ok: true, rating: newAvg, rating_count: newCount,
+    review: { id: voteId, name: body.name || 'مستخدم', rating, comment: body.comment, photo_url: body.photo_url, ts, likes_count: 0, liked: false },
+  });
 });
 
 app.post('/apps/:slug/star-check', async (c) => {
@@ -446,56 +482,64 @@ app.post('/apps/:slug/star-check', async (c) => {
   return c.json({ voted: false, rating: appData.rating, rating_count: appData.rating_count });
 });
 
-// --- مسار التعليقات (معدل لإرجاع الإعجابات) ---
+/* ---------------------------- Reviews (public) ---------------------------- */
 app.get('/apps/:slug/reviews', async (c) => {
   const appData = await getAppBySlug(c.env, c.req.param('slug'));
   if (!appData) return c.json({ error: 'not_found' }, 404);
 
-  const limit = Math.min(Number(c.req.query('limit') || '50'), 100);
-  const votes = await listReviews(c.env, appData.id, limit * 2);
-  
-  const dist = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
-  const reviews = votes.filter(v => v.comment).map(v => {
-    const r = Math.round(Number(v.rating) || 0);
-    if (r >= 1 && r <= 5) dist[r as unknown as keyof typeof dist]++;
-    return { 
-      id: v.id, 
-      name: v.name || 'مستخدم', 
-      rating: r, 
-      comment: v.comment, 
-      photo_url: v.photo_url, 
-      ts: v.ts,
-      likes_count: Number(v.likes_count || 0) 
-    };
-  }).sort((a, b) => b.ts - a.ts);
+  const rawLimit = Number(c.req.query('limit') || '50');
+  const limit = Math.min(Math.max(Math.floor(Number.isFinite(rawLimit) ? rawLimit : 50), 1), 100);
+  // `uid` is the identifier used by star_votes; here it identifies the viewer
+  // so the response can carry their personal like state. Never cached publicly.
+  const viewerId = sanitizeText(c.req.query('userId') || c.req.query('uid') || '', 128);
 
-  return c.json({ reviews: reviews.slice(0, limit), total: reviews.length, dist, rating: appData.rating, rating_count: appData.rating_count });
+  const [votes, dist, total] = await Promise.all([
+    listReviews(c.env, appData.id, limit, viewerId),
+    getRatingDistribution(c.env, appData.id),
+    countReviews(c.env, appData.id),
+  ]);
+
+  const reviews = votes.map((v: any) => ({
+    id: String(v.id),
+    name: v.name || 'مستخدم',
+    rating: Math.round(Number(v.rating) || 0),
+    comment: v.comment,
+    photo_url: v.photo_url || null,
+    ts: Number(v.ts) || 0,
+    likes_count: Number(v.likes_count) || 0,
+    liked: !!v.liked_by_me,
+  }));
+
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ reviews, total, dist, rating: appData.rating, rating_count: appData.rating_count });
 });
 
-// --- مسار الإعجاب بتعليق ---
 app.post('/apps/:slug/reviews/:reviewId/like', async (c) => {
-  const reviewId = c.req.param('reviewId');
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'review-like', 30, 60)) return c.json({ error: 'rate_limit_exceeded' }, 429);
   const body = await c.req.json().catch(() => ({}));
-  const userId = String(body.userId || '').trim();
+  const userId = sanitizeText(body.userId || body.uid, 128);
   if (!userId) return c.json({ error: 'userId_required' }, 400);
-  const review = await getReviewById(c.env, reviewId);
+  const review = await resolveReview(c, c.req.param('slug'), c.req.param('reviewId'));
   if (!review) return c.json({ error: 'review_not_found' }, 404);
-  const result = await toggleReviewLike(c.env, reviewId, userId);
-  return c.json(result);
+
+  const result = await toggleReviewLike(c.env, String(review.id), userId);
+  return c.json({ ok: true, ...result });
 });
 
-// --- مسار الإبلاغ عن تعليق ---
 app.post('/apps/:slug/reviews/:reviewId/report', async (c) => {
-  const appSlug = c.req.param('slug');
-  const reviewId = c.req.param('reviewId');
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'review-report', 10, 60)) return c.json({ error: 'rate_limit_exceeded' }, 429);
   const body = await c.req.json().catch(() => ({}));
-  const userId = String(body.userId || '').trim();
-  const reason = String(body.reason || '').trim();
-  if (!userId || !reason) return c.json({ error: 'userId_and_reason_required' }, 400);
-  const review = await getReviewById(c.env, reviewId);
+  const userId = sanitizeText(body.userId || body.uid, 128);
+  const reason = reportReasonLabel(body.reason);
+  if (!userId) return c.json({ error: 'userId_required' }, 400);
+  if (!reason) return c.json({ error: 'invalid_reason' }, 400);
+  const review = await resolveReview(c, c.req.param('slug'), c.req.param('reviewId'));
   if (!review) return c.json({ error: 'review_not_found' }, 404);
-  await reportReview(c.env, reviewId, appSlug, userId, reason);
-  return c.json({ success: true });
+
+  const result = await reportReview(c.env, String(review.id), c.req.param('slug'), userId, reason);
+  return c.json({ ok: true, ...result });
 });
 
 // Requests (D1)
@@ -567,22 +611,28 @@ app.post('/setup-r2-cors', async (c) => {
 
 app.use('/admin/*', requireAdmin);
 
-// --- مسارات إدارة البلاغات ---
+/* --------------------- Review reports (admin only) --------------------- */
 app.get('/admin/reports', async (c) => {
   try {
     const reports = await getAllReports(c.env);
+    c.header('Cache-Control', 'private, no-store');
     return c.json({ reports });
   } catch (err: any) {
-    return c.json({ error: 'fetch_reports_failed', message: err.message }, 500);
+    console.error('[admin/reports] fetch failed:', err?.message || err);
+    return c.json({ error: 'fetch_reports_failed' }, 500);
   }
 });
 
 app.delete('/admin/reports/:id', async (c) => {
+  const id = String(c.req.param('id') || '');
+  if (!id || id.length > 128 || !/^[A-Za-z0-9_-]+$/.test(id)) return c.json({ error: 'invalid_id' }, 400);
   try {
-    await deleteReport(c.env, c.req.param('id'));
+    const deleted = await deleteReport(c.env, id);
+    if (!deleted) return c.json({ error: 'not_found' }, 404);
     return c.json({ ok: true });
   } catch (err: any) {
-    return c.json({ error: 'delete_report_failed', message: err.message }, 500);
+    console.error('[admin/reports] delete failed:', err?.message || err);
+    return c.json({ error: 'delete_report_failed' }, 500);
   }
 });
 

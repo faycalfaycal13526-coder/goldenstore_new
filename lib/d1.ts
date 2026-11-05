@@ -1,4 +1,5 @@
 import type { Env } from './env.js';
+import { nowSec, randomId } from './utils.js';
 
 export function rowToApp(row: any): any {
   let search_terms: any[] = [];
@@ -55,20 +56,6 @@ export async function listScreenshots(env: Env, app_id: string): Promise<any[]> 
   return result.results || [];
 }
 
-// --- تم التعديل: حساب الإعجابات ديناميكياً ---
-export async function listReviews(env: Env, app_id: string, limit: number): Promise<any[]> {
-  const result = await env.DB.prepare(`
-    SELECT 
-      v.*, 
-      (SELECT COUNT(*) FROM review_likes rl WHERE rl.review_id = v.id) AS likes_count
-    FROM star_votes v 
-    WHERE v.app_id = ? 
-    ORDER BY v.ts DESC 
-    LIMIT ?
-  `).bind(app_id, limit).all();
-  return result.results || [];
-}
-
 export async function listNotifications(env: Env, limit?: number): Promise<any[]> {
   let sql = 'SELECT * FROM notifications ORDER BY created_at DESC';
   if (limit) sql += ' LIMIT ?';
@@ -82,49 +69,149 @@ export async function getStoreSettings(env: Env): Promise<{ notify_new_publicati
   return { notify_new_publications: row ? row.notify_new_publications === 1 : true };
 }
 
-// ============================================================
-// دوال التعليقات الجديدة (إعجاب، بلاغات)
-// ============================================================
+/* =========================================================================
+   Reviews (star_votes) — likes & reports
+   -------------------------------------------------------------------------
+   star_votes columns: id, app_id, hash, server_hash, uid, rating,
+                       comment, name, photo_url, ts
+   The `uid` column is the author identifier and `comment` holds the text.
+   Likes live in review_likes (review_id, user_id) and reports in
+   review_reports (review_id, app_slug, user_id, reason, status).
+   ========================================================================= */
 
-export async function getReviewById(env: Env, reviewId: string) {
-  const row = await env.DB.prepare('SELECT * FROM star_votes WHERE id = ?').bind(reviewId).first();
-  return row || null;
-}
-
-export async function toggleReviewLike(env: Env, reviewId: string, userId: string) {
-  const existing = await env.DB.prepare('SELECT id FROM review_likes WHERE review_id = ? AND user_id = ?').bind(reviewId, userId).first();
-  let liked = false;
-  
-  if (existing) {
-    await env.DB.prepare('DELETE FROM review_likes WHERE id = ?').bind(existing.id).run();
-    liked = false;
-  } else {
-    await env.DB.prepare('INSERT INTO review_likes (id, review_id, user_id, created_at) VALUES (?, ?, ?, ?)')
-      .bind(crypto.randomUUID(), reviewId, userId, Math.floor(Date.now() / 1000)).run();
-    liked = true;
-  }
-  
-  const countRow: any = await env.DB.prepare('SELECT COUNT(*) as count FROM review_likes WHERE review_id = ?').bind(reviewId).first();
-  return { liked, likes_count: Number(countRow?.count || 0) };
-}
-
-export async function reportReview(env: Env, reviewId: string, appSlug: string, userId: string, reason: string) {
-  await env.DB.prepare('INSERT INTO review_reports (id, review_id, app_slug, user_id, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(crypto.randomUUID(), reviewId, appSlug, userId, reason, Math.floor(Date.now() / 1000)).run();
-  return { success: true };
-}
-
-export async function getAllReports(env: Env) {
+/** Public review rows for one app, newest first, with like counts and the
+ *  current viewer's like state. Only rows that actually contain a comment
+ *  are returned; internal fields (hash, server_hash, uid) are never exposed. */
+export async function listReviews(env: Env, app_id: string, limit: number, viewerId = ''): Promise<any[]> {
   const result = await env.DB.prepare(`
-    SELECT r.*, v.comment as review_text, v.name as review_author
-    FROM review_reports r
-    LEFT JOIN star_votes v ON r.review_id = v.id
-    ORDER BY r.created_at DESC
-  `).all();
+    SELECT
+      v.id,
+      v.name,
+      v.rating,
+      v.comment,
+      v.photo_url,
+      v.ts,
+      (SELECT COUNT(DISTINCT rl.user_id) FROM review_likes rl WHERE rl.review_id = v.id) AS likes_count,
+      COALESCE(
+        (SELECT 1 FROM review_likes rl2 WHERE rl2.review_id = v.id AND rl2.user_id = ? LIMIT 1),
+        0
+      ) AS liked_by_me
+    FROM star_votes v
+    WHERE v.app_id = ?
+      AND v.comment IS NOT NULL
+      AND TRIM(v.comment) <> ''
+    ORDER BY v.ts DESC, v.id DESC
+    LIMIT ?
+  `).bind(viewerId, app_id, limit).all();
   return result.results || [];
 }
 
-export async function deleteReport(env: Env, reportId: string) {
-  await env.DB.prepare('DELETE FROM review_reports WHERE id = ?').bind(reportId).run();
-  return { success: true };
+/** Total number of written reviews (independent of the page limit). */
+export async function countReviews(env: Env, app_id: string): Promise<number> {
+  const row: any = await env.DB.prepare(`
+    SELECT COUNT(*) AS total
+    FROM star_votes
+    WHERE app_id = ? AND comment IS NOT NULL AND TRIM(comment) <> ''
+  `).bind(app_id).first();
+  return Number(row?.total || 0);
+}
+
+/** Rating distribution across ALL votes (including votes without a comment). */
+export async function getRatingDistribution(env: Env, app_id: string): Promise<Record<string, number>> {
+  const result = await env.DB.prepare(`
+    SELECT rating, COUNT(*) AS total
+    FROM star_votes
+    WHERE app_id = ?
+    GROUP BY rating
+  `).bind(app_id).all();
+  const dist: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+  for (const row of (result.results || []) as any[]) {
+    const key = String(Math.round(Number(row.rating) || 0));
+    if (key in dist) dist[key] = Number(row.total || 0);
+  }
+  return dist;
+}
+
+/** Fetch a single vote. Used to verify that a like/report targets a real
+ *  review belonging to the app in the URL. */
+export async function getReviewById(env: Env, reviewId: string): Promise<any | null> {
+  const row = await env.DB.prepare('SELECT id, app_id, uid, comment FROM star_votes WHERE id = ?').bind(reviewId).first();
+  return row || null;
+}
+
+/** Toggle a like for (review, viewer). The DELETE-first / conditional-INSERT
+ *  sequence keeps the toggle idempotent even without a UNIQUE constraint and
+ *  avoids duplicate rows from double taps. */
+export async function toggleReviewLike(env: Env, reviewId: string, userId: string): Promise<{ liked: boolean; likes_count: number }> {
+  const removed: any = await env.DB.prepare('DELETE FROM review_likes WHERE review_id = ? AND user_id = ?')
+    .bind(reviewId, userId).run();
+  const wasLiked = Number(removed?.meta?.changes || 0) > 0;
+
+  if (!wasLiked) {
+    await env.DB.prepare(`
+      INSERT INTO review_likes (id, review_id, user_id, created_at)
+      SELECT ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM review_likes WHERE review_id = ? AND user_id = ?
+      )
+    `).bind(randomId(), reviewId, userId, nowSec(), reviewId, userId).run();
+  }
+
+  const countRow: any = await env.DB.prepare('SELECT COUNT(DISTINCT user_id) AS count FROM review_likes WHERE review_id = ?')
+    .bind(reviewId).first();
+  return { liked: !wasLiked, likes_count: Number(countRow?.count || 0) };
+}
+
+/** Store a report. One active report per (review, reporter) prevents spam. */
+export async function reportReview(env: Env, reviewId: string, appSlug: string, userId: string, reason: string): Promise<{ success: boolean; duplicate: boolean }> {
+  const existing = await env.DB.prepare('SELECT id FROM review_reports WHERE review_id = ? AND user_id = ? LIMIT 1')
+    .bind(reviewId, userId).first();
+  if (existing) return { success: true, duplicate: true };
+
+  await env.DB.prepare(`
+    INSERT INTO review_reports (id, review_id, app_slug, user_id, reason, status, created_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+  `).bind(randomId(), reviewId, appSlug, userId, reason, nowSec()).run();
+  return { success: true, duplicate: false };
+}
+
+/** Admin listing: report data joined with the app name and review text. */
+export async function getAllReports(env: Env): Promise<any[]> {
+  const result = await env.DB.prepare(`
+    SELECT
+      r.id,
+      r.review_id,
+      r.app_slug,
+      r.user_id,
+      r.reason,
+      r.status,
+      r.created_at,
+      COALESCE(a.name, r.app_slug) AS app_name,
+      v.comment AS review_text,
+      v.name     AS review_author,
+      v.rating   AS review_rating
+    FROM review_reports r
+    LEFT JOIN apps a       ON a.slug = r.app_slug
+    LEFT JOIN star_votes v ON v.id = r.review_id
+    ORDER BY r.created_at DESC, r.id DESC
+  `).all();
+  return (result.results || []).map((row: any) => ({
+    id: row.id,
+    review_id: row.review_id,
+    app_slug: row.app_slug || '',
+    app_name: row.app_name || row.app_slug || '—',
+    review_text: row.review_text || '',
+    review_author: row.review_author || '',
+    review_rating: Number(row.review_rating || 0),
+    user_id: row.user_id || '',
+    reason: row.reason || '',
+    status: row.status || 'pending',
+    created_at: Number(row.created_at || 0),
+  }));
+}
+
+/** Delete a report. Returns false when the id no longer exists. */
+export async function deleteReport(env: Env, reportId: string): Promise<boolean> {
+  const result: any = await env.DB.prepare('DELETE FROM review_reports WHERE id = ?').bind(reportId).run();
+  return Number(result?.meta?.changes || 0) > 0;
 }

@@ -7,6 +7,258 @@
 
   const slug = getQuery('slug');
 
+  /* =====================================================================
+     Review interactions — likes, reports and device-local hiding.
+     The viewer id is the Firebase uid when signed in, otherwise a stable
+     random id kept in localStorage so anonymous likes survive reloads.
+     ===================================================================== */
+  const HIDDEN_REVIEWS_KEY = 'gs_hidden_reviews';
+  const VIEWER_ID_KEY = 'gs_review_viewer_id';
+  const REVIEW_REPORT_REASONS = [
+    { code: 'spam', label: () => t('رسائل مزعجة أو إعلانات') },
+    { code: 'harassment', label: () => t('إساءة أو تحرش') },
+    { code: 'hate', label: () => t('خطاب كراهية') },
+    { code: 'inappropriate', label: () => t('محتوى غير لائق') },
+    { code: 'misleading', label: () => t('معلومات مضللة أو احتيال') },
+    { code: 'off_topic', label: () => t('محتوى خارج عن الموضوع') },
+    { code: 'other', label: () => t('سبب آخر') },
+  ];
+
+  const pendingLikes = new Set();
+  let reportDialogSeq = 0;
+  let reviewsState = [];          // the array owned by ratingSection()
+  let refreshReviewViews = () => {};
+  let activeReviewMenu = null;
+
+  function readStoredArray(key) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(value) ? value.map(String) : [];
+    } catch { return []; }
+  }
+  function writeStoredArray(key, values) {
+    try { localStorage.setItem(key, JSON.stringify(values)); } catch {}
+  }
+  function hiddenReviewIds() { return new Set(readStoredArray(HIDDEN_REVIEWS_KEY)); }
+  function setReviewHidden(id, hidden) {
+    if (!id) return;
+    const ids = hiddenReviewIds();
+    if (hidden) ids.add(String(id)); else ids.delete(String(id));
+    writeStoredArray(HIDDEN_REVIEWS_KEY, Array.from(ids));
+  }
+  function viewerId() {
+    try {
+      const user = S.getUser && S.getUser();
+      if (user && user.uid) return String(user.uid).slice(0, 128);
+    } catch {}
+    let id = '';
+    try { id = localStorage.getItem(VIEWER_ID_KEY) || ''; } catch {}
+    if (!id) {
+      const rand = (window.crypto && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID().replace(/-/g, '')
+        : (Math.random().toString(36).slice(2) + Date.now().toString(36));
+      id = 'gs_' + rand;
+      try { localStorage.setItem(VIEWER_ID_KEY, id); } catch {}
+    }
+    return id;
+  }
+
+  /** Toast with an inline action (used to undo a locally hidden review). */
+  function actionToast(message, actionLabel, onAction) {
+    let stack = document.querySelector('.toast-stack');
+    if (!stack) { stack = el('div', { class: 'toast-stack' }); document.body.append(stack); }
+    const item = el('div', { class: 'toast toast-action' },
+      el('span', null, message),
+      el('button', {
+        class: 'toast-action-btn', type: 'button',
+        onclick: () => { clearTimeout(timer); item.remove(); onAction(); },
+      }, actionLabel),
+    );
+    stack.append(item);
+    const timer = setTimeout(() => {
+      item.style.transition = 'opacity .2s, transform .2s';
+      item.style.opacity = '0';
+      item.style.transform = 'translateY(8px)';
+      setTimeout(() => item.remove(), 200);
+    }, 6000);
+  }
+
+  /** Keep every rendered copy of a review (page list + modal) in sync. */
+  function applyReviewState(id, patch) {
+    const idStr = String(id);
+    const target = reviewsState.find((r) => String(r.id) === idStr);
+    if (target) Object.assign(target, patch);
+    const liked = !!(target && target.liked);
+    const count = Math.max(0, Number((target && target.likes_count) || 0));
+    document.querySelectorAll('.review[data-review-id]').forEach((card) => {
+      if (card.getAttribute('data-review-id') !== idStr) return;
+      const btn = card.querySelector('.review-like');
+      if (!btn) return;
+      const label = liked ? t('إزالة الإعجاب') : t('أعجبني');
+      btn.classList.toggle('is-liked', liked);
+      btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
+      btn.setAttribute('aria-label', label);
+      btn.setAttribute('title', label);
+      const counter = btn.querySelector('.review-like-count');
+      if (counter) counter.textContent = formatNum(count);
+      btn.classList.remove('pop');
+      void btn.offsetWidth;
+      btn.classList.add('pop');
+    });
+  }
+
+  async function toggleReviewLike(r) {
+    const id = r && r.id ? String(r.id) : '';
+    if (!id || pendingLikes.has(id)) return;
+    const previous = { liked: !!r.liked, likes_count: Number(r.likes_count) || 0 };
+    const optimistic = {
+      liked: !previous.liked,
+      likes_count: Math.max(0, previous.likes_count + (previous.liked ? -1 : 1)),
+    };
+    pendingLikes.add(id);
+    applyReviewState(id, optimistic);
+    try {
+      const res = await api(`/api/apps/${encodeURIComponent(slug)}/reviews/${encodeURIComponent(id)}/like`, {
+        method: 'POST', body: { userId: viewerId() },
+      });
+      applyReviewState(id, {
+        liked: !!res.liked,
+        likes_count: Math.max(0, Number(res.likes_count) || 0),
+      });
+    } catch {
+      applyReviewState(id, previous);
+      toast(t('تعذّر تسجيل الإعجاب، حاول مجدداً'), 'error');
+    } finally {
+      pendingLikes.delete(id);
+    }
+  }
+
+  function openReviewMenu(wrap, btn, list) {
+    closeReviewMenu();
+    // Flip upwards when there is not enough room below (review lists and
+    // the "all reviews" sheet are scrollable containers).
+    const rect = btn.getBoundingClientRect();
+    wrap.classList.toggle('drop-up', window.innerHeight - rect.bottom < 220);
+    wrap.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+    activeReviewMenu = { wrap, btn, list };
+    const first = list.querySelector('button');
+    if (first) setTimeout(() => first.focus(), 0);
+  }
+  function closeReviewMenu() {
+    if (!activeReviewMenu) return;
+    activeReviewMenu.wrap.classList.remove('open', 'drop-up');
+    activeReviewMenu.btn.setAttribute('aria-expanded', 'false');
+    activeReviewMenu = null;
+  }
+  document.addEventListener('click', (e) => {
+    if (activeReviewMenu && !activeReviewMenu.wrap.contains(e.target)) closeReviewMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeReviewMenu(); return; }
+    if (!activeReviewMenu || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    const items = Array.from(activeReviewMenu.list.querySelectorAll('button'));
+    if (!items.length) return;
+    e.preventDefault();
+    const idx = items.indexOf(document.activeElement);
+    const next = e.key === 'ArrowDown'
+      ? (idx + 1) % items.length
+      : (idx <= 0 ? items.length - 1 : idx - 1);
+    items[next].focus();
+  });
+
+  function hideReview(r) {
+    if (!r || !r.id) return;
+    setReviewHidden(r.id, true);
+    refreshReviewViews();
+    actionToast(t('تم إخفاء المراجعة على هذا الجهاز'), t('تراجع'), () => {
+      setReviewHidden(r.id, false);
+      refreshReviewViews();
+    });
+  }
+  function restoreHiddenReviews() {
+    const ids = hiddenReviewIds();
+    reviewsState.forEach((r) => { if (r.id) ids.delete(String(r.id)); });
+    writeStoredArray(HIDDEN_REVIEWS_KEY, Array.from(ids));
+    refreshReviewViews();
+    toast(t('تمت استعادة المراجعات المخفية'), 'success');
+  }
+
+  function openReportReviewModal(r) {
+    if (!r || !r.id) { toast(t('تعذّر الإبلاغ عن هذه المراجعة'), 'error'); return; }
+    let selected = '';
+    const radioName = `gs-report-reason-${++reportDialogSeq}`;
+    const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
+    const errLine = el('div', { class: 'dialog-err' });
+    const reasonList = el('div', { class: 'report-reasons', role: 'radiogroup', 'aria-label': t('سبب البلاغ') });
+    const radios = [];
+    REVIEW_REPORT_REASONS.forEach((reason) => {
+      const input = el('input', { type: 'radio', name: radioName, class: 'report-reason-input', value: reason.code });
+      input.addEventListener('change', () => { selected = reason.code; errLine.textContent = ''; });
+      radios.push(input);
+      reasonList.append(el('label', { class: 'report-reason' },
+        input,
+        el('span', { class: 'report-radio', 'aria-hidden': 'true' }),
+        el('span', { class: 'report-reason-label' }, reason.label()),
+      ));
+    });
+    const preview = el('div', { class: 'report-review-preview' },
+      el('div', { class: 'report-preview-head' },
+        ico('message', 'icon icon-sm'),
+        el('strong', null, r.name || t('مستخدم')),
+      ),
+      r.comment ? el('div', { class: 'report-preview-text' }, String(r.comment).slice(0, 240)) : null,
+    );
+    const submitBtn = el('button', { class: 'btn btn-danger', type: 'button' }, ico('flag', 'icon icon-sm'), t('إرسال البلاغ'));
+    submitBtn.addEventListener('click', async () => {
+      if (!selected) {
+        errLine.textContent = t('اختر سبب البلاغ');
+        if (radios[0]) radios[0].focus();
+        return;
+      }
+      submitBtn.disabled = true;
+      errLine.textContent = '';
+      try {
+        const res = await api(`/api/apps/${encodeURIComponent(slug)}/reviews/${encodeURIComponent(String(r.id))}/report`, {
+          method: 'POST', body: { userId: viewerId(), reason: selected },
+        });
+        close();
+        toast(res && res.duplicate ? t('لقد أبلغت عن هذه المراجعة مسبقاً') : t('تم إرسال البلاغ إلى الإدارة'),
+          res && res.duplicate ? 'info' : 'success');
+      } catch {
+        submitBtn.disabled = false;
+        errLine.textContent = t('تعذّر إرسال البلاغ، حاول مجدداً');
+      }
+    });
+    const card = el('div', {
+      class: 'dialog-card report-dialog', dir: document.documentElement.dir || 'rtl',
+      role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gs-report-title',
+    },
+      el('div', { class: 'dialog-head' },
+        el('div', { class: 'dialog-title', id: 'gs-report-title' }, ico('flag', 'icon'), t('الإبلاغ عن المراجعة')),
+        el('button', { class: 'dialog-close', type: 'button', 'aria-label': t('إغلاق'), onclick: () => close() }, ico('close')),
+      ),
+      el('div', { class: 'dialog-body' },
+        preview,
+        el('div', { class: 'dialog-field' },
+          el('span', { class: 'dialog-label' }, t('سبب البلاغ'), el('b', { class: 'req' }, ' *')),
+          reasonList,
+        ),
+        errLine,
+      ),
+      el('div', { class: 'dialog-actions' },
+        el('button', { class: 'btn btn-secondary', type: 'button', onclick: () => close() }, t('إلغاء')),
+        submitBtn,
+      ),
+    );
+    overlay.append(card);
+    function close() { overlay.remove(); document.removeEventListener('keydown', esc); }
+    function esc(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', esc);
+    document.body.append(overlay);
+    if (radios[0]) setTimeout(() => radios[0].focus(), 0);
+  }
+
   function isNativeApp() {
     return !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
   }
@@ -184,23 +436,69 @@
   }
 
   function reviewCard(r) {
-    const initial = ((r.name || 'م').trim().charAt(0) || 'م').toUpperCase();
+    const review = r || {};
+    const id = review.id ? String(review.id) : '';
+    const canInteract = !!id;
+    const initial = ((review.name || 'م').trim().charAt(0) || 'م').toUpperCase();
     const stars = el('div', { class: 'stars' });
-    const rt = Math.round(Number(r.rating) || 0);
+    const rt = Math.round(Number(review.rating) || 0);
     for (let i = 1; i <= 5; i++) stars.append(el('span', { class: `star ${i <= rt ? 'on' : ''}` }, i <= rt ? '★' : '☆'));
     const avatar = el('div', { class: 'avatar' });
-    if (r.photo_url) avatar.append(el('img', { src: r.photo_url, alt: '', referrerpolicy: 'no-referrer' }));
+    if (review.photo_url) avatar.append(el('img', { src: review.photo_url, alt: '', referrerpolicy: 'no-referrer' }));
     else avatar.textContent = initial;
-    return el('div', { class: 'review' },
+
+    const liked = !!review.liked;
+    const likeLabel = liked ? t('إزالة الإعجاب') : t('أعجبني');
+    const likeBtn = el('button', {
+      class: `review-like${liked ? ' is-liked' : ''}`,
+      type: 'button',
+      'aria-pressed': liked ? 'true' : 'false',
+      'aria-label': likeLabel,
+      title: likeLabel,
+      disabled: canInteract ? null : 'disabled',
+      onclick: () => toggleReviewLike(review),
+    },
+      ico('heart', 'icon icon-sm'),
+      el('span', { class: 'review-like-count' }, formatNum(Number(review.likes_count) || 0)),
+    );
+
+    const menuWrap = el('div', { class: 'review-menu' });
+    const menuBtn = el('button', {
+      class: 'review-menu-btn', type: 'button',
+      'aria-label': t('خيارات المراجعة'), title: t('خيارات المراجعة'),
+      'aria-haspopup': 'menu', 'aria-expanded': 'false',
+      disabled: canInteract ? null : 'disabled',
+    }, ico('moreVert', 'icon icon-sm'));
+    const menuList = el('div', { class: 'review-menu-list', role: 'menu' },
+      el('button', {
+        class: 'review-menu-item', type: 'button', role: 'menuitem',
+        onclick: () => { closeReviewMenu(); openReportReviewModal(review); },
+      }, ico('flag', 'icon icon-sm'), el('span', null, t('الإبلاغ عن المراجعة'))),
+      el('button', {
+        class: 'review-menu-item', type: 'button', role: 'menuitem',
+        onclick: () => { closeReviewMenu(); hideReview(review); },
+      }, ico('close', 'icon icon-sm'),
+        el('span', null, t('إخفاء المراجعة'), el('small', null, t('على هذا الجهاز فقط')))),
+    );
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activeReviewMenu && activeReviewMenu.wrap === menuWrap) closeReviewMenu();
+      else openReviewMenu(menuWrap, menuBtn, menuList);
+    });
+    menuWrap.append(menuBtn, menuList);
+
+    return el('div', { class: 'review', 'data-review-id': id },
       el('div', { class: 'head' },
         avatar,
         el('div', { class: 'who' },
-          el('div', { class: 'nm' }, r.name || t('مستخدم')),
-          el('div', { class: 'dt' }, formatDate(r.ts)),
+          el('div', { class: 'nm' }, review.name || t('مستخدم')),
+          el('div', { class: 'dt' }, formatDate(review.ts)),
         ),
+        menuWrap,
       ),
       stars,
-      r.comment ? el('div', { class: 'body' }, r.comment) : null,
+      review.comment ? el('div', { class: 'body' }, review.comment) : null,
+      el('div', { class: 'review-actions' }, likeBtn),
     );
   }
 
@@ -879,6 +1177,8 @@
   function ratingSection(app) {
     let fingerprint = null, voted = false, myRating = 0, selected = 0;
     let reviews = [];
+    let reviewsModalBody = null;
+    reviewsState = reviews;
 
     const avg = S.ratingValue(app);
     const initialCount = S.ratingCountOf(app);
@@ -946,42 +1246,79 @@
     const reviewsList = el('div', { class: 'reviews' });
     const showMoreBtn = el('button', { class: 'btn btn-secondary btn-sm', style: { marginTop: '12px', display: 'none' } }, t('عرض المزيد'));
     showMoreBtn.addEventListener('click', () => openReviewsModal());
+    const restoreHiddenBtn = el('button', {
+      class: 'btn btn-text btn-sm restore-hidden-btn', type: 'button',
+      style: { marginTop: '8px', display: 'none' },
+      onclick: () => restoreHiddenReviews(),
+    }, ico('refresh', 'icon icon-sm'), el('span', { class: 'restore-hidden-label' }, ''));
 
-    function renderReviews(list) {
+    function visibleReviews() {
+      const hidden = hiddenReviewIds();
+      return reviews.filter((r) => !r.id || !hidden.has(String(r.id)));
+    }
+    function syncHiddenControl() {
+      const hidden = hiddenReviewIds();
+      const hiddenHere = reviews.filter((r) => r.id && hidden.has(String(r.id))).length;
+      restoreHiddenBtn.style.display = hiddenHere ? '' : 'none';
+      const label = restoreHiddenBtn.querySelector('.restore-hidden-label');
+      if (label) label.textContent = `${t('إظهار المراجعات المخفية')} (${hiddenHere})`;
+    }
+    function renderReviews() {
+      const list = visibleReviews();
       reviewsList.innerHTML = '';
       showMoreBtn.style.display = 'none';
-      if (!list || !list.length) {
+      syncHiddenControl();
+      if (!list.length) {
         reviewsList.append(el('div', { class: 'reviews-empty' }, t('لا توجد مراجعات بعد. كن أول من يكتب مراجعة!')));
         return;
       }
-      const visible = list.slice(0, INITIAL_REVIEWS);
-      visible.forEach((r) => reviewsList.append(reviewCard(r)));
+      list.slice(0, INITIAL_REVIEWS).forEach((r) => reviewsList.append(reviewCard(r)));
       if (list.length > INITIAL_REVIEWS) {
         showMoreBtn.style.display = '';
         showMoreBtn.textContent = `${t('عرض المزيد')} (${list.length})`;
       }
     }
-
+    function fillReviewsModalBody(body) {
+      body.innerHTML = '';
+      const list = visibleReviews();
+      if (!list.length) {
+        body.append(el('div', { class: 'reviews-empty' }, t('لا توجد مراجعات بعد. كن أول من يكتب مراجعة!')));
+        return;
+      }
+      list.forEach((r) => body.append(reviewCard(r)));
+    }
     function openReviewsModal() {
-      const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
-      const body = el('div', { class: 'dialog-body', style: { maxHeight: '60vh', overflowY: 'auto' } });
-      reviews.forEach((r) => body.append(reviewCard(r)));
+      const overlay = el('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) close(); } });
+      const body = el('div', { class: 'dialog-body reviews-modal-body', style: { maxHeight: '60vh', overflowY: 'auto' } });
+      fillReviewsModalBody(body);
+      reviewsModalBody = body;
       const card = el('div', { class: 'dialog-card' },
         el('div', { class: 'dialog-head' },
           el('div', { class: 'dialog-title' }, ico('star', 'icon'), t('جميع التقييمات والمراجعات')),
-          el('button', { class: 'dialog-close', 'aria-label': t('إغلاق'), onclick: () => overlay.remove() }, ico('close')),
+          el('button', { class: 'dialog-close', 'aria-label': t('إغلاق'), onclick: () => close() }, ico('close')),
         ),
         body,
         el('div', { class: 'dialog-actions' },
-          el('button', { class: 'btn btn-secondary', onclick: () => overlay.remove() }, t('عرض أقل')),
+          el('button', { class: 'btn btn-secondary', onclick: () => close() }, t('عرض أقل')),
         ),
       );
       overlay.append(card);
+      function close() {
+        reviewsModalBody = null;
+        overlay.remove();
+        document.removeEventListener('keydown', esc);
+      }
+      function esc(e) { if (e.key === 'Escape') close(); }
+      document.addEventListener('keydown', esc);
       document.body.append(overlay);
-      document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); } });
     }
+    /** Re-render every open view of the review list (page + modal). */
+    refreshReviewViews = () => {
+      renderReviews();
+      if (reviewsModalBody && reviewsModalBody.isConnected) fillReviewsModalBody(reviewsModalBody);
+    };
 
-    renderReviews([]);
+    renderReviews();
 
     function lockVoted(rating, comment) {
       voted = true; myRating = rating; selected = rating;
@@ -1002,9 +1339,14 @@
 
     async function loadReviews() {
       try {
-        const res = await window.Store.api(`/api/apps/${encodeURIComponent(app.slug)}/reviews`);
-        reviews = res.reviews || [];
-        renderReviews(reviews);
+        const viewer = encodeURIComponent(viewerId());
+        const res = await window.Store.api(`/api/apps/${encodeURIComponent(app.slug)}/reviews?userId=${viewer}`);
+        reviews = reviewsState = (res.reviews || []).map((r) => ({
+          ...r,
+          liked: !!r.liked,
+          likes_count: Number(r.likes_count) || 0,
+        }));
+        renderReviews();
         renderDist(res.dist || {}, Number(res.rating_count || 0));
         if (typeof res.rating === 'number') refreshAverage(res.rating, Number(res.rating_count || 0));
       } catch {}
@@ -1030,8 +1372,12 @@
         lockVoted(rated, myComment);
         refreshAverage(res.rating, Number(res.rating_count || 0));
         if (res.review || myComment) {
-          reviews.unshift(res.review || { name: myName || t('مستخدم'), rating: rated, comment: myComment, photo_url: accountPhoto || null, ts: Math.floor(Date.now() / 1000) });
-          renderReviews(reviews);
+          const fresh = res.review || {
+            name: myName || t('مستخدم'), rating: rated, comment: myComment,
+            photo_url: accountPhoto || null, ts: Math.floor(Date.now() / 1000),
+          };
+          reviews.unshift({ ...fresh, likes_count: Number(fresh.likes_count) || 0, liked: false });
+          renderReviews();
         }
         loadReviews();
         toast(t('شكراً لمراجعتك!'), 'success');
@@ -1058,6 +1404,7 @@
       ),
       reviewsList,
       showMoreBtn,
+      restoreHiddenBtn,
     );
     rateBody.style.maxHeight = '0';
     rateBody.style.overflow = 'hidden';

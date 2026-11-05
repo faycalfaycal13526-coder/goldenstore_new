@@ -510,9 +510,10 @@
     'تم تعطيل الإشعارات التلقائية': { en: 'Automatic notifications disabled', fr: 'Notifications automatiques désactivées', es: 'Notificaciones automáticas desactivadas' },
     'تعذّر حفظ الإعداد': { en: 'Could not save setting', fr: 'Impossible d’enregistrer le paramètre', es: 'No se pudo guardar la configuración' },
     'تعذّر تسجيل الخروج، حاول مرة أخرى': { en: 'Could not sign out. Please try again.', fr: 'Impossible de vous déconnecter. Veuillez réessayer.', es: 'No se pudo cerrar la sesión. Inténtalo de nuevo.' },
-    'الاشتراك عبر واتساب': { en: 'Subscribe via WhatsApp', fr: 'S’abonner via WhatsApp', es: 'Suscribirse por WhatsApp' },
-    'استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر واتساب.': { en: 'Ask about available plans and confirm your subscription with the store team on WhatsApp.', fr: 'Renseignez-vous sur les offres et confirmez votre abonnement auprès de l’équipe via WhatsApp.', es: 'Consulta los planes disponibles y confirma tu suscripción con el equipo de la tienda por WhatsApp.' },
-    'راسلنا على واتساب': { en: 'Message us on WhatsApp', fr: 'Écrivez-nous sur WhatsApp', es: 'Escríbenos por WhatsApp' },
+    // account / single Telegram contact CTA (2026-11)
+    'الاشتراك عبر تليجرام': { en: 'Subscribe via Telegram', fr: 'S’abonner via Telegram', es: 'Suscribirse por Telegram' },
+    'استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر تليجرام.': { en: 'Ask about available plans and confirm your subscription with the store team on Telegram.', fr: 'Renseignez-vous sur les offres et confirmez votre abonnement auprès de l’équipe via Telegram.', es: 'Consulta los planes disponibles y confirma tu suscripción con el equipo de la tienda por Telegram.' },
+    'راسلنا على تليجرام': { en: 'Message us on Telegram', fr: 'Écrivez-nous sur Telegram', es: 'Escríbenos por Telegram' },
     'الحسابات المحفوظة': { en: 'Saved accounts', fr: 'Comptes enregistrés', es: 'Cuentas guardadas' },
     'حسابات Google التي استُخدمت سابقاً على هذا الجهاز.': { en: 'Google accounts previously used on this device.', fr: 'Comptes Google déjà utilisés sur cet appareil.', es: 'Cuentas de Google usadas anteriormente en este dispositivo.' },
     'لا توجد حسابات أخرى محفوظة بعد.': { en: 'No other accounts are saved yet.', fr: 'Aucun autre compte n’est encore enregistré.', es: 'Aún no hay otras cuentas guardadas.' },

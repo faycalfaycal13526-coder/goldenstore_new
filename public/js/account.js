@@ -3,6 +3,10 @@
   const S = window.Store;
   const { el, ico, formatBytes, formatDate, toast, t, getQuery } = S;
   const root = document.getElementById('root');
+  // Single contact CTA: Telegram only (social links were removed).
+  // Declared before S.ready() because its callback may run synchronously.
+  const TELEGRAM_URL = 'https://t.me/goldenstore_10';
+  const TELEGRAM_HANDLE = '@goldenstore_10';
 
   const isNativeApp = () => !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
 
@@ -380,8 +384,7 @@
           langSettingItem(),
           aboutDropdown(),
         ),
-        subscriptionCard(user),
-        contactCard(),
+        subscriptionCard(),
         legalLinksCard(),
         el('div', { class: 'account-actions' },
           el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
@@ -394,37 +397,25 @@
     renderSettings();
   }
 
-  function subscriptionCard(user) {
-    const phone = '213551304168';
-    const lang = (window.GSI18N && window.GSI18N.lang) || 'ar';
-    const greetings = {
-      ar: 'السلام عليكم، أود الاستفسار عن الاشتراك في Golden Store.',
-      en: 'Hello, I would like to ask about Golden Store subscription plans.',
-      fr: 'Bonjour, je souhaite me renseigner sur les offres d’abonnement Golden Store.',
-      es: 'Hola, quisiera consultar los planes de suscripción de Golden Store.',
-    };
-    const accountLabels = { ar: 'الحساب', en: 'Account', fr: 'Compte', es: 'Cuenta' };
-    const email = (user && user.email) || '';
-    const message = (greetings[lang] || greetings.ar) + (email ? `\n${accountLabels[lang] || accountLabels.ar}: ${email}` : '');
-    const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-
-    return el('section', { class: 'subscription-card', 'aria-label': t('الاشتراك عبر واتساب') },
+  // One button, no social-media list.
+  function subscriptionCard() {
+    return el('section', { class: 'subscription-card', 'aria-label': t('الاشتراك عبر تليجرام') },
       el('div', { class: 'subscription-card-head' },
-        el('span', { class: 'subscription-card-icon' }, ico('message', 'icon')),
-        el('h3', null, t('الاشتراك عبر واتساب')),
+        el('span', { class: 'subscription-card-icon' }, ico('telegram', 'icon')),
+        el('h3', null, t('الاشتراك عبر تليجرام')),
       ),
       el('p', { class: 'subscription-card-text' },
-        t('استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر واتساب.')),
+        t('استفسر عن الخطط المتاحة وتأكيد الاشتراك مع فريق المتجر عبر تليجرام.')),
       el('a', {
-        class: 'subscription-whatsapp',
-        href,
+        class: 'subscription-telegram',
+        href: TELEGRAM_URL,
         target: '_blank',
         rel: 'noopener noreferrer',
-        'aria-label': `${t('راسلنا على واتساب')} +213 551 30 41 68`,
+        'aria-label': `${t('راسلنا على تليجرام')} ${TELEGRAM_HANDLE}`,
       },
-        ico('message', 'icon'),
-        el('span', { class: 'subscription-whatsapp-label' }, t('راسلنا على واتساب')),
-        el('bdi', { class: 'subscription-phone', dir: 'ltr' }, '+213 551 30 41 68'),
+        ico('telegram', 'icon'),
+        el('span', { class: 'subscription-telegram-label' }, t('راسلنا على تليجرام')),
+        el('bdi', { class: 'subscription-handle', dir: 'ltr' }, TELEGRAM_HANDLE),
       ),
     );
   }
@@ -528,28 +519,6 @@
     });
     return el('div', null,
       el('div', { class: 'page-title', style: { padding: '8px 16px 0', fontSize: '15px' } }, t('الصفحات القانونية')),
-      list,
-    );
-  }
-
-  function contactCard() {
-    const links = [
-      { icon: 'facebook',  label: 'Facebook',  href: 'https://www.facebook.com/F.Pony.Z', fill: true },
-      { icon: 'instagram', label: 'Instagram', href: 'https://www.instagram.com/goldenstore_19?stkn=MTAwODRuYmV3Z3ZsNw==', fill: false },
-      { icon: 'telegram',  label: 'Telegram',  href: 'https://t.me/goldenstore_10', fill: true },
-      { icon: 'tiktok',  label: 'Tiktok',  href: 'https://www.tiktok.com/@goldenstore_10?_r=1&_t=ZS-9ALWcGZk5Nk', fill: true },
-      { icon: 'youtube',  label: 'youtube',  href: 'https://youtube.com/@goldenstore_10?si=-y8ZBoMDLxg39LVt', fill: true },
-    ];
-    const list = el('div', { class: 'acct-list contact-list' });
-    links.forEach((l) => {
-      list.append(el('a', { class: 'acct-setting contact-row', href: l.href, target: '_blank', rel: 'noopener noreferrer' },
-        ico(l.icon, `icon ${l.fill ? 'fill ' : ''}brand-${l.icon}`),
-        el('span', { class: 'label' }, l.label),
-        ico('external', 'icon icon-sm'),
-      ));
-    });
-    return el('div', null,
-      el('div', { class: 'page-title', style: { padding: '8px 16px 0', fontSize: '15px' } }, t('تواصل معنا')),
       list,
     );
   }

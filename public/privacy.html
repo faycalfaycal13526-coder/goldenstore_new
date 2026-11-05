@@ -13,34 +13,53 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261105d">
+<link rel="stylesheet" href="/css/play.css?v=20261105e">
 </head>
 <body data-page="privacy">
   <div class="shell legal-shell">
     <header class="topbar-nav legal-topbar">
-      <a class="icon-btn" href="/" aria-label="العودة للرئيسية" title="العودة للرئيسية">
+      <a class="icon-btn legal-back" href="/" aria-label="العودة للرئيسية" title="العودة للرئيسية">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 5 7 7-7 7"/><path d="M5 12h14"/></svg>
       </a>
-      <h1 class="title">سياسة الخصوصية</h1>
-      <span class="legal-topbar-spacer" aria-hidden="true"></span>
+      <h1 class="title legal-topbar-title">سياسة الخصوصية</h1>
+      <div class="legal-lang" id="legalLang"></div>
     </header>
 
-    <!-- النص القانوني أدناه هو نص افتراضي قابل للتعديل من لوحة الإدارة/المالك.
-         data-noi18n يمنع الترجمة الآلية للنصوص القانونية: النسخة العربية هي المرجع. -->
-    <main class="legal-page" data-noi18n>
-      <div class="legal-head">
+    <!-- Arabic copy is the canonical version (SEO + no machine translation).
+         legal-content.js swaps in curated EN/FR/ES when the language changes. -->
+    <main class="legal-page" data-noi18n data-legal-page="privacy">
+      <section class="legal-hero" aria-labelledby="legalTitle">
         <img class="legal-logo" src="/images/logo.png" alt="Golden Store">
-        <h2>سياسة الخصوصية</h2>
-        <p class="legal-updated">آخر تحديث: 5 نوفمبر 2026</p>
-        <p class="legal-lead">خصوصيتك مهمة بالنسبة إلينا. تشرح هذه الصفحة ما نجمعه وكيف نستخدمه.</p>
-      </div>
+        <div class="legal-hero-copy">
+          <span class="legal-kicker">الصفحات القانونية</span>
+          <h2 id="legalTitle">سياسة الخصوصية</h2>
+          <p class="legal-lead">خصوصيتك مهمة بالنسبة إلينا. تشرح هذه الصفحة ما نجمعه وكيف نستخدمه.</p>
+          <span class="legal-updated">آخر تحديث: 5 نوفمبر 2026</span>
+        </div>
+      </section>
+
+      <nav class="legal-toc" aria-label="محتويات الصفحة">
+        <h3 class="legal-toc-title">محتويات الصفحة</h3>
+        <ol class="legal-toc-list">
+          <li><a href="#s0">مقدمة</a></li>
+          <li><a href="#s1">البيانات التي نجمعها</a></li>
+          <li><a href="#s2">الكوكيز والتخزين المحلي</a></li>
+          <li><a href="#s3">Firebase Auth</a></li>
+          <li><a href="#s4">الإشعارات</a></li>
+          <li><a href="#s5">الإعلانات مستقبلاً</a></li>
+          <li><a href="#s6">مشاركة البيانات</a></li>
+          <li><a href="#s7">الأمان والحقوق</a></li>
+          <li><a href="#s8">التغييرات</a></li>
+        </ol>
+      </nav>
+
       <article class="legal-card">
-        <section class="legal-section">
+        <section class="legal-section" id="s0" data-key="s0">
           <h3>مقدمة</h3>
           <p>توضّح سياسة الخصوصية هذه كيفية جمع Golden Store للبيانات واستخدامها وحمايتها عند استخدامك للموقع أو التطبيق. باستخدامك للمتجر فإنك توافق على ما ورد في هذه السياسة وعلى <a class="legal-inline-link" href="/terms">شروط الخدمة</a>.</p>
           <p>هذه السياسة نص افتراضي لأغراض الامتثال المبدئي؛ يرجى مراجعتها مع مستشار قانوني واستبدالها بالنص النهائي قبل النشر.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s1" data-key="s1">
           <h3>البيانات التي نجمعها</h3>
           <p>نجمع الحد الأدنى من البيانات اللازمة لتشغيل المتجر وتحسين تجربة الاستخدام:</p>
           <ul>
@@ -50,43 +69,45 @@
             <li>تفضيلات محفوظة محلياً على جهازك: المظهر، اللغة، سجل التحميلات، والمراجعات التي أخفيتها.</li>
           </ul>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s2" data-key="s2">
           <h3>الكوكيز والتخزين المحلي</h3>
           <p>يستخدم المتجر التخزين المحلي للمتصفح (localStorage / sessionStorage) لحفظ المظهر واللغة وتفضيلاتك وسجل التحميلات، إضافة إلى ملفات تعريف ارتباط خاصة بجلسة المصادقة عند الحاجة. لا نستخدم حالياً كوكيز تتبّع إعلانية تابعة لجهات خارجية، وأي تغيير في ذلك سيُذكر في تحديث هذه السياسة.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s3" data-key="s3">
           <h3>Firebase Auth والمصادقة</h3>
           <p>تتم المصادقة عبر خدمة Firebase Authentication من Google باستخدام حساب Google. نحن لا نحفظ كلمة مرورك ولا نصل إليها؛ نتلقّى فقط المعلومات الأساسية التي يتيحها مزوّد الهوية لإنشاء ملفك داخل المتجر والتعرّف على مراجعاتك وتقييماتك.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s4" data-key="s4">
           <h3>الإشعارات</h3>
           <p>إذا منحت الإذن، نحفظ رمز جهازك لإرسال إشعارات حول التحديثات والتطبيقات الجديدة. يمكنك إيقاف الإشعارات في أي وقت من إعدادات المتصفح/الجهاز أو من داخل المتجر.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s5" data-key="s5">
           <h3>الإعلانات مستقبلاً</h3>
           <p>قد نضيف لاحقاً خدمات إعلانية أو شركاء تحليلات لدعم استمرارية المتجر. في حال حدوث ذلك سنحدّث هذه السياسة ونوضّح أنواع البيانات التي قد تتم مشاركتها، وسنطلب الموافقة اللازمة حيثما يقتضي القانون. لا نعرض حالياً إعلانات موجّهة تعتمد على تتبّع سلوكك عبر المواقع الأخرى.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s6" data-key="s6">
           <h3>مشاركة البيانات</h3>
           <p>لا نبيع بياناتك الشخصية ولا نشاركها مع أطراف ثالثة إلا بالقدر اللازم لتشغيل الخدمة (مزوّدو المصادقة والاستضافة والإشعارات) أو عند التزام قانوني ملزم.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s7" data-key="s7">
           <h3>أمان البيانات وحقوقك</h3>
           <p>نتّخذ تدابير تقنية معقولة لحماية البيانات، مع إدراك أنّ النقل عبر الإنترنت لا يكون آمناً بنسبة 100٪. يمكنك طلب حذف حسابك وبياناتك أو تصحيحها عبر قنوات التواصل المتاحة في المتجر.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s8" data-key="s8">
           <h3>التغييرات على السياسة</h3>
           <p>قد نحدّث هذه السياسة من حين لآخر؛ سيُشار إلى تاريخ آخر تحديث في أعلى الصفحة، ويُعدّ استمرارك في استخدام المتجر بعد التحديث موافقة على النسخة المعدّلة.</p>
         </section>
       </article>
+
       <p class="legal-note">النسخة العربية هي المرجع المعتمد لهذه الصفحة. لأي استفسار تواصل معنا عبر الروابط أسفل الصفحة.</p>
     </main>
 
     <footer class="site-footer" id="siteFooter" data-active="privacy"></footer>
   </div>
 
-  <script src="/js/icons.js?v=20261105d"></script>
-  <script src="/js/lang.js?v=20261105d"></script>
-  <script src="/js/legal.js?v=20261105d"></script>
+  <script src="/js/icons.js?v=20261105e"></script>
+  <script src="/js/lang.js?v=20261105e"></script>
+  <script src="/js/legal.js?v=20261105e"></script>
+  <script src="/js/legal-content.js?v=20261105e"></script>
 </body>
 </html>

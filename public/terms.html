@@ -13,74 +13,95 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261105d">
+<link rel="stylesheet" href="/css/play.css?v=20261105e">
 </head>
 <body data-page="terms">
   <div class="shell legal-shell">
     <header class="topbar-nav legal-topbar">
-      <a class="icon-btn" href="/" aria-label="العودة للرئيسية" title="العودة للرئيسية">
+      <a class="icon-btn legal-back" href="/" aria-label="العودة للرئيسية" title="العودة للرئيسية">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 5 7 7-7 7"/><path d="M5 12h14"/></svg>
       </a>
-      <h1 class="title">شروط الخدمة</h1>
-      <span class="legal-topbar-spacer" aria-hidden="true"></span>
+      <h1 class="title legal-topbar-title">شروط الخدمة</h1>
+      <div class="legal-lang" id="legalLang"></div>
     </header>
 
-    <!-- النص القانوني أدناه هو نص افتراضي قابل للتعديل من لوحة الإدارة/المالك.
-         data-noi18n يمنع الترجمة الآلية للنصوص القانونية: النسخة العربية هي المرجع. -->
-    <main class="legal-page" data-noi18n>
-      <div class="legal-head">
+    <!-- Arabic copy is the canonical version (SEO + no machine translation).
+         legal-content.js swaps in curated EN/FR/ES when the language changes. -->
+    <main class="legal-page" data-noi18n data-legal-page="terms">
+      <section class="legal-hero" aria-labelledby="legalTitle">
         <img class="legal-logo" src="/images/logo.png" alt="Golden Store">
-        <h2>شروط الخدمة</h2>
-        <p class="legal-updated">آخر تحديث: 5 نوفمبر 2026</p>
-        <p class="legal-lead">يرجى قراءة هذه الشروط قبل استخدام المتجر أو تسجيل الدخول إليه.</p>
-      </div>
+        <div class="legal-hero-copy">
+          <span class="legal-kicker">الصفحات القانونية</span>
+          <h2 id="legalTitle">شروط الخدمة</h2>
+          <p class="legal-lead">يرجى قراءة هذه الشروط قبل استخدام المتجر أو تسجيل الدخول إليه.</p>
+          <span class="legal-updated">آخر تحديث: 5 نوفمبر 2026</span>
+        </div>
+      </section>
+
+      <nav class="legal-toc" aria-label="محتويات الصفحة">
+        <h3 class="legal-toc-title">محتويات الصفحة</h3>
+        <ol class="legal-toc-list">
+          <li><a href="#s0">قبول الشروط</a></li>
+          <li><a href="#s1">استخدام الخدمة</a></li>
+          <li><a href="#s2">الحسابات</a></li>
+          <li><a href="#s3">ملفات APK</a></li>
+          <li><a href="#s4">الملكية الفكرية</a></li>
+          <li><a href="#s5">الإعلانات والروابط</a></li>
+          <li><a href="#s6">إخلاء المسؤولية</a></li>
+          <li><a href="#s7">الإنهاء والتعديلات</a></li>
+          <li><a href="#s8">القانون والتواصل</a></li>
+        </ol>
+      </nav>
+
       <article class="legal-card">
-        <section class="legal-section">
+        <section class="legal-section" id="s0" data-key="s0">
           <h3>قبول الشروط</h3>
           <p>باستخدامك لمتجر Golden Store أو بتسجيل الدخول إليه، فإنك تُقرّ بأنك قرأت هذه الشروط ووافقت عليها، ووافقت أيضاً على <a class="legal-inline-link" href="/privacy">سياسة الخصوصية</a>. إذا كنت لا توافق، يرجى التوقّف عن استخدام المتجر.</p>
           <p>هذه الشروط نص افتراضي لأغراض الامتثال المبدئي؛ يرجى مراجعته مع مستشار قانوني قبل النشر.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s1" data-key="s1">
           <h3>استخدام الخدمة</h3>
           <p>يلتزم المستخدم باستخدام المتجر لأغراض شخصية وقانونية فقط، ويمنع أي محاولة للعبث بالخدمة، أو التحميل الآلي المكثّف، أو تجاوز قيود الوصول، أو نشر محتوى غير قانوني أو مسيء في التقييمات والمراجعات.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s2" data-key="s2">
           <h3>الحسابات</h3>
           <p>يتم إنشاء حسابك عبر تسجيل الدخول بحساب Google. أنت مسؤول عن الحفاظ على أمان جهازك وحسابك، ويجب أن تكون المعلومات التي تقدّمها صحيحة. يحقّ للإدارة تعليق الحسابات المخالفة لهذه الشروط.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s3" data-key="s3">
           <h3>ملفات APK والتنزيلات</h3>
           <p>قد يتطلّب تثبيت بعض التطبيقات تفعيل خيار «التثبيت من مصادر غير معروفة» على جهازك. يتم ذلك بمسؤوليتك الكاملة؛ تحقّق من مصدر الملف ومن الأذونات التي يطلبها قبل التثبيت. لا يقدّم المتجر أي ضمان بأنّ ملفاً ما يعمل على جهازك أو يخلو من الأخطاء.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s4" data-key="s4">
           <h3>الملكية الفكرية</h3>
           <p>العلامات والأسماء والشعارات وحقوق التطبيقات تعود لأصحابها. يعرض المتجر المحتوى لأغراض التعريف والوصول إليه، ولا يدّعي ملكية تطبيقات الأطراف الثالثة. لأي اعتراض على حقوق الملكية، تواصل معنا لإزالة المحتوى المعنيّ.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s5" data-key="s5">
           <h3>الإعلانات والروابط الخارجية</h3>
           <p>قد يحتوي المتجر مستقبلاً على إعلانات أو روابط لمواقع خارجية. لا نتحمّل مسؤولية محتوى تلك المواقع أو ممارساتها، ويخضع استخدامك لها لشروطها وسياساتها الخاصة.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s6" data-key="s6">
           <h3>إخلاء المسؤولية</h3>
           <p>تُقدَّم الخدمة «كما هي» دون ضمانات صريحة أو ضمنية. لا نتحمّل مسؤولية الأضرار غير المباشرة أو فقدان البيانات الناتج عن استخدام المتجر أو تنزيل أي ملف، إلى الحد الذي يسمح به القانون.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s7" data-key="s7">
           <h3>الإنهاء والتعديلات</h3>
-          <p>يحقّ لنا تعديل هذه الشروط أو إيقاف الخدمة أو جزء منها في أي وقت، مع الإشارة إلى تاريخ آخر تحديث. يستمرّ ما لا يتعارض مع التعديل من بنود الشروط السابقة إلى حين استبدالها.</p>
+          <p>يحقّ لنا تعديل هذه الشروط أو إيقاف الخدمة أو جزء منها في أي وقت، مع الإشارة إلى تاريخ آخر تحديث.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s8" data-key="s8">
           <h3>القانون المعمول به والتواصل</h3>
           <p>تخضع هذه الشروط للقوانين المعمول بها في بلد المستخدم، مع السعي أولاً إلى حلّ أي نزاع ودياً عبر قنوات التواصل المتاحة داخل المتجر أو عبر <a class="legal-inline-link" href="https://goldenstore.online" target="_blank" rel="noopener noreferrer" dir="ltr">goldenstore.online</a>.</p>
         </section>
       </article>
+
       <p class="legal-note">النسخة العربية هي المرجع المعتمد لهذه الصفحة. لأي استفسار تواصل معنا عبر الروابط أسفل الصفحة.</p>
     </main>
 
     <footer class="site-footer" id="siteFooter" data-active="terms"></footer>
   </div>
 
-  <script src="/js/icons.js?v=20261105d"></script>
-  <script src="/js/lang.js?v=20261105d"></script>
-  <script src="/js/legal.js?v=20261105d"></script>
+  <script src="/js/icons.js?v=20261105e"></script>
+  <script src="/js/lang.js?v=20261105e"></script>
+  <script src="/js/legal.js?v=20261105e"></script>
+  <script src="/js/legal-content.js?v=20261105e"></script>
 </body>
 </html>

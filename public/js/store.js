@@ -851,6 +851,12 @@ function requireAuth() {
     authConsent.addEventListener('change', () => {
       if (consentAccepted(authConsent)) authConsent.classList.remove('consent-error');
     });
+    // Keep the consent row directly BELOW the Google button (matches login.html).
+    const authGoogleBtn = card.querySelector('.auth-google-btn');
+    if (authGoogleBtn && authConsent.parentNode) {
+      authConsent.remove();
+      authGoogleBtn.after(authConsent);
+    }
     overlay.append(card);
     document.body.append(overlay);
   });
@@ -879,6 +885,12 @@ function showAuthGate() {
   );
   gate.append(inner);
   document.body.append(gate);
+  // Keep the consent row directly BELOW the Google button (matches login.html).
+  const gateGoogleBtn = gate.querySelector('.auth-google-btn');
+  if (gateGoogleBtn && gateConsent.parentNode) {
+    gateConsent.remove();
+    gateGoogleBtn.after(gateConsent);
+  }
   document.body.style.overflow = 'hidden';
 
   const btn = gate.querySelector('.gbtn');

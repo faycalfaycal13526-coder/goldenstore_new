@@ -13,43 +13,58 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261105d">
+<link rel="stylesheet" href="/css/play.css?v=20261105e">
 </head>
 <body data-page="about">
   <div class="shell legal-shell">
     <header class="topbar-nav legal-topbar">
-      <a class="icon-btn" href="/" aria-label="العودة للرئيسية" title="العودة للرئيسية">
+      <a class="icon-btn legal-back" href="/" aria-label="العودة للرئيسية" title="العودة للرئيسية">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 5 7 7-7 7"/><path d="M5 12h14"/></svg>
       </a>
-      <h1 class="title">من نحن</h1>
-      <span class="legal-topbar-spacer" aria-hidden="true"></span>
+      <h1 class="title legal-topbar-title">من نحن</h1>
+      <div class="legal-lang" id="legalLang"></div>
     </header>
 
-    <!-- النص القانوني أدناه هو نص افتراضي قابل للتعديل من لوحة الإدارة/المالك.
-         data-noi18n يمنع الترجمة الآلية للنصوص القانونية: النسخة العربية هي المرجع. -->
-    <main class="legal-page" data-noi18n>
-      <div class="legal-head">
+    <!-- Arabic copy is the canonical version (SEO + no machine translation).
+         legal-content.js swaps in curated EN/FR/ES when the language changes. -->
+    <main class="legal-page" data-noi18n data-legal-page="about">
+      <section class="legal-hero" aria-labelledby="legalTitle">
         <img class="legal-logo" src="/images/logo.png" alt="Golden Store">
-        <h2>من نحن</h2>
-        <p class="legal-updated">آخر تحديث: 5 نوفمبر 2026</p>
-        <p class="legal-lead">متجرك العربي للتطبيقات والألعاب.</p>
-      </div>
+        <div class="legal-hero-copy">
+          <span class="legal-kicker">الصفحات القانونية</span>
+          <h2 id="legalTitle">من نحن</h2>
+          <p class="legal-lead">متجرك العربي للتطبيقات والألعاب.</p>
+          <span class="legal-updated">آخر تحديث: 5 نوفمبر 2026</span>
+        </div>
+      </section>
+
+      <nav class="legal-toc" aria-label="محتويات الصفحة">
+        <h3 class="legal-toc-title">محتويات الصفحة</h3>
+        <ol class="legal-toc-list">
+          <li><a href="#s0">من نحن</a></li>
+          <li><a href="#s1">الموقع الرسمي</a></li>
+          <li><a href="#s2">رسالتنا</a></li>
+          <li><a href="#s3">ما نقدّمه</a></li>
+          <li><a href="#s4">تواصل معنا</a></li>
+        </ol>
+      </nav>
+
       <article class="legal-card">
-        <section class="legal-section">
+        <section class="legal-section" id="s0" data-key="s0">
           <h3>من نحن</h3>
           <p>Golden Store هو متجر عربي مستقل للتطبيقات والألعاب، يوفّر واجهة سهلة وآمنة لاكتشاف المحتوى وتنزيله على أجهزة Android. أُطلق المتجر ليكون مساحة تجمع المستخدمين حول التطبيقات والألعاب مع تجربة تصفّح سريعة وواضحة باللغة العربية.</p>
           <p>هذا النص تعريفي افتراضي مختصر، يمكنك تعديله لاحقاً ليعكس هوية المتجر ورسالته وفريقه.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s1" data-key="s1">
           <h3>الموقع الرسمي</h3>
           <p>يمكنك زيارة الموقع الرسمي للمتجر والاطلاع على آخر التحديثات من خلال الرابط التالي:</p>
           <p><a class="legal-inline-link" href="https://goldenstore.online" target="_blank" rel="noopener noreferrer" dir="ltr">https://goldenstore.online</a></p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s2" data-key="s2">
           <h3>رسالتنا</h3>
           <p>نسعى إلى تقديم تجربة تنزيل بسيطة، مع معلومات واضحة عن كل تطبيق: الاسم، المطوّر، الحجم، الإصدار، التقييمات ولقطات الشاشة، دون تعقيد أو خطوات غير ضرورية.</p>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s3" data-key="s3">
           <h3>ما نقدّمه</h3>
           <p>تصفّح التطبيقات والألعاب حسب الفئة، البحث، التقييم والمراجعات، مكتبة التحميلات، الإشعارات، ومتابعة التحديثات — مع واجهة متجاوبة تعمل على الهاتف والحاسوب.</p>
           <ul>
@@ -59,19 +74,21 @@
             <li>دعم اللغات العربية والإنجليزية والفرنسية والإسبانية.</li>
           </ul>
         </section>
-        <section class="legal-section">
+        <section class="legal-section" id="s4" data-key="s4">
           <h3>تواصل معنا</h3>
           <p>لأي استفسار أو اقتراح، يمكنك التواصل معنا عبر روابط التواصل المتاحة في صفحة الإعدادات داخل المتجر، أو عبر الموقع الرسمي.</p>
         </section>
       </article>
+
       <p class="legal-note">النسخة العربية هي المرجع المعتمد لهذه الصفحة. لأي استفسار تواصل معنا عبر الروابط أسفل الصفحة.</p>
     </main>
 
     <footer class="site-footer" id="siteFooter" data-active="about"></footer>
   </div>
 
-  <script src="/js/icons.js?v=20261105d"></script>
-  <script src="/js/lang.js?v=20261105d"></script>
-  <script src="/js/legal.js?v=20261105d"></script>
+  <script src="/js/icons.js?v=20261105e"></script>
+  <script src="/js/lang.js?v=20261105e"></script>
+  <script src="/js/legal.js?v=20261105e"></script>
+  <script src="/js/legal-content.js?v=20261105e"></script>
 </body>
 </html>

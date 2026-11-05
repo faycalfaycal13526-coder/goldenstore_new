@@ -245,6 +245,10 @@
     'حسابك': { en: 'Your account', fr: 'Votre compte', es: 'Tu cuenta' },
 
     // legal pages / mandatory consent (2026-11)
+    'محتويات الصفحة': { en: 'On this page', fr: 'Sommaire', es: 'En esta página' },
+    'من نحن — Golden Store': { en: 'About us — Golden Store', fr: 'À propos — Golden Store', es: 'Sobre nosotros — Golden Store' },
+    'سياسة الخصوصية — Golden Store': { en: 'Privacy Policy — Golden Store', fr: 'Politique de confidentialité — Golden Store', es: 'Política de privacidad — Golden Store' },
+    'شروط الخدمة — Golden Store': { en: 'Terms of Service — Golden Store', fr: 'Conditions d’utilisation — Golden Store', es: 'Términos del servicio — Golden Store' },
     'من نحن': { en: 'About us', fr: 'À propos', es: 'Sobre nosotros' },
     'سياسة الخصوصية': { en: 'Privacy Policy', fr: 'Politique de confidentialité', es: 'Política de privacidad' },
     'شروط الخدمة': { en: 'Terms of Service', fr: 'Conditions d’utilisation', es: 'Términos del servicio' },

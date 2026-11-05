@@ -509,6 +509,20 @@
     'تعذّر حفظ الإعداد': { en: 'Could not save setting', fr: 'Impossible d’enregistrer le paramètre', es: 'No se pudo guardar la configuración' },
     'تعذّر تسجيل الخروج، حاول مرة أخرى': { en: 'Could not sign out. Please try again.', fr: 'Impossible de vous déconnecter. Veuillez réessayer.', es: 'No se pudo cerrar la sesión. Inténtalo de nuevo.' },
 
+    // ---- Standalone support chat + admin chat UI (2026-11) ----
+    'دعم Golden Store': { en: 'Golden Store Support', fr: 'Assistance Golden Store', es: 'Soporte de Golden Store' },
+    'دعم Golden Store — محادثة': { en: 'Golden Store Support — Chat', fr: 'Assistance Golden Store — Conversation', es: 'Soporte de Golden Store — Chat' },
+    'تواصل مع فريق دعم Golden Store في محادثة مباشرة.': { en: 'Chat directly with the Golden Store support team.', fr: 'Discutez directement avec l’équipe d’assistance Golden Store.', es: 'Chatea directamente con el equipo de soporte de Golden Store.' },
+    'فريق دعم المتجر': { en: 'Store support team', fr: 'Équipe d’assistance du store', es: 'Equipo de soporte de la tienda' },
+    'مرحباً بك في دعم Golden Store. اكتب رسالتك وسنرد عليك هنا.': { en: 'Welcome to Golden Store Support. Write your message and we will reply right here.', fr: 'Bienvenue dans l’assistance Golden Store. Écrivez votre message, nous vous répondrons ici.', es: 'Bienvenido al soporte de Golden Store. Escribe tu mensaje y te responderemos aquí.' },
+    'الرسائل تصل تلقائياً دون إعادة تحميل الصفحة.': { en: 'Messages arrive automatically without reloading the page.', fr: 'Les messages arrivent automatiquement sans recharger la page.', es: 'Los mensajes llegan automáticamente sin recargar la página.' },
+    'اكتب رسالة…': { en: 'Write a message…', fr: 'Écrivez un message…', es: 'Escribe un mensaje…' },
+    'رسالة جديدة': { en: 'New message', fr: 'Nouveau message', es: 'Mensaje nuevo' },
+    'جارٍ تحميل المحادثة…': { en: 'Loading conversation…', fr: 'Chargement de la conversation…', es: 'Cargando conversación…' },
+    'تعذّر تحميل المحادثة': { en: 'Could not load the conversation', fr: 'Impossible de charger la conversation', es: 'No se pudo cargar la conversación' },
+    'المحادثات': { en: 'Conversations', fr: 'Conversations', es: 'Conversaciones' },
+    'عرض المحادثات': { en: 'Back to conversations', fr: 'Retour aux conversations', es: 'Volver a las conversaciones' },
+
     // ---- Support chat (2026-11): account page + admin replies ----
     'الدعم والمساعدة': { en: 'Help & support', fr: 'Aide et assistance', es: 'Ayuda y soporte' },
     'راسل فريق المتجر وسنرد عليك هنا في نفس المحادثة.': { en: 'Message the store team and we will reply right here in the same conversation.', fr: 'Écrivez à l’équipe du store, nous vous répondrons ici dans la même conversation.', es: 'Escribe al equipo de la tienda y te responderemos aquí en la misma conversación.' },

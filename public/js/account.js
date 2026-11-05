@@ -3,13 +3,9 @@
   const S = window.Store;
   const { el, ico, formatBytes, formatDate, toast, t, getQuery } = S;
   const root = document.getElementById('root');
-  // Single contact CTA: Telegram only (social links were removed).
+  // Telegram invite + one link to the standalone support chat.
   // Declared before S.ready() because its callback may run synchronously.
   const TELEGRAM_URL = 'https://t.me/goldenstore_10';
-  // Declared before S.ready(): its callback may run synchronously (TDZ guard).
-  let supportPollTimer = null;
-  const supportDrafts = Object.create(null);
-
   const isNativeApp = () => !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
 
   // Module-level refs so native package events can refresh library rows after
@@ -386,7 +382,7 @@
           langSettingItem(),
         ),
         telegramCard(),
-        supportCard(),
+        supportEntry(),
         legalLinksCard(),
         el('div', { class: 'account-actions' },
           el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
@@ -487,149 +483,16 @@
     document.body.append(overlay);
   }
 
-  /* ---------------------------- Support chat ---------------------------- */
-  // One thread per topic. The user posts a message, the admin replies from the
-  // dashboard, and polling (every 10s) pulls the answer without a reload.
-  function supportCard() {
-    if (supportPollTimer) { clearInterval(supportPollTimer); supportPollTimer = null; }
-
-    const subjectInput = el('input', {
-      class: 'support-input support-subject', type: 'text', maxlength: '120',
-      placeholder: t('الموضوع (اختياري)'), 'aria-label': t('موضوع الرسالة'),
-      'data-draft': 'new-subject',
-    });
-    const messageInput = el('textarea', {
-      class: 'support-input support-message', rows: '3', maxlength: '2000',
-      placeholder: t('اكتب رسالتك هنا…'), 'aria-label': t('رسالة الدعم'),
-      'data-draft': 'new-message', required: 'required',
-    });
-    const sendBtn = el('button', { class: 'btn btn-primary support-send', type: 'submit' },
-      ico('send', 'icon icon-sm'), t('إرسال الرسالة'));
-    const form = el('form', { class: 'support-form', onsubmit: async (e) => {
-      e.preventDefault();
-      const message = messageInput.value.trim();
-      if (message.length < 2) { messageInput.focus(); return; }
-      sendBtn.disabled = true;
-      try {
-        await S.authedApi('/api/support/threads', {
-          method: 'POST',
-          body: { subject: subjectInput.value.trim(), message },
-        });
-        subjectInput.value = ''; messageInput.value = '';
-        supportDrafts['new-subject'] = ''; supportDrafts['new-message'] = '';
-        toast(t('تم إرسال الرسالة'), 'success');
-        await load(false, true);
-      } catch (err) {
-        toast(t('تعذّر إرسال الرسالة'), 'error');
-      } finally { sendBtn.disabled = false; }
-    } }, subjectInput, messageInput, sendBtn);
-
-    const threadsEl = el('div', { class: 'support-threads', 'aria-live': 'polite' });
-    const card = el('section', { class: 'support-card', 'aria-label': t('الدعم والمساعدة') },
-      el('div', { class: 'support-card-head' },
-        el('span', { class: 'support-card-icon' }, ico('message', 'icon')),
-        el('h3', null, t('الدعم والمساعدة')),
-      ),
-      el('p', { class: 'support-card-text' },
-        t('راسل فريق المتجر وسنرد عليك هنا في نفس المحادثة.')),
-      form,
-      el('div', { class: 'support-threads-title' }, t('محادثاتك')),
-      threadsEl,
+  // One button in "أنت" opens the standalone, full-screen support chat.
+  function supportEntry() {
+    return el('a', {
+      class: 'support-entry', href: '/support',
+      'aria-label': t('الدعم والمساعدة'),
+    },
+      ico('message', 'icon'),
+      el('span', { class: 'support-entry-label' }, t('الدعم والمساعدة')),
+      ico('chevronEnd', 'icon support-entry-chevron'),
     );
-
-    function captureDrafts() {
-      card.querySelectorAll('[data-draft]').forEach((n) => {
-        supportDrafts[n.getAttribute('data-draft')] = n.value;
-      });
-    }
-    function restoreDrafts() {
-      card.querySelectorAll('[data-draft]').forEach((n) => {
-        const v = supportDrafts[n.getAttribute('data-draft')];
-        if (typeof v === 'string') n.value = v;
-      });
-    }
-
-    function threadEl(th) {
-      const messages = Array.isArray(th.messages) ? th.messages : [];
-      const list = el('div', { class: 'support-msgs' });
-      messages.forEach((m) => list.append(
-        el('div', { class: 'support-msg ' + (m.sender === 'admin' ? 'support-msg-admin' : 'support-msg-user') },
-          el('div', { class: 'support-msg-meta' },
-            el('strong', null, m.sender === 'admin' ? t('فريق الدعم') : t('أنت')),
-            el('span', null, formatDate(m.created_at))),
-          el('div', { class: 'support-msg-body' }, m.body),
-        ),
-      ));
-
-      const replyInput = el('textarea', {
-        class: 'support-input support-reply', rows: '2', maxlength: '2000',
-        placeholder: t('اكتب ردك…'), 'aria-label': t('ردك على المحادثة'),
-        'data-draft': 'reply:' + th.id,
-      });
-      const replyBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'submit' },
-        ico('send', 'icon icon-sm'), t('إرسال'));
-      const replyForm = th.status === 'open'
-        ? el('form', { class: 'support-reply-form', onsubmit: async (e) => {
-          e.preventDefault();
-          const message = replyInput.value.trim();
-          if (message.length < 2) { replyInput.focus(); return; }
-          replyBtn.disabled = true;
-          try {
-            await S.authedApi('/api/support/threads/' + encodeURIComponent(th.id) + '/messages', {
-              method: 'POST', body: { message },
-            });
-            replyInput.value = ''; supportDrafts['reply:' + th.id] = '';
-            toast(t('تم إرسال الرسالة'), 'success');
-            await load(false, true);
-          } catch (err) {
-            toast(t('تعذّر إرسال الرسالة'), 'error');
-          } finally { replyBtn.disabled = false; }
-        } }, replyInput, replyBtn)
-        : el('div', { class: 'support-closed' }, t('المحادثة مغلقة'));
-
-      return el('div', { class: 'support-thread' },
-        el('div', { class: 'support-thread-head' },
-          el('strong', null, th.subject || t('رسالة دعم')),
-          el('span', { class: 'support-status ' + (th.status === 'open' ? 'is-open' : 'is-closed') },
-            t(th.status === 'open' ? 'مفتوحة' : 'مغلقة')),
-          el('span', { class: 'support-thread-date' }, formatDate(th.created_at)),
-        ),
-        list,
-        replyForm,
-      );
-    }
-
-    let loading = false;
-    async function load(silent, force) {
-      if (loading && !force) return;
-      loading = true;
-      try {
-        const data = await S.authedApi('/api/support/threads');
-        const threads = Array.isArray(data.threads) ? data.threads : [];
-        captureDrafts();
-        threadsEl.textContent = '';
-        if (!threads.length) {
-          threadsEl.append(el('div', { class: 'support-empty' },
-            ico('message', 'icon'), el('p', null, t('لا توجد محادثات بعد'))));
-        } else {
-          threads.forEach((th) => threadsEl.append(threadEl(th)));
-        }
-        restoreDrafts();
-      } catch (err) {
-        if (!silent) {
-          threadsEl.textContent = '';
-          threadsEl.append(el('div', { class: 'support-error' },
-            ico('info', 'icon'), el('p', null, t('تعذّر تحميل المحادثات'))));
-        }
-      } finally { loading = false; }
-    }
-
-    load(false);
-    supportPollTimer = setInterval(() => {
-      if (document.hidden || !card.isConnected) return;
-      load(true);
-    }, 10000);
-    return card;
   }
 
   // Legal pages: also reachable from the site footer on every store page.

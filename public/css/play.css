@@ -560,9 +560,9 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
 /* screenshots — portrait/square cards keep their shared height (220px mobile,
-   270px desktop). Landscape screenshots are a fixed 1280 × 720 HD (16:9)
-   frame on desktop, scaled down to fit phones/tablets via the media query
-   below (a little smaller still). object-fit: contain fills 16:9 exactly. */
+   270px desktop). Landscape is a fixed 1280 × 720 HD frame on DESKTOP, a
+   viewport-fitting frame on tablets, and a Google Play-style responsive card
+   on PHONES (width: calc(100% - 40px), 16/9, cover, next card peeking). */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -615,13 +615,12 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   flex: 0 0 auto;
   object-fit: contain;            /* 16:9 fills exactly; no crop, no stretch */
 }
-/* Phones / tablets: 1280px is far too wide, so scale the frame down to fit the
-   viewport while keeping the exact 16:9 ratio. Trimmed a further ~10% so it
-   feels less dominant on a phone: 640px -> 576px cap, and (100vw - 40px)
-   -> (90vw - 36px), which is exactly 0.9 x the previous width at every size.
-   Both the card and the image read these two variables, so only the variables
-   need overriding. Desktop (>=960px) keeps the full HD 1280 × 720 frame. */
-@media (max-width: 959px) {
+/* Tablets / small windows (541–959px): 1280px is too wide, so scale the frame
+   down while keeping the exact 16:9 ratio. Only the two variables are needed —
+   the card, its min-width and the image all read them. Phones (<=540px) get the
+   Google Play layout below and never use these fixed values. Desktop (>=960px)
+   keeps the full HD 1280 × 720 frame, untouched. */
+@media (min-width: 541px) and (max-width: 959px) {
   .shot-card.is-landscape {
     --landscape-w: min(576px, calc(90vw - 36px));
     --landscape-h: calc(var(--landscape-w) * 9 / 16);
@@ -2325,7 +2324,33 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .applist > a.approw[href^="/search?category="] > .icon:last-child { display: none; }
 
 @media (max-width: 540px) {
-  /* portrait cards inherit --shot-h: 220px; landscape uses the <960px frame */
+  /* Google Play-style landscape screenshots on PHONES ONLY.
+     The desktop 1280px width is completely unused here: every property that
+     reads --landscape-w / --landscape-h is overridden below. */
+  .shot-card.is-landscape {
+    width: calc(100% - 40px);   /* full image on screen + a peek of the next */
+    height: auto;               /* height comes from the aspect ratio */
+    min-width: 0;               /* clear the desktop HD min-width */
+    aspect-ratio: 16 / 9;
+    align-self: center;         /* .shots is align-items:stretch — don't stretch */
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;   /* one swipe = one screenshot */
+  }
+  .shot-card.is-landscape .shot-img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-width: none;            /* override global img { max-width: 100% } */
+    object-fit: cover;          /* fills the 16:9 card exactly, no letterbox */
+  }
+  /* Swiping is only for moving to the next screenshot, never for panning
+     inside one. Snap to each card's start, aligned with the strip's padding. */
+  .shots:has(.shot-card.is-landscape) {
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline-start: 16px;
+  }
+  /* portrait cards still inherit --shot-h: 220px — unchanged */
   .lb-stage { padding: 68px 12px 8px; }
   .lb-footer { padding-bottom: 12px; }
   .lb-thumb { width: 52px; height: 52px; }

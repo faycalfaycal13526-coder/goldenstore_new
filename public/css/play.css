@@ -2039,25 +2039,25 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   overflow: hidden !important;
 }
 
+/* The cancel button already contains ico('close') — an X-shaped SVG.
+   An old "split button" override injected a literal '?' via ::before and hid
+   that SVG. Neutralise the pseudo-element and show the real X icon instead. */
 .install-group.split-active .download-cancel-btn::before,
 .install-group.split-active .install-cancel-btn::before {
-  content: '?' !important;
-  display: block !important;
-  font-size: 22px !important;
-  font-weight: 400 !important;
-  color: #ffffff !important;
-  line-height: 1 !important;
-  font-family: Arial, sans-serif !important;
+  content: none !important;
+  display: none !important;
 }
 
-.install-group.split-active .download-cancel-btn svg,
-.install-group.split-active .download-cancel-btn .icon,
-.install-group.split-active .install-cancel-btn svg,
-.install-group.split-active .install-cancel-btn .icon {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-  opacity: 0 !important;
+.install-group.split-active .download-cancel-btn svg.icon,
+.install-group.split-active .install-cancel-btn svg.icon {
+  display: block !important;
+  width: 22px !important;
+  height: 22px !important;
+  opacity: 1 !important;
+  color: #ffffff !important;
+  stroke: currentColor !important;
+  fill: none !important;
+  flex: 0 0 auto !important;
 }
 
 .install-group.split-active .install-caret,

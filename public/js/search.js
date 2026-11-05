@@ -6,6 +6,14 @@
   const root = document.getElementById('root');
   S.bottomNav('');
 
+  // Static head strings are translated too (lang.js only walks <body>).
+  // This runs at parse time, before lang.js' DOMContentLoaded title pass.
+  document.title = t('بحث') + ' — Golden Store';
+  try {
+    const desc = document.querySelector('meta[name="description"]');
+    if (desc) desc.setAttribute('content', t('ابحث عن التطبيقات والألعاب في Golden Store.'));
+  } catch (e) {}
+
   const PAGE_SIZE = 20;
   const DEBOUNCE = 250;
 
@@ -25,6 +33,16 @@
     class: 'ms-ico', type: 'button', 'aria-label': t('مسح'), title: t('مسح'),
     onclick: () => { input.value = ''; state.q = ''; syncUrl(); run(); input.focus(); },
   }, ico('close'));
+  // Language switcher lives inside the bar so the page is fully translated
+  // without having to leave it. Uses the shared GSI18N control when available.
+  const langBox = el('div', { class: 'ms-lang' });
+  let switcher = null;
+  try { if (typeof S.langSwitcherEl === 'function') switcher = S.langSwitcherEl(); } catch (e) {}
+  if ((!switcher || switcher.nodeType !== 1) && window.GSI18N && typeof window.GSI18N.switcherEl === 'function') {
+    try { switcher = window.GSI18N.switcherEl(); } catch (e) {}
+  }
+  if (switcher && switcher.nodeType === 1) langBox.append(switcher);
+
   const bar = el('div', { class: 'ms-bar' },
     el('div', { class: 'ms-bar-inner' },
       el('button', {
@@ -36,6 +54,7 @@
         input,
         clearBtn,
       ),
+      langBox,
     ),
   );
 
@@ -79,10 +98,11 @@
   }
 
   function paintHeader() {
+    const unit = (one, many) => t(total === 1 ? one : many);
     titleEl.textContent = state.q ? t('نتائج البحث') : t('الأكثر تحميلاً');
     countEl.textContent = state.q
-      ? '«' + state.q + '» · ' + S.formatCount(total) + ' ' + t('نتيجة')
-      : S.formatCount(total) + ' ' + t('تطبيق');
+      ? '«' + state.q + '» · ' + S.formatCount(total) + ' ' + unit('نتيجة', 'نتائج')
+      : S.formatCount(total) + ' ' + unit('تطبيق', 'تطبيقات');
     clearBtn.classList.toggle('hidden', !state.q);
   }
 

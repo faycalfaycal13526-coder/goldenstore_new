@@ -249,7 +249,15 @@
     'الأكثر تحميلاً': { en: 'Most downloaded', fr: 'Les plus téléchargés', es: 'Los más descargados' },
     'جرّب كلمة أخرى أو تحقّق من الكتابة.': { en: 'Try another word or check the spelling.', fr: 'Essayez un autre mot ou vérifiez l’orthographe.', es: 'Prueba otra palabra o revisa la ortografía.' },
     'ستظهر التطبيقات هنا فور إضافتها.': { en: 'Apps will appear here as soon as they are added.', fr: 'Les applications apparaîtront ici dès leur ajout.', es: 'Las apps aparecerán aquí en cuanto se añadan.' },
-    'نتيجة': { en: 'results', fr: 'résultats', es: 'resultados' },
+    'نتيجة': { en: 'result', fr: 'résultat', es: 'resultado' },
+    'نتائج': { en: 'results', fr: 'résultats', es: 'resultados' },
+    'تطبيقات': { en: 'apps', fr: 'applications', es: 'aplicaciones' },
+    'بحث — Golden Store': { en: 'Search — Golden Store', fr: 'Recherche — Golden Store', es: 'Buscar — Golden Store' },
+    'ابحث عن التطبيقات والألعاب في Golden Store.': {
+      en: 'Search apps and games on Golden Store.',
+      fr: 'Recherchez des applications et des jeux sur Golden Store.',
+      es: 'Busca aplicaciones y juegos en Golden Store.',
+    },
 
     // legal pages / mandatory consent (2026-11)
     'محتويات الصفحة': { en: 'On this page', fr: 'Sommaire', es: 'En esta página' },
@@ -781,7 +789,8 @@
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'icon-btn lang-btn';
-    btn.setAttribute('aria-label', 'Language');
+    btn.setAttribute('aria-label', t('اللغة'));
+    btn.setAttribute('title', t('اللغة'));
     try { btn.appendChild(window.GSIcons.iconEl('globe', 'icon')); } catch (e) {}
     var code = document.createElement('span');
     code.className = 'lang-code';

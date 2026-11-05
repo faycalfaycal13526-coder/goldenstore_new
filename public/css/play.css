@@ -2623,6 +2623,9 @@ html[dir="ltr"] .legal-back .icon { transform: scaleX(-1); }
 .ms-ico:hover { background: var(--surface-2); color: var(--text); }
 .ms-ico.hidden { display: none; }
 .ms-ico .icon { width: 20px; height: 20px; }
+.ms-lang { flex: 0 0 auto; display: inline-flex; align-items: center; }
+.ms-lang .lang-btn.icon-btn { height: 40px; min-width: 44px; border-radius: 999px; }
+.ms-lang .lang-menu { z-index: 80; }
 html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); }
 
 .ms-main { max-width: var(--maxw); margin: 0 auto; padding: 22px 16px 28px; }
@@ -2679,4 +2682,8 @@ html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); 
   .ms-title { font-size: 20px; }
   .ms-row { padding: 10px; gap: 10px; }
   .ms-art { width: 48px; height: 48px; border-radius: 14px; }
+  .ms-lang .lang-btn.icon-btn { height: 38px; min-width: 38px; padding: 0 6px; }
+}
+@media (max-width: 360px) {
+  .ms-lang .lang-code { display: none; }
 }

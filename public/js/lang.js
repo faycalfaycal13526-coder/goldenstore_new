@@ -244,19 +244,12 @@
     'جار تسجيل الدخول…': { en: 'Signing in…', fr: 'Connexion…', es: 'Iniciando sesión…' },
     'حسابك': { en: 'Your account', fr: 'Votre compte', es: 'Tu cuenta' },
 
-    // advanced search (2026-11)
-    'الفلاتر': { en: 'Filters', fr: 'Filtres', es: 'Filtros' },
-    'تصفية النتائج': { en: 'Filter results', fr: 'Filtrer les résultats', es: 'Filtrar resultados' },
-    'الكل': { en: 'All', fr: 'Tout', es: 'Todos' },
-    'الترتيب': { en: 'Sort by', fr: 'Trier par', es: 'Ordenar por' },
-    'الأحدث': { en: 'Newest', fr: 'Plus récents', es: 'Más recientes' },
-    'الأكثر شعبية': { en: 'Most popular', fr: 'Les plus populaires', es: 'Más populares' },
-    'أقل تقييم': { en: 'Minimum rating', fr: 'Note minimale', es: 'Valoración mínima' },
-    'مسح الفلاتر': { en: 'Clear filters', fr: 'Effacer les filtres', es: 'Borrar filtros' },
-    'كل التصنيفات': { en: 'All categories', fr: 'Toutes les catégories', es: 'Todas las categorías' },
+    // minimal search (2026-11)
+    'ابحث عن تطبيق أو لعبة أو مطوّر': { en: 'Search apps, games or developers', fr: 'Rechercher apps, jeux ou développeurs', es: 'Buscar apps, juegos o desarrolladores' },
+    'الأكثر تحميلاً': { en: 'Most downloaded', fr: 'Les plus téléchargés', es: 'Los más descargados' },
+    'جرّب كلمة أخرى أو تحقّق من الكتابة.': { en: 'Try another word or check the spelling.', fr: 'Essayez un autre mot ou vérifiez l’orthographe.', es: 'Prueba otra palabra o revisa la ortografía.' },
+    'ستظهر التطبيقات هنا فور إضافتها.': { en: 'Apps will appear here as soon as they are added.', fr: 'Les applications apparaîtront ici dès leur ajout.', es: 'Las apps aparecerán aquí en cuanto se añadan.' },
     'نتيجة': { en: 'results', fr: 'résultats', es: 'resultados' },
-    'عرض كل النتائج': { en: 'See all results', fr: 'Voir tous les résultats', es: 'Ver todos los resultados' },
-    'جرّب كلمات أخرى أو أزل بعض الفلاتر.': { en: 'Try other keywords or remove some filters.', fr: 'Essayez d’autres mots-clés ou retirez des filtres.', es: 'Prueba otras palabras o quita algunos filtros.' },
 
     // legal pages / mandatory consent (2026-11)
     'محتويات الصفحة': { en: 'On this page', fr: 'Sommaire', es: 'En esta página' },

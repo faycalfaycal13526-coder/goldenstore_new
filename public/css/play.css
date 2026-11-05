@@ -2688,55 +2688,69 @@ html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); 
    Standalone chat UI — shared by /support and the admin Support tab.
    ===================================================================== */
 :root {
-  /* Golden chat palette (dark) */
-  --wa-bg: #14110a;
-  --wa-head: #241e0e;
-  --wa-compose: #241e0e;
-  --wa-input: #322a14;
-  --wa-in: #26210f;
-  --wa-out: #7a5c08;
-  --wa-out-text: #fff6d8;
-  --wa-text: #f3ead3;
-  --wa-sub: #c3b283;
-  --wa-accent: var(--gold);
-  --wa-accent-ink: var(--gold-ink);
-  --wa-tick: var(--gold-2);
-  --wa-line: rgba(244,192,31,.16);
-  --wa-pattern: rgba(244,192,31,.06);
-  --wa-day-bg: rgba(244,192,31,.14);
-  --wa-day-text: #f0dba2;
+  /* Chat: pure black background, golden bubbles + send button (dark) */
+  --wa-bg: #000000;
+  --wa-head: #000000;
+  --wa-compose: #000000;
+  --wa-input: #0d0d0d;
+  --wa-in: #f4c01f;
+  --wa-out: #ffd54a;
+  --wa-in-tail: #e6b325;
+  --wa-out-tail: #c99206;
+  --wa-in-grad: linear-gradient(135deg, #ffe9a8, #e6b325);
+  --wa-out-grad: linear-gradient(135deg, #f4c01f, #c99206);
+  --wa-bubble-text: #2a1c00;
+  --wa-bubble-meta: rgba(42,28,0,.68);
+  --wa-bubble-link: #6b4e00;
+  --wa-out-text: #2a1c00;
+  --wa-text: #ffffff;
+  --wa-sub: #b8b8b8;
+  --wa-accent: #f4c01f;
+  --wa-accent-ink: #1a1400;
+  --wa-tick: #6b4e00;
+  --wa-line: rgba(244,192,31,.28);
+  --wa-pattern: transparent;
+  --wa-day-bg: rgba(244,192,31,.16);
+  --wa-day-text: #ffe08a;
   --wa-notice: rgba(244,192,31,.12);
-  --wa-notice-text: #f0dba2;
-  --wa-shadow: 0 1px .5px rgba(0,0,0,.28);
-  --wa-avatar-bg: #2a220c;
-  --wa-avatar-ring: rgba(244,192,31,.55);
+  --wa-notice-text: #ffe08a;
+  --wa-shadow: 0 1px .5px rgba(0,0,0,.55);
+  --wa-avatar-bg: #0a0a0a;
+  --wa-avatar-ring: rgba(244,192,31,.65);
 }
 :root[data-theme="light"] {
-  /* Golden chat palette (light) */
-  --wa-bg: #f7efdc;
-  --wa-head: #fffaf0;
-  --wa-compose: #fffaf0;
-  --wa-input: #ffffff;
-  --wa-in: #ffffff;
-  --wa-out: #ffe9a8;
-  --wa-out-text: #332700;
-  --wa-text: #2a2208;
-  --wa-sub: #7d6b3c;
-  --wa-accent: #c79a06;
-  --wa-accent-ink: #ffffff;
-  --wa-tick: #a87f00;
-  --wa-line: rgba(199,154,6,.22);
-  --wa-pattern: rgba(160,124,10,.07);
-  --wa-day-bg: rgba(199,154,6,.18);
+  /* Chat: pure white background, golden bubbles + send button (light) */
+  --wa-bg: #ffffff;
+  --wa-head: #ffffff;
+  --wa-compose: #ffffff;
+  --wa-input: #f4f4f4;
+  --wa-in: #ffe08a;
+  --wa-out: #f4c01f;
+  --wa-in-tail: #e6b325;
+  --wa-out-tail: #c99206;
+  --wa-in-grad: linear-gradient(135deg, #fff3c4, #e6b325);
+  --wa-out-grad: linear-gradient(135deg, #f4c01f, #c99206);
+  --wa-bubble-text: #2a1c00;
+  --wa-bubble-meta: rgba(42,28,0,.68);
+  --wa-bubble-link: #6b4e00;
+  --wa-out-text: #2a1c00;
+  --wa-text: #111111;
+  --wa-sub: #666666;
+  --wa-accent: #d9a406;
+  --wa-accent-ink: #1a1400;
+  --wa-tick: #6b4e00;
+  --wa-line: rgba(199,154,6,.32);
+  --wa-pattern: transparent;
+  --wa-day-bg: rgba(199,154,6,.14);
   --wa-day-text: #6b5713;
-  --wa-notice: rgba(199,154,6,.15);
+  --wa-notice: rgba(199,154,6,.12);
   --wa-notice-text: #6b5713;
-  --wa-shadow: 0 1px .5px rgba(90,70,0,.14);
-  --wa-avatar-bg: #2a220c;
+  --wa-shadow: 0 1px .5px rgba(0,0,0,.12);
+  --wa-avatar-bg: #fff8dc;
   --wa-avatar-ring: rgba(199,154,6,.6);
 }
-body.wa-page { margin: 0; overflow: hidden; background: #0f0d07; }
-:root[data-theme="light"] body.wa-page { background: #e8dcbd; }
+body.wa-page { margin: 0; overflow: hidden; background: #000000; }
+:root[data-theme="light"] body.wa-page { background: #ffffff; }
 .wa-app {
   position: fixed; inset: 0; z-index: 1;
   display: flex; flex-direction: column;
@@ -2804,21 +2818,27 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
 .wa-bubble {
   position: relative; max-width: min(82%, 460px);
   padding: 7px 9px 5px; border-radius: 12px;
-  box-shadow: var(--wa-shadow); color: var(--wa-text);
+  box-shadow: var(--wa-shadow); color: var(--wa-bubble-text);
 }
-.wa-bubble.in { background: var(--wa-in); border-start-start-radius: 4px; }
-.wa-bubble.out { background: var(--wa-out); color: var(--wa-out-text); border-start-end-radius: 4px; }
+.wa-bubble.in {
+  background: var(--wa-in); background-image: var(--wa-in-grad);
+  color: var(--wa-bubble-text); border-start-start-radius: 4px;
+}
+.wa-bubble.out {
+  background: var(--wa-out); background-image: var(--wa-out-grad);
+  color: var(--wa-bubble-text); border-start-end-radius: 4px;
+}
 .wa-bubble::after {
   content: ''; position: absolute; top: 0; width: 0; height: 0;
   border: 8px solid transparent;
 }
 .wa-bubble.in::after {
   inset-inline-start: -7px;
-  border-inline-end-color: var(--wa-in); border-top-color: var(--wa-in);
+  border-inline-end-color: var(--wa-in-tail); border-top-color: var(--wa-in-tail);
 }
 .wa-bubble.out::after {
   inset-inline-end: -7px;
-  border-inline-start-color: var(--wa-out); border-top-color: var(--wa-out);
+  border-inline-start-color: var(--wa-out-tail); border-top-color: var(--wa-out-tail);
 }
 .wa-bubble-text {
   white-space: pre-wrap; overflow-wrap: anywhere;
@@ -2826,7 +2846,7 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
 }
 .wa-meta {
   display: flex; align-items: center; justify-content: flex-end; gap: 4px;
-  margin-top: 3px; font-size: 10.5px; color: var(--wa-sub);
+  margin-top: 3px; font-size: 10.5px; color: var(--wa-bubble-meta);
 }
 .wa-ticks { color: var(--wa-tick); font-size: 12px; letter-spacing: -3px; padding-inline-end: 3px; }
 .wa-day {
@@ -2872,7 +2892,9 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
   width: 46px; height: 46px; flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: 50%; background: var(--wa-accent);
+  background-image: linear-gradient(135deg, #ffe9a8, var(--wa-accent));
   color: var(--wa-accent-ink); cursor: pointer; transition: filter .15s, transform .1s;
+  box-shadow: 0 4px 14px rgba(244,192,31,.28);
 }
 .wa-send:hover { filter: brightness(1.07); }
 .wa-send:active { transform: scale(.96); }
@@ -2881,80 +2903,15 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
 .wa-send.is-busy .icon { animation: wa-pulse .8s ease-in-out infinite; }
 @keyframes wa-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 
-/* Composer tools, attachment chips, media bubbles and detected links */
 .wa-compose-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.wa-input-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; }
-.wa-input-row .wa-input-wrap { flex: 1; min-width: 0; }
-.wa-attach-tools { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.wa-compose-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.wa-tool {
-  width: 34px; height: 34px; flex: 0 0 auto;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--wa-line); border-radius: 50%;
-  background: var(--wa-input); color: var(--wa-text); cursor: pointer;
-  transition: border-color .15s, color .15s, background .15s;
-}
-.wa-tool:hover { border-color: var(--wa-accent); color: var(--wa-accent); }
-.wa-tool .icon { width: 18px; height: 18px; }
-.wa-tool.is-recording {
-  background: #b3261e; border-color: #b3261e; color: #fff;
-  animation: wa-record-pulse 1s ease-in-out infinite;
-}
-@keyframes wa-record-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(179,38,30,.45); } 50% { box-shadow: 0 0 0 6px rgba(179,38,30,0); } }
-/* Keep the native file inputs focusable and clickable (Safari/iOS refuses a
-   programmatic click on display:none inputs) but visually out of the way. */
-.wa-file-input {
-  position: absolute; left: -9999px; width: 1px; height: 1px;
-  opacity: 0; border: 0; padding: 0; margin: 0;
-}
-.wa-attach-status {
-  font-size: 11px; color: var(--wa-sub); min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.wa-attach-preview { display: flex; flex-wrap: wrap; gap: 6px; }
-.wa-attach-chip {
-  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
-  padding: 4px 6px; border-radius: 999px;
-  background: var(--wa-input); border: 1px solid var(--wa-line);
-  font-size: 11px; color: var(--wa-sub);
-}
-.wa-attach-thumb { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }
-.wa-attach-thumb.wa-attach-audio { display: inline-flex; align-items: center; justify-content: center; background: var(--wa-day-bg); color: var(--wa-accent); }
-.wa-attach-thumb.wa-attach-audio .icon { width: 14px; height: 14px; }
-.wa-attach-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wa-attach-remove {
-  width: 20px; height: 20px; flex: 0 0 auto;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 0; border-radius: 50%; background: transparent; color: var(--wa-sub); cursor: pointer;
-}
-.wa-attach-remove .icon { width: 13px; height: 13px; }
-.wa-attach-remove:hover { color: #ffb4ab; }
-
-.wa-bubble-attachments { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.wa-attachment-image-link {
-  display: block; width: fit-content; max-width: 100%;
-  border-radius: 10px; overflow: hidden; border: 1px solid var(--wa-line);
-}
-.wa-attachment-image {
-  display: block; max-width: 100%; max-height: 260px; width: auto; height: auto;
-  object-fit: contain; background: var(--wa-input);
-}
-.wa-bubble.out .wa-attachment-image-link { border-color: rgba(255,255,255,.22); }
-.wa-attachment-audio { display: flex; flex-direction: column; gap: 4px; }
-.wa-attachment-player { width: min(260px, 100%); min-width: 200px; }
-.wa-attachment-caption { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--wa-sub); }
-.wa-attachment-caption .icon { width: 13px; height: 13px; }
 .wa-link {
-  color: var(--wa-tick); text-decoration: underline; text-underline-offset: 2px;
+  color: var(--wa-bubble-link); text-decoration: underline; text-underline-offset: 2px;
   overflow-wrap: anywhere; direction: ltr; unicode-bidi: isolate;
 }
-.wa-bubble.out .wa-link { color: #fff6d8; }
+.wa-bubble.out .wa-link { color: var(--wa-bubble-link); }
 
 @media (max-width: 420px) {
   .wa-chat, .wa-admin-msgs { padding: 12px 8px 16px; }
   .wa-bubble { max-width: 86%; }
   .wa-head-title { font-size: 15px; }
-  .wa-tool { width: 32px; height: 32px; }
-  .wa-attach-name { max-width: 80px; }
-  .wa-attachment-player { min-width: 0; width: 100%; }
 }

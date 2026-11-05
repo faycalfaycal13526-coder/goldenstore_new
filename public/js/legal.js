@@ -97,7 +97,7 @@
       fetch('/api/legal/consent', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accepted: true, version: '2026-11-05' }),
+        body: JSON.stringify({ accepted: true, version: '2026-11-05r2' }),
       }).catch(function () {});
     } catch (e) {}
   }

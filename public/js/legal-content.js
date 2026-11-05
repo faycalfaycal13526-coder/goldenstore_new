@@ -1,7 +1,9 @@
 /* Golden Store — curated EN/FR/ES content for the legal pages.
    Arabic is the canonical static HTML (see about/privacy/terms.html); this file
    swaps it for reviewed translations when the UI language is not Arabic.
-   NEVER machine-translated: legal wording must be reviewed by counsel.       */
+   Revised to match the current store: Google sign-in + consent, instant search,
+   ratings/reviews, text-only support chat, clickable links and Web Push.
+   NEVER machine-translated: final wording should be reviewed by counsel. */
 (function () {
   'use strict';
   var CONTENT = {
@@ -9,55 +11,57 @@
     "about": {
       "title": "About us — Golden Store",
       "h2": "About us",
-      "lead": "Your Arabic store for apps and games.",
       "kicker": "Legal",
-      "updated": "Last updated: 5 November 2026",
+      "lead": "An independent Arabic store for apps and games, with a clear interface and four languages.",
+      "updated": "Last updated: 5 November 2026 — revised edition",
       "tocTitle": "On this page",
+      "note": "These clauses have been revised to reflect the store’s current features: Google sign-in, mandatory consent, ratings and reviews, instant search, text-only support chat, clickable links and web notifications. Final wording should be reviewed by counsel.",
       "toc": [
         "About us",
         "Official website",
         "Our mission",
-        "What we offer",
-        "Contact"
+        "Current features",
+        "Support & contact"
       ],
-      "note": "The Arabic version is the authoritative reference for this page. For questions, use the links below.",
       "sections": [
         {
           "title": "About us",
           "paras": [
-            "Golden Store is an independent Arabic store for apps and games, offering a simple and safe way to discover and download content on Android devices. It was created to bring users together around apps and games with a fast, clear browsing experience in Arabic.",
-            "This is short placeholder copy — replace it later with your store’s identity, mission and team."
+            "Golden Store is an independent Arabic store for Android apps and games. It presents APK files with clear metadata and supports Arabic, English, French and Spanish, with dark and light themes.",
+            "The store has been updated with ratings, reviews, likes and reports, instant search, rich detail pages with screenshots, a standalone support page, and mandatory legal consent before sign-in."
           ]
         },
         {
           "title": "Official website",
           "paras": [
-            "Visit the official store website for the latest updates:",
+            "The official website is the only reference for the current store and its policies:",
             "<a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">https://goldenstore.online</a>"
           ]
         },
         {
           "title": "Our mission",
           "paras": [
-            "We aim to provide a straightforward download experience with clear information for every app: name, developer, size, version, ratings and screenshots — without unnecessary complexity or steps."
+            "To provide a simple, safe download experience: every app shows its name, developer, category, version, size, ratings and screenshots, plus its publish date or last update depending on status — without unnecessary steps."
           ]
         },
         {
-          "title": "What we offer",
+          "title": "Current features",
           "paras": [
-            "Browse apps and games by category, search, rate and review them, keep a download library, receive notifications and follow updates — all in a responsive interface that works on phone and desktop."
+            "The store now includes:"
           ],
           "items": [
-            "Fast browsing and search for apps and games.",
-            "Detail pages with screenshots, ratings and reviews.",
-            "A personal library for downloads and updates.",
-            "Arabic, English, French and Spanish language support."
+            "Browsing apps and games by category and instant no-reload search.",
+            "Detail pages with screenshots, ratings, reviews, likes, reports, category, version and publish/update date.",
+            "Google sign-in with mandatory Terms and Privacy consent before access.",
+            "A download library, Web Push notifications, and a Telegram group join button on the account page.",
+            "A standalone /support page for one ongoing text-only chat with the admin; links open in a new tab, no images or voice notes are sent, and there are no in-app notifications.",
+            "Four languages, dark/light themes, and a golden chat design. There are currently no payments or subscriptions in the store."
           ]
         },
         {
-          "title": "Contact",
+          "title": "Support & contact",
           "paras": [
-            "For questions or suggestions, reach us through the contact links on the Settings page inside the store, or via the official website."
+            "For questions or reports use the <a class=\"legal-inline-link\" href=\"/support\">Support page</a> inside the store, the Telegram group button on the account page, or the official website above."
           ]
         }
       ]
@@ -65,82 +69,83 @@
     "privacy": {
       "title": "Privacy Policy — Golden Store",
       "h2": "Privacy Policy",
-      "lead": "Your privacy matters. This page explains what we collect and how we use it.",
       "kicker": "Legal",
-      "updated": "Last updated: 5 November 2026",
+      "lead": "This policy explains what the updated store collects, how it is used and how it is deleted.",
+      "updated": "Last updated: 5 November 2026 — revised edition",
       "tocTitle": "On this page",
+      "note": "These clauses have been revised to reflect the store’s current features. Final wording should be reviewed by counsel.",
       "toc": [
         "Introduction",
         "Data we collect",
         "Cookies & local storage",
-        "Firebase Auth",
+        "Firebase Auth & consent",
         "Notifications",
-        "Future ads",
-        "Sharing",
-        "Security & rights",
-        "Changes"
+        "Support chat",
+        "Future advertising",
+        "Sharing & deletion",
+        "Changes to this policy"
       ],
-      "note": "The Arabic version is the authoritative reference for this page. For questions, use the links below.",
       "sections": [
         {
           "title": "Introduction",
           "paras": [
-            "This Privacy Policy explains how Golden Store collects, uses and protects data when you use the website or the app. By using the store you agree to this policy and to the <a class=\"legal-inline-link\" href=\"/terms\">Terms of Service</a>.",
-            "This is placeholder text for initial compliance. Please have it reviewed by legal counsel and replace it with the final wording before publishing."
+            "This policy explains how Golden Store collects, uses and protects data when you browse the store, sign in, rate an app, or message support. By using the store you agree to this policy and to the <a class=\"legal-inline-link\" href=\"/terms\">Terms of Service</a>.",
+            "The clauses were updated for the current features: mandatory legal consent, search, ratings and reviews, and a text-only support chat with no voice or image attachments."
           ]
         },
         {
           "title": "Data we collect",
           "paras": [
-            "We collect only the minimum data needed to run the store and improve the experience:"
+            "We collect the minimum needed to run the service:"
           ],
           "items": [
-            "Account data when signing in with Google: display name, email address, profile photo and user ID (UID).",
-            "Notification identifiers (FCM / Web Push) if you allow notifications.",
-            "Basic usage data such as download counts and the ratings and reviews you choose to add.",
-            "Preferences stored locally on your device: theme, language, download history and reviews you hid."
+            "Google account data: display name, email, profile picture and user ID (UID).",
+            "Ratings, reviews, likes, reports and reviews you choose to hide.",
+            "Text of support-chat messages and their timestamps; we no longer accept images or voice recordings in chat.",
+            "Download history, local preferences, theme, language, and Web Push/FCM device tokens if you grant permission.",
+            "A record of your consent to the current Terms and Privacy version."
           ]
         },
         {
           "title": "Cookies & local storage",
           "paras": [
-            "The store uses browser local storage (localStorage / sessionStorage) to save theme, language, preferences and download history, plus session cookies when authentication requires them. We do not currently use third-party advertising tracking cookies; any change will be described in an update to this policy."
+            "The store uses localStorage/sessionStorage for language, theme, download history and chat drafts, plus a secure cookie for legal-consent receipt and authentication sessions when needed. We do not currently use third-party advertising tracking cookies."
           ]
         },
         {
-          "title": "Firebase Auth & sign-in",
+          "title": "Firebase Auth & consent",
           "paras": [
-            "Authentication is handled by Google’s Firebase Authentication using your Google account. We never store or see your password; we receive only the basic profile information the identity provider supplies, used to create your in-store profile and associate your reviews and ratings."
+            "Authentication uses Firebase Authentication with a Google account; we never store or see your password. Before signing in you must tick the mandatory Terms and Privacy consent box, and a receipt for the current version is recorded through /api/legal/consent."
           ]
         },
         {
           "title": "Notifications",
           "paras": [
-            "If you grant permission, we store a device token to send notifications about updates and new apps. You can disable notifications at any time in your browser/device settings or inside the store."
+            "If you grant permission we store a device token to send Web Push notifications about new apps and updates. Support chat does not trigger in-app notifications; messages refresh by polling only while the page is open. You can disable notifications in your browser or device settings."
+          ]
+        },
+        {
+          "title": "Support chat",
+          "paras": [
+            "The /support page opens one ongoing text conversation with the admin. Only text is stored; the admin can read, reply to, or permanently delete the thread and its messages. Links you type become safe links that open in a new tab. No images or audio files are uploaded and attachment blobs are no longer stored."
           ]
         },
         {
           "title": "Future advertising",
           "paras": [
-            "We may later add advertising or analytics partners to support the store. If that happens we will update this policy, describe any data that may be shared and request consent where the law requires it. We currently show no targeted ads based on cross-site tracking."
+            "We may later add advertising or analytics services to support the store; if so we will update this policy, explain the data involved and request consent where required. We currently show no targeted ads and the store has no payments or subscriptions."
           ]
         },
         {
-          "title": "Sharing data",
+          "title": "Sharing & deletion",
           "paras": [
-            "We do not sell your personal data and share it with third parties only as far as necessary to operate the service (authentication, hosting and notification providers) or when required by law."
-          ]
-        },
-        {
-          "title": "Security & your rights",
-          "paras": [
-            "We apply reasonable technical measures to protect data, while recognising that no internet transfer is 100% secure. You may request deletion or correction of your account and data through the contact channels available in the store."
+            "We do not sell your data. We share it only with authentication, hosting, storage and notification providers as needed to run the service, or when legally required. Admins can permanently delete reviews, reports, support threads and their messages from the dashboard, and you can request deletion or correction of your account data through support."
           ]
         },
         {
           "title": "Changes to this policy",
           "paras": [
-            "We may update this policy from time to time; the last-updated date appears at the top of the page, and continued use of the store after an update constitutes acceptance of the revised version."
+            "We may update this policy when features change; the last-updated date appears at the top, and we may request fresh consent to a revised version before you continue signing in."
           ]
         }
       ]
@@ -148,76 +153,75 @@
     "terms": {
       "title": "Terms of Service — Golden Store",
       "h2": "Terms of Service",
-      "lead": "Please read these terms before using the store or signing in.",
       "kicker": "Legal",
-      "updated": "Last updated: 5 November 2026",
+      "lead": "Updated terms for using Golden Store with its current features.",
+      "updated": "Last updated: 5 November 2026 — revised edition",
       "tocTitle": "On this page",
+      "note": "These clauses have been revised to reflect the store’s current features. Final wording should be reviewed by counsel.",
       "toc": [
-        "Acceptance",
+        "Acceptance of terms",
         "Use of the service",
-        "Accounts",
-        "APK files",
+        "Accounts & consent",
+        "APK files & downloads",
         "Intellectual property",
-        "Ads & links",
+        "Advertising & external links",
         "Disclaimer",
-        "Termination",
-        "Law & contact"
+        "Termination & changes",
+        "Applicable law & contact"
       ],
-      "note": "The Arabic version is the authoritative reference for this page. For questions, use the links below.",
       "sections": [
         {
           "title": "Acceptance of terms",
           "paras": [
-            "By using Golden Store or signing in, you confirm that you have read and accepted these terms as well as the <a class=\"legal-inline-link\" href=\"/privacy\">Privacy Policy</a>. If you do not agree, please stop using the store.",
-            "These terms are placeholder text for initial compliance. Please have them reviewed by legal counsel before publishing."
+            "By using Golden Store or signing in, you confirm that you have read and agree to these Terms and the <a class=\"legal-inline-link\" href=\"/privacy\">Privacy Policy</a>. Sign-in cannot complete until the mandatory consent box is ticked."
           ]
         },
         {
           "title": "Use of the service",
           "paras": [
-            "You may use the store only for lawful, personal purposes. Any tampering with the service, bulk automated downloading, bypassing access limits, or posting unlawful or abusive content in ratings and reviews is prohibited."
+            "The store is for personal, lawful use only. Do not tamper with the service, scrape it aggressively, bypass access controls, impersonate others, or post abusive or illegal content in ratings, reviews, reports or support messages. Admins may hide or remove violating content."
           ]
         },
         {
-          "title": "Accounts",
+          "title": "Accounts & consent",
           "paras": [
-            "Your account is created by signing in with Google. You are responsible for keeping your device and account secure and for providing accurate information. The administration may suspend accounts that violate these terms."
+            "Accounts are created through Google and identified by a UID. You are responsible for your device, account security and accurate data. Consent to the current Terms and Privacy version is recorded before access, and admins may suspend violating accounts. There are currently no payments or subscriptions in the store."
           ]
         },
         {
           "title": "APK files & downloads",
           "paras": [
-            "Installing some apps may require enabling “Install from unknown sources” on your device. You do so at your own risk; check the file source and requested permissions before installing. The store does not guarantee that any file works on your device or is free of errors."
+            "Installing some apps may require enabling “install from unknown sources”. You do so at your own responsibility; check the file source and requested permissions before installing. The store shows name, developer, category, version, size and publish/update date, but does not guarantee that a file works on your device or is error-free."
           ]
         },
         {
           "title": "Intellectual property",
           "paras": [
-            "Trademarks, names, logos and app rights belong to their respective owners. The store displays content for information and access purposes and does not claim ownership of third-party apps. For any rights objection, contact us to have the relevant content removed."
+            "Trademarks, names, logos and app rights belong to their owners. The store displays content for discovery and access and does not claim ownership of third-party apps. For rights objections, contact us to remove the relevant content."
           ]
         },
         {
           "title": "Advertising & external links",
           "paras": [
-            "The store may later include ads or links to external sites. We are not responsible for the content or practices of those sites; your use of them is governed by their own terms and policies."
+            "Advertising or external links may be added later; we are not responsible for their content or practices. Links in support messages open in a new tab with safety attributes, and external sites are governed by their own terms. The Telegram group button on the account page is also an external link."
           ]
         },
         {
           "title": "Disclaimer",
           "paras": [
-            "The service is provided “as is” without express or implied warranties. To the extent permitted by law, we are not liable for indirect damages or data loss arising from using the store or downloading any file."
+            "The service is provided “as is” without express or implied warranties. Support chat is text-only, with no images or voice notes, and produces no in-app notifications. We are not liable for indirect damages or data loss arising from using the store or installing any file, to the extent permitted by law."
           ]
         },
         {
           "title": "Termination & changes",
           "paras": [
-            "We may amend these terms or discontinue the service, in whole or in part, at any time, with the last-updated date shown above."
+            "Admins may permanently delete reviews, reports, support threads and their messages, close a support conversation, modify these Terms, or discontinue part of the service, with the last-updated date shown. We may request fresh consent after a material change."
           ]
         },
         {
           "title": "Applicable law & contact",
           "paras": [
-            "These terms are subject to the laws applicable in the user’s country, and we first seek to resolve any dispute amicably through the contact channels in the store or via <a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">goldenstore.online</a>."
+            "These Terms are governed by the laws applicable in the user’s country, and we first seek to resolve disputes amicably through the <a class=\"legal-inline-link\" href=\"/support\">Support page</a> or via <a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">goldenstore.online</a>."
           ]
         }
       ]
@@ -227,55 +231,57 @@
     "about": {
       "title": "À propos — Golden Store",
       "h2": "À propos",
-      "lead": "Votre store arabe d’applications et de jeux.",
-      "kicker": "Informations légales",
-      "updated": "Dernière mise à jour : 5 novembre 2026",
-      "tocTitle": "Sommaire",
+      "kicker": "Mentions légales",
+      "lead": "Un store arabe indépendant pour applications et jeux, avec une interface claire et quatre langues.",
+      "updated": "Dernière mise à jour : 5 novembre 2026 — version révisée",
+      "tocTitle": "Sur cette page",
+      "note": "Ces clauses ont été révisées pour refléter les fonctions actuelles du store : connexion Google, consentement obligatoire, notes et avis, recherche instantanée, chat d’assistance texte, liens cliquables et notifications web. La rédaction finale doit être relue par un conseil juridique.",
       "toc": [
         "À propos",
         "Site officiel",
         "Notre mission",
-        "Nos services",
-        "Contact"
+        "Fonctionnalités actuelles",
+        "Assistance et contact"
       ],
-      "note": "La version arabe fait foi pour cette page. Pour toute question, utilisez les liens ci-dessous.",
       "sections": [
         {
           "title": "À propos",
           "paras": [
-            "Golden Store est un store arabe indépendant d’applications et de jeux, qui offre un moyen simple et sûr de découvrir et télécharger du contenu sur Android. Il a été créé pour rassembler les utilisateurs autour des applications et des jeux avec une navigation rapide et claire en arabe.",
-            "Ce texte est un exemple provisoire : remplacez-le plus tard par l’identité, la mission et l’équipe de votre store."
+            "Golden Store est un store arabe indépendant d’applications et de jeux Android. Il présente des fichiers APK avec des métadonnées claires et prend en charge l’arabe, l’anglais, le français et l’espagnol, avec thèmes clair et sombre.",
+            "Le store a été mis à jour avec notes, avis, mentions « J’aime » et signalements, recherche instantanée, pages détaillées avec captures d’écran, une page d’assistance dédiée et un consentement légal obligatoire avant la connexion."
           ]
         },
         {
           "title": "Site officiel",
           "paras": [
-            "Visitez le site officiel du store pour les dernières nouveautés :",
+            "Le site officiel est la seule référence pour la version actuelle du store et ses politiques :",
             "<a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">https://goldenstore.online</a>"
           ]
         },
         {
           "title": "Notre mission",
           "paras": [
-            "Nous voulons offrir un téléchargement simple, avec des informations claires pour chaque application : nom, développeur, taille, version, notes et captures d’écran, sans complexité ni étapes inutiles."
+            "Offrir une expérience de téléchargement simple et sûre : chaque application affiche son nom, développeur, catégorie, version, taille, notes et captures, ainsi que sa date de publication ou de dernière mise à jour selon son état — sans étapes inutiles."
           ]
         },
         {
-          "title": "Nos services",
+          "title": "Fonctionnalités actuelles",
           "paras": [
-            "Parcourir les applications et les jeux par catégorie, rechercher, noter et commenter, conserver une bibliothèque de téléchargements, recevoir des notifications et suivre les mises à jour — dans une interface responsive, sur mobile comme sur ordinateur."
+            "Le store comprend désormais :"
           ],
           "items": [
-            "Navigation et recherche rapides parmi les applications et les jeux.",
-            "Fiches détaillées avec captures d’écran, notes et avis.",
-            "Bibliothèque personnelle pour les téléchargements et mises à jour.",
-            "Prise en charge de l’arabe, de l’anglais, du français et de l’espagnol."
+            "Navigation par catégorie et recherche instantanée sans rechargement.",
+            "Pages détaillées avec captures, notes, avis, mentions « J’aime », signalements, catégorie, version et date de publication/mise à jour.",
+            "Connexion Google avec consentement obligatoire aux Conditions et à la Confidentialité avant l’accès.",
+            "Bibliothèque de téléchargements, notifications Web Push et bouton pour rejoindre le groupe Telegram sur la page Compte.",
+            "Page /support pour une conversation texte unique avec l’admin ; les liens s’ouvrent dans un nouvel onglet, aucune image ni note vocale n’est envoyée, et aucune notification interne n’est générée.",
+            "Quatre langues, thèmes clair/sombre et design doré pour le chat. Aucun paiement ni abonnement n’est proposé actuellement."
           ]
         },
         {
-          "title": "Contact",
+          "title": "Assistance et contact",
           "paras": [
-            "Pour toute question ou suggestion, contactez-nous via les liens de la page Paramètres du store ou via le site officiel."
+            "Pour toute question ou signalement, utilisez la <a class=\"legal-inline-link\" href=\"/support\">page d’assistance</a> du store, le bouton du groupe Telegram sur la page Compte, ou le site officiel ci-dessus."
           ]
         }
       ]
@@ -283,82 +289,83 @@
     "privacy": {
       "title": "Politique de confidentialité — Golden Store",
       "h2": "Politique de confidentialité",
-      "lead": "Votre confidentialité compte. Cette page explique ce que nous collectons et comment nous l’utilisons.",
-      "kicker": "Informations légales",
-      "updated": "Dernière mise à jour : 5 novembre 2026",
-      "tocTitle": "Sommaire",
+      "kicker": "Mentions légales",
+      "lead": "Cette politique explique les données collectées par le store mis à jour, leur usage et leur suppression.",
+      "updated": "Dernière mise à jour : 5 novembre 2026 — version révisée",
+      "tocTitle": "Sur cette page",
+      "note": "Ces clauses ont été révisées pour refléter les fonctions actuelles du store. La rédaction finale doit être relue par un conseil juridique.",
       "toc": [
         "Introduction",
         "Données collectées",
         "Cookies et stockage local",
-        "Firebase Auth",
+        "Firebase Auth et consentement",
         "Notifications",
+        "Chat d’assistance",
         "Publicité future",
-        "Partage",
-        "Sécurité et droits",
+        "Partage et suppression",
         "Modifications"
       ],
-      "note": "La version arabe fait foi pour cette page. Pour toute question, utilisez les liens ci-dessous.",
       "sections": [
         {
           "title": "Introduction",
           "paras": [
-            "Cette politique explique comment Golden Store collecte, utilise et protège les données lorsque vous utilisez le site ou l’application. En utilisant le store, vous acceptez cette politique ainsi que les <a class=\"legal-inline-link\" href=\"/terms\">Conditions d’utilisation</a>.",
-            "Ce texte est un exemple provisoire de conformité. Faites-le valider par un conseil juridique et remplacez-le par la version définitive avant publication."
+            "Cette politique explique comment Golden Store collecte, utilise et protège les données lors de la navigation, de la connexion, des notes ou des messages d’assistance. En utilisant le store, vous acceptez cette politique et les <a class=\"legal-inline-link\" href=\"/terms\">Conditions d’utilisation</a>.",
+            "Les clauses ont été mises à jour pour les fonctions actuelles : consentement légal obligatoire, recherche, notes et avis, et chat d’assistance texte sans pièces jointes vocales ou image."
           ]
         },
         {
           "title": "Données collectées",
           "paras": [
-            "Nous collectons uniquement le minimum nécessaire au fonctionnement du store et à l’amélioration de l’expérience :"
+            "Nous collectons le minimum nécessaire au service :"
           ],
           "items": [
-            "Données du compte lors de la connexion avec Google : nom affiché, e-mail, photo de profil et identifiant utilisateur (UID).",
-            "Identifiants de notification (FCM / Web Push) si vous autorisez les notifications.",
-            "Données d’usage de base : nombre de téléchargements, notes et avis que vous ajoutez volontairement.",
-            "Préférences enregistrées localement sur votre appareil : thème, langue, historique et avis masqués."
+            "Données du compte Google : nom affiché, e-mail, photo de profil et identifiant utilisateur (UID).",
+            "Notes, avis, mentions « J’aime », signalements et avis que vous choisissez de masquer.",
+            "Texte des messages du chat d’assistance et leur horodatage ; nous n’acceptons plus d’images ni d’enregistrements vocaux dans le chat.",
+            "Historique de téléchargements, préférences locales, thème, langue et jetons d’appareil Web Push/FCM si vous autorisez les notifications.",
+            "Trace de votre consentement à la version actuelle des Conditions et de la Confidentialité."
           ]
         },
         {
           "title": "Cookies et stockage local",
           "paras": [
-            "Le store utilise le stockage local du navigateur (localStorage / sessionStorage) pour le thème, la langue, les préférences et l’historique, ainsi que des cookies de session si l’authentification le demande. Nous n’utilisons pas actuellement de cookies publicitaires tiers ; tout changement sera indiqué dans une mise à jour de cette politique."
+            "Le store utilise localStorage/sessionStorage pour la langue, le thème, l’historique et les brouillons de chat, ainsi qu’un cookie sécurisé pour l’accusé de consentement et les sessions d’authentification si besoin. Nous n’utilisons pas actuellement de cookies de suivi publicitaire tiers."
           ]
         },
         {
-          "title": "Firebase Auth et connexion",
+          "title": "Firebase Auth et consentement",
           "paras": [
-            "L’authentification est assurée par Firebase Authentication de Google avec votre compte Google. Nous ne stockons ni ne voyons jamais votre mot de passe ; nous recevons uniquement les informations de profil de base fournies par le fournisseur d’identité, pour créer votre profil et associer vos avis et notes."
+            "L’authentification passe par Firebase Authentication avec un compte Google ; nous ne stockons ni ne voyons votre mot de passe. Avant la connexion, vous devez cocher la case obligatoire des Conditions et de la Confidentialité, et un accusé de la version actuelle est enregistré via /api/legal/consent."
           ]
         },
         {
           "title": "Notifications",
           "paras": [
-            "Si vous donnez votre autorisation, nous conservons un jeton d’appareil pour envoyer des notifications sur les mises à jour et les nouvelles applications. Vous pouvez les désactiver à tout moment dans les réglages du navigateur, de l’appareil ou du store."
+            "Si vous autorisez les notifications, nous conservons un jeton d’appareil pour envoyer des Web Push sur les nouveautés et mises à jour. Le chat d’assistance ne déclenche aucune notification interne ; les messages se rafraîchissent par interrogation tant que la page est ouverte. Vous pouvez désactiver les notifications dans le navigateur ou l’appareil."
+          ]
+        },
+        {
+          "title": "Chat d’assistance",
+          "paras": [
+            "La page /support ouvre une conversation texte unique avec l’admin. Seul le texte est stocké ; l’admin peut lire, répondre ou supprimer définitivement le fil et ses messages. Les liens saisis deviennent des liens sûrs ouvrant un nouvel onglet. Aucune image ni audio n’est téléversé et les blobs de pièces jointes ne sont plus stockés."
           ]
         },
         {
           "title": "Publicité future",
           "paras": [
-            "Nous pourrions ajouter plus tard des partenaires publicitaires ou d’analyse pour soutenir le store. Dans ce cas, nous mettrons cette politique à jour, préciserons les données susceptibles d’être partagées et demanderons le consentement requis par la loi. Nous n’affichons actuellement aucune publicité ciblée basée sur le suivi inter-sites."
+            "Nous pourrions ajouter plus tard publicité ou analyse pour soutenir le store ; nous mettrions alors cette politique à jour, préciserions les données et demanderions le consentement requis. Aucune publicité ciblée n’est affichée actuellement et le store ne propose ni paiement ni abonnement."
           ]
         },
         {
-          "title": "Partage des données",
+          "title": "Partage et suppression",
           "paras": [
-            "Nous ne vendons pas vos données personnelles et ne les partageons avec des tiers que dans la mesure nécessaire au service (authentification, hébergement, notifications) ou sur obligation légale."
+            "Nous ne vendons pas vos données. Elles sont partagées uniquement avec les fournisseurs d’authentification, d’hébergement, de stockage et de notifications selon le besoin, ou sur obligation légale. Les admins peuvent supprimer définitivement avis, signalements, fils d’assistance et messages depuis le tableau de bord, et vous pouvez demander la suppression ou la correction de vos données via l’assistance."
           ]
         },
         {
-          "title": "Sécurité et vos droits",
+          "title": "Modifications",
           "paras": [
-            "Nous appliquons des mesures techniques raisonnables pour protéger les données, tout en rappelant qu’aucun transfert sur Internet n’est sûr à 100 %. Vous pouvez demander la suppression ou la rectification de votre compte et de vos données via les canaux de contact du store."
-          ]
-        },
-        {
-          "title": "Modifications de la politique",
-          "paras": [
-            "Cette politique peut être mise à jour ; la date de dernière mise à jour figure en haut de la page et la poursuite de l’utilisation du store après une mise à jour vaut acceptation de la version révisée."
+            "Cette politique peut être mise à jour lors de changements de fonctionnalités ; la date de dernière mise à jour figure en haut, et un nouveau consentement peut être demandé avant de poursuivre la connexion."
           ]
         }
       ]
@@ -366,76 +373,75 @@
     "terms": {
       "title": "Conditions d’utilisation — Golden Store",
       "h2": "Conditions d’utilisation",
-      "lead": "Veuillez lire ces conditions avant d’utiliser le store ou de vous connecter.",
-      "kicker": "Informations légales",
-      "updated": "Dernière mise à jour : 5 novembre 2026",
-      "tocTitle": "Sommaire",
+      "kicker": "Mentions légales",
+      "lead": "Conditions mises à jour pour l’utilisation de Golden Store avec ses fonctions actuelles.",
+      "updated": "Dernière mise à jour : 5 novembre 2026 — version révisée",
+      "tocTitle": "Sur cette page",
+      "note": "Ces clauses ont été révisées pour refléter les fonctions actuelles du store. La rédaction finale doit être relue par un conseil juridique.",
       "toc": [
         "Acceptation",
-        "Utilisation",
-        "Comptes",
-        "Fichiers APK",
+        "Utilisation du service",
+        "Comptes et consentement",
+        "Fichiers APK et téléchargements",
         "Propriété intellectuelle",
-        "Publicité et liens",
-        "Responsabilité",
-        "Résiliation",
-        "Droit et contact"
+        "Publicité et liens externes",
+        "Limitation de responsabilité",
+        "Résiliation et modifications",
+        "Droit applicable et contact"
       ],
-      "note": "La version arabe fait foi pour cette page. Pour toute question, utilisez les liens ci-dessous.",
       "sections": [
         {
-          "title": "Acceptation des conditions",
+          "title": "Acceptation",
           "paras": [
-            "En utilisant Golden Store ou en vous y connectant, vous confirmez avoir lu et accepté ces conditions ainsi que la <a class=\"legal-inline-link\" href=\"/privacy\">Politique de confidentialité</a>. Si vous n’êtes pas d’accord, cessez d’utiliser le store.",
-            "Ces conditions sont un texte provisoire de conformité. Faites-les valider par un conseil juridique avant publication."
+            "En utilisant Golden Store ou en vous connectant, vous confirmez avoir lu et accepté les présentes Conditions et la <a class=\"legal-inline-link\" href=\"/privacy\">Politique de confidentialité</a>. La connexion ne peut aboutir sans la case de consentement obligatoire."
           ]
         },
         {
           "title": "Utilisation du service",
           "paras": [
-            "L’utilisateur s’engage à n’utiliser le store qu’à des fins personnelles et légales. Toute altération du service, téléchargement automatisé massif, contournement des limitations d’accès ou publication de contenu illégal ou abusif dans les notes et avis est interdite."
+            "Le store est réservé à un usage personnel et légal. Il est interdit de perturber le service, d’en faire un scraping intensif, de contourner les contrôles d’accès, d’usurper une identité ou de publier un contenu abusif ou illégal dans les notes, avis, signalements ou messages d’assistance. Les admins peuvent masquer ou supprimer le contenu contrevenant."
           ]
         },
         {
-          "title": "Comptes",
+          "title": "Comptes et consentement",
           "paras": [
-            "Votre compte est créé lors de la connexion avec Google. Vous êtes responsable de la sécurité de votre appareil et de votre compte, ainsi que de l’exactitude des informations fournies. L’administration peut suspendre les comptes contrevenants."
+            "Les comptes sont créés via Google et identifiés par un UID. Vous êtes responsable de votre appareil, de la sécurité du compte et de l’exactitude des données. Le consentement à la version actuelle est enregistré avant l’accès, et les admins peuvent suspendre les comptes contrevenants. Aucun paiement ni abonnement n’est proposé actuellement."
           ]
         },
         {
           "title": "Fichiers APK et téléchargements",
           "paras": [
-            "L’installation de certaines applications peut nécessiter d’activer « Installer depuis des sources inconnues » sur votre appareil. Vous le faites à vos propres risques : vérifiez la source du fichier et les autorisations demandées avant l’installation. Le store ne garantit pas qu’un fichier fonctionne sur votre appareil ou soit exempt d’erreurs."
+            "Installer certaines applications peut nécessiter d’activer les « sources inconnues ». Vous le faites sous votre responsabilité ; vérifiez la source du fichier et les permissions avant installation. Le store affiche nom, développeur, catégorie, version, taille et date de publication/mise à jour, mais ne garantit pas le fonctionnement du fichier sur votre appareil ni l’absence d’erreurs."
           ]
         },
         {
           "title": "Propriété intellectuelle",
           "paras": [
-            "Marques, noms, logos et droits des applications appartiennent à leurs propriétaires. Le store présente le contenu à des fins d’information et d’accès et ne revendique aucune propriété sur les applications tierces. Pour toute objection, contactez-nous afin de retirer le contenu concerné."
+            "Marques, noms, logos et droits des applications appartiennent à leurs propriétaires. Le store affiche le contenu pour la découverte et l’accès et ne revendique pas la propriété des applications tierces. Pour toute objection de droits, contactez-nous afin de retirer le contenu concerné."
           ]
         },
         {
           "title": "Publicité et liens externes",
           "paras": [
-            "Le store pourra contenir ultérieurement des publicités ou des liens vers des sites externes. Nous ne sommes pas responsables de leur contenu ni de leurs pratiques ; leur utilisation est régie par leurs propres conditions et politiques."
+            "Publicité ou liens externes pourront être ajoutés plus tard ; nous ne sommes pas responsables de leur contenu ni de leurs pratiques. Les liens des messages d’assistance s’ouvrent dans un nouvel onglet avec attributs de sécurité, et les sites externes sont régis par leurs propres conditions. Le bouton du groupe Telegram sur la page Compte est aussi un lien externe."
           ]
         },
         {
           "title": "Limitation de responsabilité",
           "paras": [
-            "Le service est fourni « tel quel », sans garantie expresse ou implicite. Dans les limites permises par la loi, nous ne sommes pas responsables des dommages indirects ou des pertes de données liés à l’utilisation du store ou au téléchargement d’un fichier."
+            "Le service est fourni « tel quel » sans garantie expresse ou implicite. Le chat d’assistance est uniquement texte, sans images ni notes vocales, et ne génère aucune notification interne. Nous ne sommes pas responsables des dommages indirects ou pertes de données liés à l’usage du store ou à l’installation d’un fichier, dans la limite permise par la loi."
           ]
         },
         {
           "title": "Résiliation et modifications",
           "paras": [
-            "Nous pouvons modifier ces conditions ou interrompre le service, en tout ou partie, à tout moment, avec la date de dernière mise à jour indiquée plus haut."
+            "Les admins peuvent supprimer définitivement avis, signalements, fils d’assistance et messages, clore une conversation, modifier les présentes Conditions ou interrompre une partie du service, avec la date de dernière mise à jour indiquée. Un nouveau consentement peut être demandé après une modification substantielle."
           ]
         },
         {
           "title": "Droit applicable et contact",
           "paras": [
-            "Ces conditions sont soumises au droit applicable dans le pays de l’utilisateur, et nous cherchons d’abord à résoudre tout litige à l’amiable via les canaux de contact du store ou via <a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">goldenstore.online</a>."
+            "Les présentes Conditions sont régies par le droit applicable dans le pays de l’utilisateur, et nous cherchons d’abord à résoudre tout litige à l’amiable via la <a class=\"legal-inline-link\" href=\"/support\">page d’assistance</a> ou via <a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">goldenstore.online</a>."
           ]
         }
       ]
@@ -445,55 +451,57 @@
     "about": {
       "title": "Sobre nosotros — Golden Store",
       "h2": "Sobre nosotros",
-      "lead": "Tu tienda árabe de aplicaciones y juegos.",
-      "kicker": "Información legal",
-      "updated": "Última actualización: 5 de noviembre de 2026",
+      "kicker": "Legal",
+      "lead": "Una tienda árabe independiente de aplicaciones y juegos, con interfaz clara y cuatro idiomas.",
+      "updated": "Última actualización: 5 de noviembre de 2026 — edición revisada",
       "tocTitle": "En esta página",
+      "note": "Estas cláusulas se han revisado para reflejar las funciones actuales de la tienda: acceso con Google, consentimiento obligatorio, valoraciones y reseñas, búsqueda instantánea, chat de soporte solo texto, enlaces pulsables y notificaciones web. La redacción final debe ser revisada por un asesor legal.",
       "toc": [
         "Sobre nosotros",
         "Sitio oficial",
         "Nuestra misión",
-        "Qué ofrecemos",
-        "Contacto"
+        "Funciones actuales",
+        "Soporte y contacto"
       ],
-      "note": "La versión en árabe es la referencia oficial de esta página. Para consultas, usa los enlaces de abajo.",
       "sections": [
         {
           "title": "Sobre nosotros",
           "paras": [
-            "Golden Store es una tienda árabe independiente de aplicaciones y juegos que ofrece una forma sencilla y segura de descubrir y descargar contenido en dispositivos Android. Nació para reunir a los usuarios en torno a las apps y los juegos con una navegación rápida y clara en árabe.",
-            "Este es un texto provisional: sustitúyelo más adelante por la identidad, misión y equipo de tu tienda."
+            "Golden Store es una tienda árabe independiente de aplicaciones y juegos Android. Presenta archivos APK con metadatos claros y admite árabe, inglés, francés y español, con temas claro y oscuro.",
+            "La tienda se ha actualizado con valoraciones, reseñas, «me gusta» y reportes, búsqueda instantánea, páginas de detalle con capturas, una página de soporte independiente y consentimiento legal obligatorio antes de iniciar sesión."
           ]
         },
         {
           "title": "Sitio oficial",
           "paras": [
-            "Visita el sitio oficial de la tienda para ver las últimas novedades:",
+            "El sitio oficial es la única referencia de la versión actual de la tienda y sus políticas:",
             "<a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">https://goldenstore.online</a>"
           ]
         },
         {
           "title": "Nuestra misión",
           "paras": [
-            "Buscamos una experiencia de descarga sencilla, con información clara de cada app: nombre, desarrollador, tamaño, versión, valoraciones y capturas, sin complejidades ni pasos innecesarios."
+            "Ofrecer una experiencia de descarga sencilla y segura: cada app muestra nombre, desarrollador, categoría, versión, tamaño, valoraciones y capturas, además de su fecha de publicación o última actualización según corresponda, sin pasos innecesarios."
           ]
         },
         {
-          "title": "Qué ofrecemos",
+          "title": "Funciones actuales",
           "paras": [
-            "Explorar apps y juegos por categoría, buscar, valorar y reseñar, mantener una biblioteca de descargas, recibir notificaciones y seguir las actualizaciones, todo en una interfaz adaptable al móvil y al ordenador."
+            "La tienda incluye ahora:"
           ],
           "items": [
-            "Navegación y búsqueda rápidas de aplicaciones y juegos.",
-            "Fichas con capturas, valoraciones y reseñas.",
-            "Biblioteca personal de descargas y actualizaciones.",
-            "Compatibilidad con árabe, inglés, francés y español."
+            "Navegación por categoría y búsqueda instantánea sin recargar la página.",
+            "Páginas de detalle con capturas, valoraciones, reseñas, «me gusta», reportes, categoría, versión y fecha de publicación/actualización.",
+            "Acceso con Google y consentimiento obligatorio de Términos y Privacidad antes de entrar.",
+            "Biblioteca de descargas, notificaciones Web Push y botón para unirse al grupo de Telegram en la página Cuenta.",
+            "Página /support con un único chat de texto con el administrador; los enlaces se abren en una pestaña nueva, no se envían imágenes ni notas de voz y no hay notificaciones internas.",
+            "Cuatro idiomas, temas claro/oscuro y diseño dorado en el chat. Actualmente no hay pagos ni suscripciones en la tienda."
           ]
         },
         {
-          "title": "Contacto",
+          "title": "Soporte y contacto",
           "paras": [
-            "Para consultas o sugerencias, escríbenos mediante los enlaces de la página de Ajustes de la tienda o a través del sitio oficial."
+            "Para consultas o reportes usa la <a class=\"legal-inline-link\" href=\"/support\">página de soporte</a> dentro de la tienda, el botón del grupo de Telegram en Cuenta, o el sitio oficial indicado arriba."
           ]
         }
       ]
@@ -501,82 +509,83 @@
     "privacy": {
       "title": "Política de privacidad — Golden Store",
       "h2": "Política de privacidad",
-      "lead": "Tu privacidad importa. Esta página explica qué recopilamos y cómo lo usamos.",
-      "kicker": "Información legal",
-      "updated": "Última actualización: 5 de noviembre de 2026",
+      "kicker": "Legal",
+      "lead": "Esta política explica qué datos recopila la tienda actualizada, cómo se usan y cómo se eliminan.",
+      "updated": "Última actualización: 5 de noviembre de 2026 — edición revisada",
       "tocTitle": "En esta página",
+      "note": "Estas cláusulas se han revisado para reflejar las funciones actuales de la tienda. La redacción final debe ser revisada por un asesor legal.",
       "toc": [
         "Introducción",
-        "Datos recopilados",
+        "Datos que recopilamos",
         "Cookies y almacenamiento local",
-        "Firebase Auth",
+        "Firebase Auth y consentimiento",
         "Notificaciones",
+        "Chat de soporte",
         "Publicidad futura",
-        "Compartir datos",
-        "Seguridad y derechos",
-        "Cambios"
+        "Compartir y eliminación",
+        "Cambios en la política"
       ],
-      "note": "La versión en árabe es la referencia oficial de esta página. Para consultas, usa los enlaces de abajo.",
       "sections": [
         {
           "title": "Introducción",
           "paras": [
-            "Esta política explica cómo Golden Store recopila, usa y protege los datos cuando utilizas el sitio o la aplicación. Al usar la tienda aceptas esta política y los <a class=\"legal-inline-link\" href=\"/terms\">Términos del servicio</a>.",
-            "Este es un texto provisional de cumplimiento. Revísalo con un asesor legal y sustitúyelo por la redacción definitiva antes de publicarlo."
+            "Esta política explica cómo Golden Store recopila, usa y protege los datos al navegar, iniciar sesión, valorar una app o escribir al soporte. Al usar la tienda aceptas esta política y los <a class=\"legal-inline-link\" href=\"/terms\">Términos del servicio</a>.",
+            "Las cláusulas se actualizaron para las funciones actuales: consentimiento legal obligatorio, búsqueda, valoraciones y reseñas, y chat de soporte solo texto sin adjuntos de voz o imagen."
           ]
         },
         {
           "title": "Datos que recopilamos",
           "paras": [
-            "Recopilamos solo el mínimo necesario para que la tienda funcione y para mejorar la experiencia:"
+            "Recopilamos lo mínimo necesario para el servicio:"
           ],
           "items": [
-            "Datos de la cuenta al iniciar sesión con Google: nombre, correo, foto de perfil e identificador de usuario (UID).",
-            "Identificadores de notificaciones (FCM / Web Push) si permites las notificaciones.",
-            "Datos de uso básicos, como el número de descargas y las valoraciones y reseñas que añades voluntariamente.",
-            "Preferencias guardadas localmente en tu dispositivo: tema, idioma, historial de descargas y reseñas ocultas."
+            "Datos de la cuenta de Google: nombre visible, correo, foto de perfil e identificador de usuario (UID).",
+            "Valoraciones, reseñas, «me gusta», reportes y reseñas que decidas ocultar.",
+            "Texto de los mensajes del chat de soporte y su hora; ya no aceptamos imágenes ni grabaciones de voz en el chat.",
+            "Historial de descargas, preferencias locales, tema, idioma y tokens de dispositivo Web Push/FCM si das permiso.",
+            "Registro de tu consentimiento a la versión actual de Términos y Privacidad."
           ]
         },
         {
           "title": "Cookies y almacenamiento local",
           "paras": [
-            "La tienda usa el almacenamiento local del navegador (localStorage / sessionStorage) para guardar el tema, el idioma, las preferencias y el historial, además de cookies de sesión cuando la autentificación lo requiere. Actualmente no usamos cookies publicitarias de terceros; cualquier cambio se indicará en una actualización de esta política."
+            "La tienda usa localStorage/sessionStorage para idioma, tema, historial y borradores del chat, además de una cookie segura para el justificante de consentimiento y las sesiones de autenticación cuando hacen falta. Actualmente no usamos cookies de seguimiento publicitario de terceros."
           ]
         },
         {
-          "title": "Firebase Auth e inicio de sesión",
+          "title": "Firebase Auth y consentimiento",
           "paras": [
-            "La autentificación se realiza mediante Firebase Authentication de Google con tu cuenta de Google. Nunca guardamos ni vemos tu contraseña; solo recibimos la información básica de perfil que ofrece el proveedor de identidad, para crear tu perfil y asociar tus reseñas y valoraciones."
+            "La autenticación usa Firebase Authentication con una cuenta de Google; nunca guardamos ni vemos tu contraseña. Antes de entrar debes marcar la casilla obligatoria de Términos y Privacidad, y se registra un justificante de la versión actual mediante /api/legal/consent."
           ]
         },
         {
           "title": "Notificaciones",
           "paras": [
-            "Si das permiso, guardamos un token del dispositivo para enviar notificaciones sobre actualizaciones y nuevas aplicaciones. Puedes desactivarlas en cualquier momento desde los ajustes del navegador, del dispositivo o de la tienda."
+            "Si das permiso guardamos un token de dispositivo para enviar notificaciones Web Push sobre novedades y actualizaciones. El chat de soporte no genera notificaciones internas; los mensajes se actualizan por sondeo solo mientras la página está abierta. Puedes desactivarlas en el navegador o el dispositivo."
+          ]
+        },
+        {
+          "title": "Chat de soporte",
+          "paras": [
+            "La página /support abre una única conversación de texto con el administrador. Solo se guarda el texto; el administrador puede leer, responder o eliminar definitivamente el hilo y sus mensajes. Los enlaces que escribes se convierten en enlaces seguros que abren una pestaña nueva. No se suben imágenes ni audio y ya no se almacenan blobs de adjuntos."
           ]
         },
         {
           "title": "Publicidad futura",
           "paras": [
-            "Más adelante podríamos añadir socios publicitarios o de análisis para sostener la tienda. Si ocurre, actualizaremos esta política, detallaremos los datos que podrían compartirse y solicitaremos el consentimiento que exija la ley. Actualmente no mostramos anuncios segmentados basados en seguimiento entre sitios."
+            "Más adelante podríamos añadir publicidad o análisis para sostener la tienda; entonces actualizaríamos esta política, explicaríamos los datos y pediríamos el consentimiento necesario. Actualmente no mostramos publicidad dirigida y la tienda no tiene pagos ni suscripciones."
           ]
         },
         {
-          "title": "Compartir datos",
+          "title": "Compartir y eliminación",
           "paras": [
-            "No vendemos tus datos personales ni los compartimos con terceros salvo lo necesario para prestar el servicio (autenticación, alojamiento y notificaciones) o por obligación legal."
-          ]
-        },
-        {
-          "title": "Seguridad y tus derechos",
-          "paras": [
-            "Aplicamos medidas técnicas razonables para proteger los datos, sabiendo que ninguna transferencia por Internet es 100 % segura. Puedes solicitar la eliminación o corrección de tu cuenta y tus datos mediante los canales de contacto de la tienda."
+            "No vendemos tus datos. Solo se comparten con proveedores de autenticación, alojamiento, almacenamiento y notificaciones según lo necesario, o por obligación legal. Los administradores pueden eliminar definitivamente reseñas, reportes, hilos de soporte y mensajes desde el panel, y tú puedes pedir la eliminación o corrección de tus datos a través del soporte."
           ]
         },
         {
           "title": "Cambios en la política",
           "paras": [
-            "Podemos actualizar esta política periódicamente; la fecha de última actualización figura arriba y seguir usando la tienda tras un cambio implica la aceptación de la versión revisada."
+            "Podemos actualizar esta política cuando cambien las funciones; la fecha de última actualización aparece arriba y podemos pedir un nuevo consentimiento antes de continuar con el inicio de sesión."
           ]
         }
       ]
@@ -584,76 +593,75 @@
     "terms": {
       "title": "Términos del servicio — Golden Store",
       "h2": "Términos del servicio",
-      "lead": "Lee estos términos antes de usar la tienda o iniciar sesión.",
-      "kicker": "Información legal",
-      "updated": "Última actualización: 5 de noviembre de 2026",
+      "kicker": "Legal",
+      "lead": "Términos actualizados para usar Golden Store con sus funciones actuales.",
+      "updated": "Última actualización: 5 de noviembre de 2026 — edición revisada",
       "tocTitle": "En esta página",
+      "note": "Estas cláusulas se han revisado para reflejar las funciones actuales de la tienda. La redacción final debe ser revisada por un asesor legal.",
       "toc": [
         "Aceptación",
         "Uso del servicio",
-        "Cuentas",
-        "Archivos APK",
+        "Cuentas y consentimiento",
+        "Archivos APK y descargas",
         "Propiedad intelectual",
-        "Anuncios y enlaces",
-        "Responsabilidad",
-        "Terminación",
-        "Ley y contacto"
+        "Publicidad y enlaces externos",
+        "Limitación de responsabilidad",
+        "Terminación y modificaciones",
+        "Ley aplicable y contacto"
       ],
-      "note": "La versión en árabe es la referencia oficial de esta página. Para consultas, usa los enlaces de abajo.",
       "sections": [
         {
-          "title": "Aceptación de los términos",
+          "title": "Aceptación",
           "paras": [
-            "Al usar Golden Store o iniciar sesión, confirmas que has leído y aceptas estos términos y la <a class=\"legal-inline-link\" href=\"/privacy\">Política de privacidad</a>. Si no estás de acuerdo, deja de usar la tienda.",
-            "Estos términos son un texto provisional de cumplimiento. Revísalos con un asesor legal antes de publicarlos."
+            "Al usar Golden Store o iniciar sesión confirmas que has leído y aceptas estos Términos y la <a class=\"legal-inline-link\" href=\"/privacy\">Política de privacidad</a>. El acceso no puede completarse sin marcar la casilla de consentimiento obligatoria."
           ]
         },
         {
           "title": "Uso del servicio",
           "paras": [
-            "El usuario se compromete a usar la tienda solo con fines personales y legales. Se prohíbe manipular el servicio, descargar de forma automatizada y masiva, eludir los límites de acceso o publicar contenido ilegal o abusivo en valoraciones y reseñas."
+            "La tienda es para uso personal y legal. Se prohíbe manipular el servicio, hacer scraping intensivo, eludir controles de acceso, suplantar identidades o publicar contenido abusivo o ilegal en valoraciones, reseñas, reportes o mensajes de soporte. Los administradores pueden ocultar o eliminar el contenido infractor."
           ]
         },
         {
-          "title": "Cuentas",
+          "title": "Cuentas y consentimiento",
           "paras": [
-            "Tu cuenta se crea al iniciar sesión con Google. Eres responsable de la seguridad de tu dispositivo y tu cuenta y de que los datos facilitados sean correctos. La administración puede suspender las cuentas que incumplan estos términos."
+            "Las cuentas se crean con Google y se identifican por un UID. Eres responsable de tu dispositivo, de la seguridad de la cuenta y de la veracidad de los datos. El consentimiento a la versión actual se registra antes del acceso y los administradores pueden suspender cuentas infractoras. Actualmente no hay pagos ni suscripciones en la tienda."
           ]
         },
         {
           "title": "Archivos APK y descargas",
           "paras": [
-            "Instalar algunas aplicaciones puede requerir activar «Instalar desde fuentes desconocidas» en tu dispositivo. Lo haces bajo tu responsabilidad: comprueba el origen del archivo y los permisos solicitados antes de instalar. La tienda no garantiza que un archivo funcione en tu dispositivo ni que esté libre de errores."
+            "Instalar algunas apps puede requerir activar «fuentes desconocidas». Lo haces bajo tu responsabilidad; revisa el origen del archivo y los permisos antes de instalar. La tienda muestra nombre, desarrollador, categoría, versión, tamaño y fecha de publicación/actualización, pero no garantiza que el archivo funcione en tu dispositivo ni que esté libre de errores."
           ]
         },
         {
           "title": "Propiedad intelectual",
           "paras": [
-            "Marcas, nombres, logotipos y derechos de las aplicaciones pertenecen a sus propietarios. La tienda muestra el contenido con fines informativos y de acceso y no reclama la propiedad de apps de terceros. Ante cualquier objeción, contáctanos para retirar el contenido afectado."
+            "Marcas, nombres, logos y derechos de las apps pertenecen a sus dueños. La tienda muestra el contenido para descubrirlo y acceder a él y no reclama la propiedad de apps de terceros. Para cualquier objeción de derechos, contáctanos para retirar el contenido correspondiente."
           ]
         },
         {
           "title": "Publicidad y enlaces externos",
           "paras": [
-            "La tienda podría incluir más adelante anuncios o enlaces a sitios externos. No somos responsables de su contenido ni de sus prácticas; su uso se rige por sus propios términos y políticas."
+            "Más adelante podrían añadirse anuncios o enlaces externos; no somos responsables de su contenido ni de sus prácticas. Los enlaces de los mensajes de soporte se abren en una pestaña nueva con atributos de seguridad, y los sitios externos se rigen por sus propios términos. El botón del grupo de Telegram en Cuenta también es un enlace externo."
           ]
         },
         {
           "title": "Limitación de responsabilidad",
           "paras": [
-            "El servicio se presta «tal cual», sin garantías expresas o implícitas. En la medida permitida por la ley, no respondemos por daños indirectos o pérdida de datos derivados del uso de la tienda o de la descarga de un archivo."
+            "El servicio se ofrece «tal cual» sin garantías expresas o implícitas. El chat de soporte es solo texto, sin imágenes ni notas de voz, y no genera notificaciones internas. No respondemos por daños indirectos o pérdida de datos derivados del uso de la tienda o de la instalación de un archivo, hasta donde lo permita la ley."
           ]
         },
         {
           "title": "Terminación y modificaciones",
           "paras": [
-            "Podemos modificar estos términos o interrumpir el servicio, total o parcialmente, en cualquier momento, indicando la fecha de última actualización."
+            "Los administradores pueden eliminar definitivamente reseñas, reportes, hilos de soporte y mensajes, cerrar una conversación, modificar estos Términos o interrumpir parte del servicio, indicando la fecha de última actualización. Podemos pedir un nuevo consentimiento tras un cambio sustancial."
           ]
         },
         {
           "title": "Ley aplicable y contacto",
           "paras": [
-            "Estos términos se rigen por la ley aplicable en el país del usuario, y buscamos primero resolver cualquier disputa de forma amistosa mediante los canales de contacto de la tienda o a través de <a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">goldenstore.online</a>."
+            "Estos Términos se rigen por la ley aplicable en el país del usuario, y primero buscamos resolver cualquier disputa de forma amistosa mediante la <a class=\"legal-inline-link\" href=\"/support\">página de soporte</a> o a través de <a class=\"legal-inline-link\" href=\"https://goldenstore.online\" target=\"_blank\" rel=\"noopener noreferrer\" dir=\"ltr\">goldenstore.online</a>."
           ]
         }
       ]

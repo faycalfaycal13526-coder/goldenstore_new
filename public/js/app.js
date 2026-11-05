@@ -591,9 +591,17 @@
       ));
     }
 
+    const createdAt = Number(app.created_at) || 0;
+    const updatedAt = Number(app.updated_at) || 0;
+    const dateChip = (createdAt || updatedAt)
+      ? (updatedAt > createdAt
+          ? el('span', { class: 'chip' }, t('آخر تحديث') + ' ' + formatDate(updatedAt))
+          : el('span', { class: 'chip' }, t('تاريخ النشر') + ' ' + formatDate(createdAt)))
+      : null;
     content.append(el('div', { class: 'chip-row' },
       app.category ? el('span', { class: 'chip' }, S.categoryName(app.category)) : null,
       el('span', { class: 'chip' }, t('الإصدار') + ' ' + (app.version_name || '—')),
+      dateChip,
     ));
 
     content.append(ratingSection(app));

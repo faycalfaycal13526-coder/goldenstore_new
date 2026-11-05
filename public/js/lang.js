@@ -272,6 +272,7 @@
     'الموقع الرسمي': { en: 'Official website', fr: 'Site officiel', es: 'Sitio oficial' },
     'جميع الحقوق محفوظة': { en: 'All rights reserved', fr: 'Tous droits réservés', es: 'Todos los derechos reservados' },
     'آخر تحديث': { en: 'Last updated', fr: 'Dernière mise à jour', es: 'Última actualización' },
+    'تاريخ النشر': { en: 'Published', fr: 'Publié le', es: 'Publicado el' },
     'أوافق على': { en: 'I agree to the', fr: 'J’accepte les', es: 'Acepto los' },
     'و': { en: 'and', fr: 'et', es: 'y' },
     'يجب الموافقة على شروط الخدمة وسياسة الخصوصية قبل المتابعة.': {
@@ -509,28 +510,9 @@
     'تعذّر حفظ الإعداد': { en: 'Could not save setting', fr: 'Impossible d’enregistrer le paramètre', es: 'No se pudo guardar la configuración' },
     'تعذّر تسجيل الخروج، حاول مرة أخرى': { en: 'Could not sign out. Please try again.', fr: 'Impossible de vous déconnecter. Veuillez réessayer.', es: 'No se pudo cerrar la sesión. Inténtalo de nuevo.' },
 
-    // ---- Chat attachments, voice notes and links (2026-11) ----
-    'إرسال صورة': { en: 'Send image', fr: 'Envoyer une image', es: 'Enviar imagen' },
-    'التقاط صورة': { en: 'Take photo', fr: 'Prendre une photo', es: 'Tomar foto' },
-    'تسجيل رسالة صوتية': { en: 'Record voice message', fr: 'Enregistrer un message vocal', es: 'Grabar mensaje de voz' },
-    'إيقاف التسجيل': { en: 'Stop recording', fr: 'Arrêter l’enregistrement', es: 'Detener grabación' },
-    'جارٍ التسجيل…': { en: 'Recording…', fr: 'Enregistrement…', es: 'Grabando…' },
-    'مرفق واحد جاهز': { en: 'One attachment ready', fr: 'Une pièce jointe prête', es: 'Un archivo adjunto listo' },
-    'مرفقات جاهزة': { en: 'Attachments ready', fr: 'Pièces jointes prêtes', es: 'Archivos adjuntos listos' },
-    'إزالة المرفق': { en: 'Remove attachment', fr: 'Supprimer la pièce jointe', es: 'Quitar archivo adjunto' },
-    'فتح الصورة': { en: 'Open image', fr: 'Ouvrir l’image', es: 'Abrir imagen' },
+    // ---- Chat links (2026-11) ----
     'فتح الرابط': { en: 'Open link', fr: 'Ouvrir le lien', es: 'Abrir enlace' },
-    'رسالة صوتية': { en: 'Voice message', fr: 'Message vocal', es: 'Mensaje de voz' },
     'صورة': { en: 'Image', fr: 'Image', es: 'Imagen' },
-    'الملف كبير جداً': { en: 'File is too large', fr: 'Fichier trop volumineux', es: 'El archivo es demasiado grande' },
-    'نوع الملف غير مدعوم': { en: 'Unsupported file type', fr: 'Type de fichier non pris en charge', es: 'Tipo de archivo no compatible' },
-    'الحد الأقصى أربعة مرفقات': { en: 'Maximum of four attachments', fr: 'Quatre pièces jointes maximum', es: 'Máximo cuatro archivos adjuntos' },
-    'تعذّر قراءة الصورة': { en: 'Could not read the image', fr: 'Impossible de lire l’image', es: 'No se pudo leer la imagen' },
-    'التسجيل الصوتي غير مدعوم في هذا المتصفح': { en: 'Voice recording is not supported in this browser', fr: 'L’enregistrement vocal n’est pas pris en charge par ce navigateur', es: 'La grabación de voz no es compatible con este navegador' },
-    'تعذّر الوصول إلى الميكروفون': { en: 'Could not access the microphone', fr: 'Impossible d’accéder au microphone', es: 'No se pudo acceder al micrófono' },
-    'تعذّر قراءة التسجيل': { en: 'Could not read the recording', fr: 'Impossible de lire l’enregistrement', es: 'No se pudo leer la grabación' },
-    'التسجيل فارغ': { en: 'Recording is empty', fr: 'Enregistrement vide', es: 'La grabación está vacía' },
-    'متصفحك لا يدعم تشغيل الصوت': { en: 'Your browser does not support audio playback', fr: 'Votre navigateur ne prend pas en charge la lecture audio', es: 'Tu navegador no admite reproducción de audio' },
     'تم حذف المحادثة وكل محتواها': { en: 'Conversation and all its contents were deleted', fr: 'Conversation et tout son contenu supprimés', es: 'Conversación y todo su contenido eliminados' },
 
     // ---- Standalone support chat + admin chat UI (2026-11) ----

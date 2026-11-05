@@ -49,7 +49,6 @@
   let lastSignature = '';
   let lastReadSignature = '';
   let pollTimer = null;
-  let attachmentComposer = null;
 
   S.ready((user) => {
     if (!user) { S.goToLogin(); return; }
@@ -64,7 +63,6 @@
     });
     window.addEventListener('pagehide', () => {
       if (pollTimer) window.clearInterval(pollTimer);
-      if (attachmentComposer) attachmentComposer.destroy();
     }, { once: true });
   });
 
@@ -112,17 +110,11 @@
     sendBtn = el('button', {
       class: 'wa-send', type: 'submit',
       'aria-label': t('إرسال'), title: t('إرسال'),
-    }, ico('ship', 'icon'));
-    if (attachmentComposer) attachmentComposer.destroy();
-    attachmentComposer = C.createAttachmentComposer({
-      el, ico, t, toast, isAdmin: false,
-      onChanged: (state) => { sendBtn.disabled = sending || state.recording; },
-    });
+    }, ico('plane', 'icon'));
     const form = el('form', {
       class: 'wa-compose', onsubmit: (e) => { e.preventDefault(); send(); },
     },
       el('div', { class: 'wa-compose-main' },
-        attachmentComposer.node,
         el('div', { class: 'wa-input-row' },
           el('div', { class: 'wa-input-wrap' }, input),
           sendBtn)),
@@ -167,10 +159,6 @@
         C.linkifyInto(textEl, m.body, { title: t('فتح الرابط') });
         bubbleKids.push(textEl);
       }
-      const attachments = C.renderAttachments(m.attachments, { el, ico, t, isAdmin: false });
-      if (attachments.length) {
-        bubbleKids.push(el('div', { class: 'wa-bubble-attachments', 'data-noi18n': '' }, attachments));
-      }
       bubbleKids.push(el('div', { class: 'wa-meta' },
         el('span', { class: 'wa-time' }, timeOf(m.created_at)),
         out ? el('span', { class: 'wa-ticks', 'aria-hidden': 'true' }, '✓✓') : null));
@@ -195,8 +183,7 @@
       const next = threads.find((th) => th.status !== 'closed') || null;
       const list = next && Array.isArray(next.messages) ? next.messages : [];
       const signature = (next ? next.id + ':' + next.status : 'new') + '|'
-        + list.map((m) => m.id + ':' + m.sender + ':' + m.created_at + ':'
-          + (Array.isArray(m.attachments) ? m.attachments.map((a) => a.id).join('.') : '')).join('|');
+        + list.map((m) => m.id + ':' + m.sender + ':' + m.created_at).join('|');
       activeThread = next;
       messages = list;
       const changed = signature !== lastSignature;
@@ -223,29 +210,23 @@
 
   async function send() {
     if (sending || !input) return;
-    if (attachmentComposer && attachmentComposer.isRecording()) {
-      toast(t('إيقاف التسجيل'), 'info');
-      return;
-    }
     const message = input.value.trim();
-    const attachments = attachmentComposer ? attachmentComposer.getAttachments() : [];
-    if (message.length < 2 && !attachments.length) { input.focus(); return; }
+    if (message.length < 2) { input.focus(); return; }
     sending = true;
     sendBtn.disabled = true;
     sendBtn.classList.add('is-busy');
     try {
       if (activeThread) {
         await S.authedApi('/api/support/threads/' + encodeURIComponent(activeThread.id) + '/messages', {
-          method: 'POST', body: { message, attachments },
+          method: 'POST', body: { message },
         });
       } else {
         await S.authedApi('/api/support/threads', {
-          method: 'POST', body: { subject: t(SUBJECT), message, attachments },
+          method: 'POST', body: { subject: t(SUBJECT), message },
         });
       }
       input.value = '';
       autoGrow(input);
-      if (attachmentComposer) attachmentComposer.clear();
       await load(false, true);
       toast(t('تم إرسال الرسالة'), 'success');
     } catch (err) {

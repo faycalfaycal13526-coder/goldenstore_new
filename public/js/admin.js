@@ -1,6 +1,13 @@
 (async function () {
   const { api, el, ico, toast, formatBytes, formatNum, formatDate, themeToggleBtn } = window.GS;
-  const t = (window.GSI18N && window.GSI18N.t) ? window.GSI18N.t : (s) => s;
+  // Late-bound lookup: all report-tab strings (including toasts, confirmations
+  // and title/aria attributes) resolve through the manual GSI18N dictionary.
+  const t = (source) => {
+    try {
+      return window.GSI18N && typeof window.GSI18N.t === 'function'
+        ? window.GSI18N.t(source) : source;
+    } catch { return source; }
+  };
   const root = document.getElementById('content');
 
   let me = null;
@@ -367,7 +374,7 @@
       tabBtn('games', 'gamepad', 'الألعاب'),
       tabBtn('new', 'plus', 'إضافة جديد'),
       tabBtn('requests', 'flag', 'الطلبات والبلاغات'),
-      tabBtn('reports', 'message', 'بلاغات المراجعات'),
+      tabBtn('reports', 'message', t('بلاغات المراجعات')),
       tabBtn('notifications', 'bell', 'الإشعارات'),
       tabBtn('app-update', 'download', 'رابط تحميل التطبيق'),
       tabBtn('settings', 'settings', 'إعدادات المتجر'),
@@ -524,11 +531,11 @@
   // -------- review reports (review_reports) --------
   async function renderReports(body) {
     body.innerHTML = '';
-    const countEl = el('div', { class: 'reports-count' }, t('جارٍ التحميل…'));
+    const countEl = el('div', { class: 'reports-count' }, t('جارٍ تحميل البلاغات…'));
     const listWrap = el('div', { class: 'reports-list' });
     const refreshBtn = el('button', {
       class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => load(),
-    }, ico('refresh', 'icon icon-sm'), t('تحديث'));
+    }, ico('refresh', 'icon icon-sm'), t('تحديث القائمة'));
     body.append(
       el('div', { class: 'reports-toolbar' },
         el('div', null,
@@ -641,8 +648,11 @@
         el('div', { class: 'report-confirm' },
           el('span', { class: 'report-confirm-text' },
             isReview
-              ? t('حذف التعليق نهائياً؟ ستُحذف الإعجابات وكل البلاغات المرتبطة به.')
-              : t('تأكيد الحذف؟')),
+              ? t('هل أنت متأكد من حذف هذا التعليق نهائياً؟')
+              : t('هل أنت متأكد من حذف هذا البلاغ؟')),
+          isReview
+            ? el('span', { class: 'report-confirm-text' }, t('سيُحذف التعليق مع الإعجابات وجميع البلاغات المرتبطة به.'))
+            : null,
           el('button', {
             class: 'btn btn-danger btn-sm', type: 'button',
             onclick: () => (isReview ? removeReview() : removeReport()),

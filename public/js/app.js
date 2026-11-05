@@ -1,7 +1,16 @@
 // App detail page — Google Play–style.
 (function () {
   const S = window.Store;
-  const { el, ico, api, getQuery, formatBytes, formatNum, formatCount, formatDate, ratingOf, toast, t } = S;
+  const { el, ico, api, getQuery, formatBytes, formatNum, formatCount, formatDate, ratingOf, toast } = S;
+  // JS-generated UI (menus, dialogs, toasts, confirmations) must resolve
+  // through the manual i18n dictionary instead of the MutationObserver-based
+  // machine translator, so every string is translated immediately.
+  const t = (source) => {
+    try {
+      return window.GSI18N && typeof window.GSI18N.t === 'function'
+        ? window.GSI18N.t(source) : source;
+    } catch { return source; }
+  };
   const root = document.getElementById('root');
   S.bottomNav('');
 
@@ -209,7 +218,8 @@
       ),
       r.comment ? el('div', { class: 'report-preview-text' }, String(r.comment).slice(0, 240)) : null,
     );
-    const submitBtn = el('button', { class: 'btn btn-danger', type: 'button' }, ico('flag', 'icon icon-sm'), t('إرسال البلاغ'));
+    const submitLabel = el('span', null, t('إرسال البلاغ'));
+    const submitBtn = el('button', { class: 'btn btn-danger', type: 'button' }, ico('flag', 'icon icon-sm'), submitLabel);
     submitBtn.addEventListener('click', async () => {
       if (!selected) {
         errLine.textContent = t('اختر سبب البلاغ');
@@ -217,17 +227,19 @@
         return;
       }
       submitBtn.disabled = true;
+      submitLabel.textContent = t('جاري الإرسال...');
       errLine.textContent = '';
       try {
         const res = await api(`/api/apps/${encodeURIComponent(slug)}/reviews/${encodeURIComponent(String(r.id))}/report`, {
           method: 'POST', body: { userId: viewerId(), reason: selected },
         });
         close();
-        toast(res && res.duplicate ? t('لقد أبلغت عن هذه المراجعة مسبقاً') : t('تم إرسال البلاغ إلى الإدارة'),
+        toast(res && res.duplicate ? t('لقد أبلغت عن هذه المراجعة مسبقاً') : t('تم إرسال البلاغ بنجاح'),
           res && res.duplicate ? 'info' : 'success');
       } catch {
         submitBtn.disabled = false;
-        errLine.textContent = t('تعذّر إرسال البلاغ، حاول مجدداً');
+        submitLabel.textContent = t('إرسال البلاغ');
+        errLine.textContent = t('حدث خطأ أثناء إرسال البلاغ');
       }
     });
     const card = el('div', {

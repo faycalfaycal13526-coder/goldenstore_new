@@ -611,38 +611,75 @@
     const dateCell = el('td', { class: 'report-date' }, r.created_at ? formatDate(r.created_at) : '—');
 
     const actionsCell = el('td', { class: 'report-actions' });
-    const deleteBtn = el('button', {
+    const reviewId = r.review_id ? String(r.review_id) : '';
+
+    const deleteReportBtn = el('button', {
       class: 'btn btn-danger btn-sm btn-delete-report', type: 'button',
       'aria-label': t('حذف البلاغ'),
+      title: t('حذف هذا البلاغ فقط'),
     }, ico('trash', 'icon icon-sm'), t('حذف البلاغ'));
+
+    const deleteReviewBtn = el('button', {
+      class: 'btn btn-secondary btn-sm btn-delete-review', type: 'button',
+      'aria-label': t('حذف التعليق'),
+      title: t('حذف التعليق نهائياً مع الإعجابات والبلاغات المرتبطة به'),
+      disabled: reviewId ? null : 'disabled',
+    }, ico('trash', 'icon icon-sm'), t('حذف التعليق'));
 
     function showDefault() {
       actionsCell.innerHTML = '';
-      actionsCell.append(deleteBtn);
+      actionsCell.append(el('div', {
+        class: 'report-actions-row',
+        style: { display: 'inline-flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' },
+      }, deleteReportBtn, deleteReviewBtn));
     }
-    function showConfirm() {
+
+    function showConfirm(action) {
       actionsCell.innerHTML = '';
+      const isReview = action === 'review';
       actionsCell.append(
         el('div', { class: 'report-confirm' },
-          el('span', { class: 'report-confirm-text' }, t('تأكيد الحذف؟')),
-          el('button', { class: 'btn btn-danger btn-sm', type: 'button', onclick: removeReport }, t('نعم، احذف')),
+          el('span', { class: 'report-confirm-text' },
+            isReview
+              ? t('حذف التعليق نهائياً؟ ستُحذف الإعجابات وكل البلاغات المرتبطة به.')
+              : t('تأكيد الحذف؟')),
+          el('button', {
+            class: 'btn btn-danger btn-sm', type: 'button',
+            onclick: () => (isReview ? removeReview() : removeReport()),
+          }, t('نعم، احذف')),
           el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: showDefault }, t('إلغاء')),
         ),
       );
     }
-    async function removeReport() {
+
+    async function runDelete(path, successMsg, errorMsg) {
       const confirmBtn = actionsCell.querySelector('.btn-danger');
       if (confirmBtn) confirmBtn.disabled = true;
       try {
-        await api(`/api/admin/reports/${encodeURIComponent(String(r.id))}`, { method: 'DELETE' });
-        toast(t('تم حذف البلاغ'), 'success');
+        await api(path, { method: 'DELETE' });
+        toast(successMsg, 'success');
         await refresh();
       } catch (e) {
         showDefault();
-        toast(e.message || t('تعذّر حذف البلاغ'), 'error');
+        toast(e.message || errorMsg, 'error');
       }
     }
-    deleteBtn.addEventListener('click', showConfirm);
+    function removeReport() {
+      return runDelete(
+        `/api/admin/reports/${encodeURIComponent(String(r.id))}`,
+        t('تم حذف البلاغ'), t('تعذّر حذف البلاغ'),
+      );
+    }
+    function removeReview() {
+      if (!reviewId) return;
+      return runDelete(
+        `/api/admin/reviews/${encodeURIComponent(reviewId)}`,
+        t('تم حذف التعليق'), t('تعذّر حذف التعليق'),
+      );
+    }
+
+    deleteReportBtn.addEventListener('click', () => showConfirm('report'));
+    deleteReviewBtn.addEventListener('click', () => showConfirm('review'));
     showDefault();
 
     row.append(appCell, reviewCell, reasonCell, dateCell, actionsCell);

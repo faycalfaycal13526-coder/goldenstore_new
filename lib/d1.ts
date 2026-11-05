@@ -215,3 +215,36 @@ export async function deleteReport(env: Env, reportId: string): Promise<boolean>
   const result: any = await env.DB.prepare('DELETE FROM review_reports WHERE id = ?').bind(reportId).run();
   return Number(result?.meta?.changes || 0) > 0;
 }
+
+/** Delete a review (star_votes row) and every row that references it:
+ *  review_likes and review_reports. Also recomputes the parent app's rating
+ *  aggregates, since a star_votes row carries both the comment and its vote.
+ *  All four writes are executed in one D1 batch (a single transaction). */
+export async function deleteReview(env: Env, reviewId: string): Promise<{ deleted: boolean; likes: number; reports: number }> {
+  const review: any = await env.DB.prepare('SELECT id, app_id FROM star_votes WHERE id = ?').bind(reviewId).first();
+  if (!review) return { deleted: false, likes: 0, reports: 0 };
+
+  // Count dependent rows and compute the app's aggregates AFTER the deletion,
+  // i.e. over the remaining votes of that app.
+  const [likesRow, reportsRow, aggRow]: any[] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) AS n FROM review_likes WHERE review_id = ?').bind(reviewId).first(),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM review_reports WHERE review_id = ?').bind(reviewId).first(),
+    env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(rating), 0) AS s FROM star_votes WHERE app_id = ? AND id <> ?')
+      .bind(review.app_id, reviewId).first(),
+  ]);
+  const likes = Number(likesRow?.n || 0);
+  const reports = Number(reportsRow?.n || 0);
+  const count = Number(aggRow?.n || 0);
+  const sum = Number(aggRow?.s || 0);
+  const rating = count > 0 ? Math.round((sum / count) * 10) / 10 : 0;
+
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM review_likes WHERE review_id = ?').bind(reviewId),
+    env.DB.prepare('DELETE FROM review_reports WHERE review_id = ?').bind(reviewId),
+    env.DB.prepare('DELETE FROM star_votes WHERE id = ?').bind(reviewId),
+    env.DB.prepare('UPDATE apps SET rating = ?, rating_count = ?, rating_sum = ?, stars = ? WHERE id = ?')
+      .bind(rating, count, sum, count, review.app_id),
+  ]);
+
+  return { deleted: true, likes, reports };
+}

@@ -4,7 +4,7 @@ import { verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../li
 import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
-  getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport,
+  getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport, deleteReview,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -633,6 +633,21 @@ app.delete('/admin/reports/:id', async (c) => {
   } catch (err: any) {
     console.error('[admin/reports] delete failed:', err?.message || err);
     return c.json({ error: 'delete_report_failed' }, 500);
+  }
+});
+
+app.delete('/admin/reviews/:reviewId', async (c) => {
+  const reviewId = String(c.req.param('reviewId') || '');
+  if (!reviewId || reviewId.length > 128 || !/^[A-Za-z0-9_-]+$/.test(reviewId)) {
+    return c.json({ error: 'invalid_id' }, 400);
+  }
+  try {
+    const result = await deleteReview(c.env, reviewId);
+    if (!result.deleted) return c.json({ error: 'not_found' }, 404);
+    return c.json({ ok: true, ...result });
+  } catch (err: any) {
+    console.error('[admin/reviews] delete failed:', err?.message || err);
+    return c.json({ error: 'delete_review_failed' }, 500);
   }
 });
 

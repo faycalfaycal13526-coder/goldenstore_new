@@ -288,13 +288,229 @@
     return map[sdk] || (sdk ? `SDK ${sdk}` : '—');
   }
 
-  function openModal(src) {
-    const m = el('div', { class: 'modal', onclick: (e) => { if (e.target === m) m.remove(); } },
-      el('button', { class: 'close', 'aria-label': t('إغلاق'), onclick: () => m.remove() }, ico('close')),
-      el('img', { src, onclick: () => m.remove(), onerror: function () { this.style.display = 'none'; } }),
+  /* ===================================================================
+     Screenshots — large orientation-aware cards + full-screen lightbox.
+     New control labels are translated here (not via lang.js) so en/fr/es
+     keep working while lang.js stays untouched.
+     =================================================================== */
+  const GALLERY_I18N = {
+    'الصورة السابقة': { en: 'Previous screenshot', fr: 'Capture précédente', es: 'Captura anterior' },
+    'الصورة التالية': { en: 'Next screenshot', fr: 'Capture suivante', es: 'Captura siguiente' },
+    'معرض لقطات الشاشة': { en: 'Screenshots', fr: 'Captures d’écran', es: 'Capturas de pantalla' },
+    'تعذّر تحميل الصورة': { en: 'Could not load image', fr: 'Impossible de charger l’image', es: 'No se pudo cargar la imagen' },
+  };
+  function gt(ar) {
+    let lang = 'ar';
+    try { lang = (window.GSI18N && window.GSI18N.lang) || 'ar'; } catch {}
+    if (lang === 'ar') return ar;
+    const local = GALLERY_I18N[ar] && GALLERY_I18N[ar][lang];
+    return local || t(ar);
+  }
+
+  let closeActiveGallery = null;
+
+  function openGallery(urls, startIndex, trigger) {
+    const list = (Array.isArray(urls) ? urls : []).filter((u) => typeof u === 'string' && u.trim());
+    if (!list.length) return;
+    if (closeActiveGallery) closeActiveGallery();
+    let index = Math.max(0, Math.min(Number(startIndex) || 0, list.length - 1));
+    const prevFocus = document.activeElement;
+    const prevOverflow = document.body.style.overflow;
+    let closed = false;
+
+    const img = el('img', { class: 'lb-image', alt: '', draggable: 'false' });
+    const errLine = el('div', { class: 'lb-error' });
+    const stage = el('div', { class: 'lb-stage' }, img, errLine);
+    const counter = el('div', { class: 'lb-counter', 'aria-live': 'polite' });
+    const thumbs = el('div', { class: 'lb-thumbs' });
+    const closeBtn = el('button', {
+      class: 'lb-close', type: 'button',
+      'aria-label': t('إغلاق'), title: t('إغلاق'),
+      onclick: () => close(),
+    }, ico('close', 'icon'));
+    const prevBtn = el('button', {
+      class: 'lb-nav lb-prev', type: 'button',
+      'aria-label': gt('الصورة السابقة'), title: gt('الصورة السابقة'),
+      onclick: (e) => { e.stopPropagation(); go(-1); },
+    }, ico('arrowLeft', 'icon'));
+    const nextBtn = el('button', {
+      class: 'lb-nav lb-next', type: 'button',
+      'aria-label': gt('الصورة التالية'), title: gt('الصورة التالية'),
+      onclick: (e) => { e.stopPropagation(); go(1); },
+    }, ico('arrowRight', 'icon'));
+
+    const overlay = el('div', {
+      class: 'gs-lightbox', role: 'dialog', 'aria-modal': 'true',
+      'aria-label': gt('معرض لقطات الشاشة'), tabindex: '-1',
+      onclick: (e) => { if (e.target === overlay || e.target === stage) close(); },
+    },
+      closeBtn,
+      el('div', { class: 'lb-topbar' }, counter),
+      stage,
+      prevBtn,
+      nextBtn,
+      el('div', { class: 'lb-footer' }, thumbs),
     );
-    document.body.append(m);
-    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { m.remove(); document.removeEventListener('keydown', esc); } });
+
+    const thumbNodes = list.map((url, i) => {
+      const b = el('button', {
+        class: 'lb-thumb', type: 'button',
+        'aria-label': `${gt('معرض لقطات الشاشة')} ${i + 1} / ${list.length}`,
+        onclick: (e) => { e.stopPropagation(); show(i); },
+      }, el('img', { src: url, alt: '', loading: 'lazy' }));
+      thumbs.append(b);
+      return b;
+    });
+
+    function preload(i) {
+      [i - 1, i + 1].forEach((j) => {
+        const u = list[(j + list.length) % list.length];
+        if (!u) return;
+        try { const pre = new Image(); pre.src = u; } catch {}
+      });
+    }
+
+    function show(i) {
+      index = (i + list.length) % list.length;
+      img.classList.remove('is-ready');
+      errLine.textContent = '';
+      img.alt = `${gt('معرض لقطات الشاشة')} — ${index + 1} / ${list.length}`;
+      img.onload = () => img.classList.add('is-ready');
+      img.onerror = () => {
+        img.classList.remove('is-ready');
+        img.removeAttribute('src');
+        errLine.textContent = gt('تعذّر تحميل الصورة');
+      };
+      img.src = list[index];
+      // A cached image (or re-selecting the same thumbnail) may not fire a
+      // second load event — reveal it immediately in that case.
+      if (img.complete && img.naturalWidth) img.classList.add('is-ready');
+      counter.textContent = `${index + 1} / ${list.length}`;
+      thumbNodes.forEach((n, k) => {
+        n.classList.toggle('is-active', k === index);
+        if (k === index) n.setAttribute('aria-current', 'true');
+        else n.removeAttribute('aria-current');
+      });
+      const single = list.length < 2;
+      prevBtn.hidden = single;
+      nextBtn.hidden = single;
+      thumbs.hidden = single;
+      if (thumbNodes[index] && typeof thumbNodes[index].scrollIntoView === 'function') {
+        try { thumbNodes[index].scrollIntoView({ block: 'nearest', inline: 'center' }); } catch {}
+      }
+      preload(index);
+    }
+
+    function go(step) { if (list.length > 1) show(index + step); }
+
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+      else if (e.key === 'Tab') {
+        const focusables = [closeBtn, prevBtn, nextBtn, ...thumbNodes].filter((n) => !n.hidden);
+        if (!focusables.length) return;
+        const first = focusables[0], last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    }
+
+    // Touch swipe (mobile): horizontal gestures navigate, vertical ones scroll.
+    let sx = null, sy = null;
+    stage.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+    }, { passive: true });
+    stage.addEventListener('touchend', (e) => {
+      if (sx == null || !e.changedTouches || !e.changedTouches.length) return;
+      const dx = e.changedTouches[0].clientX - sx;
+      const dy = e.changedTouches[0].clientY - sy;
+      sx = null; sy = null;
+      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) go(dx < 0 ? 1 : -1);
+    }, { passive: true });
+
+    function close() {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      document.body.style.overflow = prevOverflow;
+      if (closeActiveGallery === close) closeActiveGallery = null;
+      const target = (trigger && trigger.focus) ? trigger : prevFocus;
+      if (target && typeof target.focus === 'function') { try { target.focus(); } catch {} }
+    }
+
+    document.addEventListener('keydown', onKey, true);
+    document.body.style.overflow = 'hidden';
+    document.body.append(overlay);
+    closeActiveGallery = close;
+    show(index);
+    try { overlay.focus(); } catch {}
+  }
+
+  // Backwards-compatible single-image entry point.
+  function openModal(src) { openGallery([src], 0); }
+
+  function renderScreenshots(screenshots) {
+    const urls = (screenshots || []).map((x) => (x && x.url) || '').filter(Boolean);
+    const shots = el('div', { class: 'shots', role: 'list', 'aria-label': t('لقطات الشاشة') });
+    urls.forEach((url, i) => {
+      const img = el('img', {
+        class: 'shot-img', src: url, alt: '', draggable: 'false', decoding: 'async',
+        loading: i < 2 ? 'eager' : 'lazy',
+      });
+      const card = el('button', {
+        class: 'shot-card', type: 'button', role: 'listitem',
+        'aria-label': `${t('لقطات الشاشة')} ${i + 1} / ${urls.length}`,
+        onclick: () => openGallery(urls, i, card),
+      },
+        img,
+        el('span', { class: 'shot-zoom', 'aria-hidden': 'true' }, ico('image', 'icon icon-sm')),
+      );
+      function orient() {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) return;
+        const ratio = w / h;
+        card.classList.remove('is-portrait', 'is-landscape', 'is-square');
+        card.classList.add(ratio >= 1.15 ? 'is-landscape' : ratio <= 0.85 ? 'is-portrait' : 'is-square');
+      }
+      img.addEventListener('load', orient);
+      img.addEventListener('error', () => card.classList.add('is-error'));
+      if (img.complete && img.naturalWidth) orient();
+      shots.append(card);
+    });
+    return el('div', { class: 'd-section' }, shots);
+  }
+
+  async function loadCategories(app, container) {
+    const section = el('div', { class: 'd-section gs-cats-section' });
+    container.append(section);
+    const type = app && app.type === 'game' ? 'game' : 'app';
+    let cats = [];
+    try {
+      const res = await api(`/api/categories?type=${encodeURIComponent(type)}`);
+      cats = Array.isArray(res && res.categories) ? res.categories : [];
+    } catch { cats = []; }
+    const items = cats.filter((c) => c && (c.slug || c.name)).slice(0, 12);
+    if (!items.length) { section.remove(); return; }
+    const track = el('div', { class: 'gs-cats', role: 'list' });
+    items.forEach((c) => {
+      const slug = String(c.slug || c.name || '');
+      const name = (typeof S.categoryName === 'function' && S.categoryName(slug)) || c.name || slug || '—';
+      const count = Number(c.count || 0);
+      const card = el('a', {
+        class: 'gs-cat', role: 'listitem',
+        href: `/search?category=${encodeURIComponent(slug)}`, title: name,
+      },
+        el('span', { class: 'gs-cat-icon', 'aria-hidden': 'true' }, ico(c.icon || 'grid', 'icon')),
+        el('span', { class: 'gs-cat-name' }, name),
+        el('span', { class: 'gs-cat-count' }, `${formatNum(count)} ${t(type === 'game' ? 'لعبة' : 'تطبيق')}`),
+      );
+      if (app && app.category === slug) card.classList.add('is-active');
+      track.append(card);
+    });
+    section.append(el('div', { class: 'gs-cats-head' }, el('h3', null, t('الفئات'))), track);
   }
 
   async function getFingerprint() {
@@ -373,11 +589,7 @@
     content.append(installControl(app));
     content.append(el('div', { class: 'd-note' }, t('سيتم تنزيل ملف APK') + ` (${formatBytes(app.size_bytes || 0)}). ` + t('فعّل «تثبيت من مصادر غير معروفة» لإكمال التثبيت.')));
 
-    if (screenshots.length) {
-      const shots = el('div', { class: 'shots' });
-      screenshots.forEach((s) => { if (s.url) shots.append(el('img', { src: s.url, alt: '', loading: 'lazy', onclick: () => openModal(s.url) })); });
-      content.append(el('div', { class: 'd-section' }, shots));
-    }
+    if (screenshots.length) content.append(renderScreenshots(screenshots));
 
     if (app.short_description || app.description) {
       content.append(el('div', { class: 'd-section' },
@@ -393,6 +605,7 @@
 
     content.append(ratingSection(app));
 
+    loadCategories(app, content);
     loadSimilar(app, content);
 
     function stat(value, label) {

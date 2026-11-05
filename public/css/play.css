@@ -559,26 +559,45 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
-/* screenshots */
-.shots { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 4px 0; }
-.shots::-webkit-scrollbar { display: none; }
-.shots img {
-  /* Orientation-aware sizing: auto dimensions + max constraints let the
-     browser fit ANY aspect ratio (portrait 9:16, landscape 16:9, square…)
-     with zero cropping or distortion. Portrait shots use the full row
-     height; landscape shots use the full allowed width. */
-  width: auto; height: auto;
-  max-height: 280px;
-  max-width: min(72vw, 480px);
-  min-width: 96px;   /* loading placeholder before intrinsic size is known */
-  min-height: 96px;
-  flex: 0 0 auto;
-  border-radius: 14px;
-  background: var(--surface-2);
-  object-fit: contain;  /* protective: never stretch if a bound ever clamps */
-  cursor: pointer;
-  border: 1px solid var(--line);
+/* screenshots — one large, consistent stage height for every card;
+   width adapts to the image orientation, so landscape shots are never tiny. */
+.shots {
+  display: flex; align-items: stretch; gap: 16px;
+  overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory; scrollbar-width: thin;
+  padding: 6px 2px 16px;
 }
+.shots::-webkit-scrollbar { height: 8px; }
+.shots::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
+.shot-card {
+  position: relative; display: block; flex: 0 0 auto;
+  width: var(--shot-w, 260px); height: var(--shot-h, 460px);
+  padding: 0; border: 1px solid var(--line); border-radius: 20px;
+  background: #08080a; overflow: hidden; cursor: zoom-in;
+  scroll-snap-align: start;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.shot-card:hover { transform: translateY(-3px); border-color: var(--nav); box-shadow: 0 14px 34px rgba(0,0,0,.45); }
+.shot-card:focus-visible { outline: 3px solid var(--nav); outline-offset: 3px; }
+.shot-card.is-landscape { --shot-w: 460px; }
+.shot-card.is-square { --shot-w: 400px; }
+.shot-img {
+  display: block; width: 100%; height: 100%;
+  object-fit: contain;              /* never crop or stretch */
+  background: #08080a;             /* intentional letterbox, like Play's viewer */
+  user-select: none; -webkit-user-drag: none;
+}
+.shot-card.is-error .shot-img { opacity: 0; }
+.shot-zoom {
+  position: absolute; inset-inline-end: 10px; bottom: 10px;
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55); color: #fff; opacity: 0;
+  transition: opacity .18s ease;
+}
+.shot-zoom .icon { width: 16px; height: 16px; }
+.shot-card:hover .shot-zoom, .shot-card:focus-visible .shot-zoom { opacity: 1; }
 
 .d-section { margin-top: 28px; }
 .d-section h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
@@ -1186,11 +1205,9 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     line-height: 1.9;
     max-width: 700px;
   }
-  .shots img {
-    max-height: 340px;
-    max-width: min(46vw, 560px);
-    border-radius: 18px;
-  }
+  .shot-card { height: 520px; --shot-w: 290px; }
+  .shot-card.is-landscape { --shot-w: 520px; }
+  .shot-card.is-square { --shot-w: 450px; }
 
   /* --- Login gate desktop --- */
   .gate .logo {
@@ -2158,3 +2175,165 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .report-confirm-text { font-size: 12px; color: #ff8a8a; font-weight: 700; }
 :root[data-theme="light"] .report-reason-badge { color: #b3261e; background: rgba(217, 48, 37, .1); }
 :root[data-theme="light"] .report-confirm-text { color: #b3261e; }
+
+
+/* =====================================================================
+   Full-screen screenshot gallery (lightbox)
+   ===================================================================== */
+.gs-lightbox {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; flex-direction: column;
+  background: rgba(4,4,6,.97); color: #fff;
+  animation: lb-fade .2s ease both;
+  -webkit-tap-highlight-color: transparent;
+}
+@keyframes lb-fade { from { opacity: 0; } to { opacity: 1; } }
+.lb-topbar {
+  position: absolute; top: 0; left: 0; right: 0; height: 64px; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.lb-counter {
+  font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,.9); background: rgba(0,0,0,.4);
+  padding: 6px 14px; border-radius: 999px;
+}
+.lb-close {
+  position: absolute; top: 12px; inset-inline-end: 12px; z-index: 3;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.1); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.lb-close:hover, .lb-close:focus-visible { background: rgba(255,255,255,.24); }
+.lb-close .icon { width: 22px; height: 22px; }
+.lb-stage {
+  position: relative; flex: 1 1 auto; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 76px 84px 16px; overflow: hidden; touch-action: pan-y;
+}
+.lb-image {
+  max-width: 100%; max-height: 100%; width: auto; height: auto;
+  object-fit: contain; border-radius: 10px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.6);
+  opacity: 0; transition: opacity .18s ease;
+  user-select: none; -webkit-user-drag: none;
+}
+.lb-image.is-ready { opacity: 1; }
+.lb-error {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  font-size: 14px; color: rgba(255,255,255,.8); text-align: center;
+}
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 3;
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.1); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background .16s ease, transform .16s ease;
+}
+.lb-nav:hover, .lb-nav:focus-visible { background: rgba(255,255,255,.26); }
+.lb-nav .icon { width: 24px; height: 24px; }
+.lb-prev { left: 16px; }
+.lb-next { right: 16px; }
+.lb-nav[hidden] { display: none; }
+.lb-footer {
+  flex: 0 0 auto; display: flex; justify-content: center;
+  padding: 10px 12px 18px;
+  background: linear-gradient(to top, rgba(0,0,0,.55), transparent);
+}
+.lb-thumbs {
+  display: flex; gap: 8px; max-width: 100%;
+  overflow-x: auto; padding: 4px; scrollbar-width: thin;
+}
+.lb-thumbs[hidden] { display: none; }
+.lb-thumb {
+  flex: 0 0 auto; width: 64px; height: 64px; padding: 0;
+  border: 2px solid transparent; border-radius: 10px; overflow: hidden;
+  background: #101014; opacity: .55; cursor: pointer;
+  transition: opacity .16s ease, border-color .16s ease;
+}
+.lb-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.lb-thumb.is-active { opacity: 1; border-color: var(--nav); }
+.lb-thumb:focus-visible { outline: 2px solid var(--nav); outline-offset: 2px; }
+
+/* =====================================================================
+   Categories — Google Play style circular cards
+   ===================================================================== */
+.gs-cats-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.gs-cats-head h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.gs-cats {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 132px; gap: 12px;
+  overflow-x: auto; padding: 4px 2px 14px;
+  overscroll-behavior-inline: contain; scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+.gs-cats::-webkit-scrollbar { height: 8px; }
+.gs-cats::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
+.gs-cat {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 8px 14px; border-radius: 18px;
+  background: var(--surface); border: 1px solid var(--line);
+  text-align: center; scroll-snap-align: start;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease;
+}
+.gs-cat:hover { transform: translateY(-3px); border-color: var(--nav); background: var(--surface-2); text-decoration: none; }
+.gs-cat:focus-visible { outline: 3px solid var(--nav); outline-offset: 2px; }
+.gs-cat.is-active { border-color: var(--nav); background: var(--nav-bg); }
+.gs-cat-icon {
+  width: 62px; height: 62px; border-radius: 50%; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--nav-bg); border: 1px solid var(--line); color: var(--nav);
+}
+.gs-cat-icon .icon { width: 28px; height: 28px; }
+.gs-cat-name {
+  font-size: 13.5px; font-weight: 700; color: var(--text); line-height: 1.35;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-cat-count { font-size: 11.5px; color: var(--text-3); }
+
+/* Home / Games "Categories" tab: turn the plain .approw list into cards.
+   :has() scopes the grid to category lists only, so app lists are untouched. */
+@supports selector(.applist:has(> a[href^="/search?category="])) {
+  .applist:has(> a[href^="/search?category="]) {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px; padding: 8px;
+  }
+}
+.applist > a.approw[href^="/search?category="] {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 10px; text-align: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease;
+}
+.applist > a.approw[href^="/search?category="]:hover {
+  transform: translateY(-3px); border-color: var(--nav);
+  background: var(--surface-2); text-decoration: none;
+}
+.applist > a.approw[href^="/search?category="] .art {
+  width: 64px; height: 64px; flex: 0 0 auto; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line);
+}
+.applist > a.approw[href^="/search?category="] .art .icon { width: 28px; height: 28px; color: var(--nav); }
+.applist > a.approw[href^="/search?category="] .info { flex: 0 0 auto; width: 100%; text-align: center; }
+.applist > a.approw[href^="/search?category="] .nm { font-size: 13.5px; font-weight: 700; }
+.applist > a.approw[href^="/search?category="] .sub { font-size: 11.5px; }
+.applist > a.approw[href^="/search?category="] > .icon:last-child { display: none; }
+
+@media (max-width: 540px) {
+  .shot-card { height: 340px; --shot-w: 190px; }
+  .shot-card.is-landscape { --shot-w: 340px; }
+  .shot-card.is-square { --shot-w: 300px; }
+  .lb-stage { padding: 68px 12px 8px; }
+  .lb-nav { width: 42px; height: 42px; top: auto; bottom: 96px; transform: none; }
+  .lb-prev { left: 12px; }
+  .lb-next { right: 12px; }
+  .lb-footer { padding-bottom: 12px; }
+  .lb-thumb { width: 52px; height: 52px; }
+  .gs-cats { grid-auto-columns: 118px; }
+  .gs-cat-icon { width: 56px; height: 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shot-card, .gs-cat, .lb-image, .gs-lightbox { animation: none; transition: none; }
+}

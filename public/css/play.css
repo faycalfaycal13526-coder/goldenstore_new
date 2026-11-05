@@ -559,10 +559,10 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
-/* screenshots — portrait cards return to their original height (280px,
-   340px on wide screens). Landscape cards are slightly smaller than the
-   previous gallery build and are capped to the viewport so they keep the
-   same side edges as portrait cards instead of touching the screen border. */
+/* screenshots — portrait cards use their original height (280px mobile,
+   340px desktop). Landscape images use the EXACT SAME height and an automatic
+   width derived from their own aspect ratio, so they are never letterboxed
+   small, never cropped, and never stretched. */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -573,9 +573,14 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .shots::-webkit-scrollbar { height: 8px; }
 .shots::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
 .shot-card {
+  --shot-h: 280px;   /* ONE height value shared by portrait AND landscape */
+  --shot-w: 158px;
   position: relative; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;  /* centered card */
-  width: var(--shot-w, 158px); height: var(--shot-h, 280px);
+  width: var(--shot-w); height: var(--shot-h);
+  /* content-box keeps the 1px border outside the declared height, so the
+     image really is 280px / 340px tall for BOTH orientations. */
+  box-sizing: content-box;
   padding: 0; border: 1px solid var(--line); border-radius: 20px;
   background: #08080a; overflow: hidden; cursor: zoom-in;
   scroll-snap-align: start;
@@ -584,8 +589,17 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .shot-card:hover { transform: translateY(-3px); border-color: var(--nav); box-shadow: 0 14px 34px rgba(0,0,0,.45); }
 .shot-card:focus-visible { outline: 3px solid var(--nav); outline-offset: 3px; }
 .shot-card.is-landscape {
-  --shot-w: min(400px, calc(100vw - 48px));
+  width: auto;                 /* card follows the image's aspect ratio */
+  height: var(--shot-h);       /* EXACT same height as the portrait cards */
+  min-width: calc(var(--shot-h) * 1.1);  /* stable card before the image loads */
   scroll-snap-align: center;   /* keep a centered card with visible edges */
+}
+.shot-card.is-landscape .shot-img {
+  width: auto;                 /* aspect ratio determines the width automatically */
+  height: var(--shot-h);       /* 280px mobile / 340px desktop — same as portrait */
+  max-width: none;             /* override the global img { max-width: 100% } */
+  flex: 0 0 auto;
+  object-fit: contain;         /* never crop, never stretch */
 }
 .shot-card.is-square { --shot-w: 280px; }
 .shot-img {
@@ -1211,8 +1225,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     line-height: 1.9;
     max-width: 700px;
   }
-  .shot-card { height: 340px; --shot-w: 190px; }
-  .shot-card.is-landscape { --shot-w: min(460px, calc(100vw - 64px)); }
+  .shot-card { --shot-h: 340px; --shot-w: 190px; }
   .shot-card.is-square { --shot-w: 340px; }
 
   /* --- Login gate desktop --- */
@@ -2286,7 +2299,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .applist > a.approw[href^="/search?category="] > .icon:last-child { display: none; }
 
 @media (max-width: 540px) {
-  .shot-card.is-landscape { --shot-w: min(288px, calc(100vw - 48px)); }
+  /* portrait AND landscape both inherit --shot-h: 280px here */
   .lb-stage { padding: 68px 12px 8px; }
   .lb-footer { padding-bottom: 12px; }
   .lb-thumb { width: 52px; height: 52px; }

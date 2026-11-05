@@ -2708,6 +2708,8 @@ html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); 
   --wa-notice: rgba(244,192,31,.12);
   --wa-notice-text: #f0dba2;
   --wa-shadow: 0 1px .5px rgba(0,0,0,.28);
+  --wa-avatar-bg: #2a220c;
+  --wa-avatar-ring: rgba(244,192,31,.55);
 }
 :root[data-theme="light"] {
   /* Golden chat palette (light) */
@@ -2730,6 +2732,8 @@ html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); 
   --wa-notice: rgba(199,154,6,.15);
   --wa-notice-text: #6b5713;
   --wa-shadow: 0 1px .5px rgba(90,70,0,.14);
+  --wa-avatar-bg: #2a220c;
+  --wa-avatar-ring: rgba(199,154,6,.6);
 }
 body.wa-page { margin: 0; overflow: hidden; background: #0f0d07; }
 :root[data-theme="light"] body.wa-page { background: #e8dcbd; }
@@ -2768,9 +2772,15 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
 .wa-avatar {
   width: 40px; height: 40px; flex: 0 0 auto;
   border-radius: 50%; display: grid; place-items: center;
-  background: var(--wa-accent); color: var(--wa-accent-ink);
+  background: var(--wa-avatar-bg); color: var(--wa-accent);
+  border: 1px solid var(--wa-avatar-ring); overflow: hidden;
 }
 .wa-avatar .icon { width: 22px; height: 22px; }
+.wa-brand-logo {
+  width: 100%; height: 100%; display: block;
+  object-fit: contain; box-sizing: border-box;
+  padding: 5px; border-radius: inherit;
+}
 .wa-head-info { flex: 1; min-width: 0; }
 .wa-head-title { font-size: 16px; font-weight: 800; line-height: 1.2; }
 .wa-head-sub { margin-top: 2px; font-size: 11.5px; color: var(--wa-sub); }

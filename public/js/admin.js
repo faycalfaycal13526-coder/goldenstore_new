@@ -567,6 +567,21 @@
           out ? el('span', { class: 'wa-ticks', 'aria-hidden': 'true' }, '✓✓') : null)));
   }
 
+  // The conversation header shows the store logo; list rows keep the user icon.
+  function brandAvatar() {
+    const box = el('span', { class: 'wa-admin-avatar has-logo', 'aria-hidden': 'true' });
+    const img = el('img', {
+      src: '/images/logo.png', alt: '', class: 'wa-brand-logo',
+      draggable: 'false', decoding: 'async',
+    });
+    img.addEventListener('error', () => {
+      img.remove();
+      box.append(ico('user', 'icon'));
+    });
+    box.append(img);
+    return box;
+  }
+
   async function renderSupport(body) {
     body.innerHTML = '';
     if (supportAdminTimer) { clearInterval(supportAdminTimer); supportAdminTimer = null; }
@@ -670,7 +685,7 @@
 
       const head = el('header', { class: 'wa-admin-head' },
         backBtn,
-        el('span', { class: 'wa-admin-avatar', 'aria-hidden': 'true' }, ico('user', 'icon')),
+        brandAvatar(),
         el('div', { class: 'wa-admin-head-info' },
           el('div', { class: 'wa-admin-head-name', 'data-noi18n': '' },
             thread.user_name || thread.user_email || thread.uid || t('مستخدم')),

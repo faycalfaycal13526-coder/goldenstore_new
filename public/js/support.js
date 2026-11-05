@@ -72,7 +72,17 @@
       class: 'wa-back', href: '/account',
       'aria-label': t('رجوع'), title: t('رجوع'),
     }, ico('chevronEnd', 'icon'));
-    const avatar = el('span', { class: 'wa-avatar', 'aria-hidden': 'true' }, ico('message', 'icon'));
+    // The store logo replaces the generic chat avatar in the conversation header.
+    const avatar = el('span', { class: 'wa-avatar', 'aria-hidden': 'true' });
+    const avatarLogo = el('img', {
+      src: '/images/logo.png', alt: '', class: 'wa-brand-logo',
+      draggable: 'false', decoding: 'async',
+    });
+    avatarLogo.addEventListener('error', () => {
+      avatarLogo.remove();
+      avatar.append(ico('message', 'icon'));
+    });
+    avatar.append(avatarLogo);
     const langWrap = el('div', { class: 'wa-lang' });
     try {
       const sw = S.langSwitcherEl && S.langSwitcherEl();

@@ -46,6 +46,112 @@ export async function listApps(env: Env, opts: ListAppsOptions = {}): Promise<{ 
   return { apps: (dataResult.results || []).map(rowToApp), total };
 }
 
+/* =========================================================================
+   Advanced search — GET /api/search and GET /api/search/suggest
+   -------------------------------------------------------------------------
+   All user values are bound parameters. Sort clauses come from a fixed
+   whitelist, and LIKE wildcards are escaped so a query like "100%" is
+   treated as literal text (no wildcard injection).
+   ========================================================================= */
+
+export interface SearchAppsOptions {
+  q?: string;
+  category?: string;
+  type?: string;
+  sort?: string;
+  minRating?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export const SEARCH_SORTS: Record<string, string> = {
+  recent:    'created_at DESC, id DESC',
+  newest:    'created_at DESC, id DESC',
+  popular:   'downloads DESC, rating DESC, id DESC',
+  downloads: 'downloads DESC, rating DESC, id DESC',
+  rating:    'rating DESC, rating_count DESC, downloads DESC, id DESC',
+  stars:     'rating DESC, rating_count DESC, downloads DESC, id DESC',
+  name:      'name_lower ASC, id ASC',
+  alpha:     'name_lower ASC, id ASC',
+};
+
+/** Escape %, _ and \ so LIKE treats the user's text literally. */
+function likeEscape(raw: string): string {
+  return raw.replace(/[\\%_]/g, (m) => '\\' + m);
+}
+
+/** One AND-group per whitespace token: every token must match at least one
+ *  of name / developer / short description / description / search terms. */
+function textConditions(q: string, params: any[]): string[] {
+  const tokens = q.toLowerCase().split(/\s+/)
+    .filter((w) => w.length > 0 && w.length <= 64).slice(0, 6);
+  const conditions: string[] = [];
+  for (const token of tokens) {
+    const like = `%${likeEscape(token)}%`;
+    conditions.push(
+      "(name_lower LIKE ? ESCAPE '\\'" +
+      " OR COALESCE(developer, '') LIKE ? ESCAPE '\\'" +
+      " OR COALESCE(short_description, '') LIKE ? ESCAPE '\\'" +
+      " OR COALESCE(description, '') LIKE ? ESCAPE '\\'" +
+      " OR COALESCE(search_terms, '') LIKE ? ESCAPE '\\')"
+    );
+    params.push(like, like, like, like, like);
+  }
+  return conditions;
+}
+
+export async function searchApps(env: Env, opts: SearchAppsOptions = {}): Promise<{ apps: any[]; total: number }> {
+  const limit = Math.min(Math.max(Number(opts.limit) || 24, 1), 60);
+  const offset = Math.max(Number(opts.offset) || 0, 0);
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  const q = (opts.q || '').trim();
+  if (q) conditions.push(...textConditions(q, params));
+
+  const category = (opts.category || '').trim();
+  if (category && /^[a-z0-9_-]{1,60}$/i.test(category)) {
+    conditions.push('category = ?');
+    params.push(category);
+  }
+
+  const type = (opts.type || '').trim();
+  if (type === 'game') conditions.push("type = 'game'");
+  else if (type === 'app') conditions.push("type != 'game'");
+
+  const minRating = Number(opts.minRating) || 0;
+  if (minRating > 0) {
+    conditions.push('COALESCE(rating, 0) >= ?');
+    params.push(Math.min(minRating, 5));
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const orderBy = `ORDER BY ${SEARCH_SORTS[(opts.sort || '').trim()] || SEARCH_SORTS.recent}`;
+
+  const countRow: any = await env.DB.prepare(`SELECT COUNT(*) AS total FROM apps ${where}`)
+    .bind(...params).first();
+  const total = Number(countRow?.total ?? 0);
+  const result = await env.DB.prepare(`SELECT * FROM apps ${where} ${orderBy} LIMIT ? OFFSET ?`)
+    .bind(...params, limit, offset).all();
+  return { apps: (result.results || []).map(rowToApp), total };
+}
+
+/** Lightweight autocomplete rows (no description / keys in the payload). */
+export async function suggestApps(env: Env, q: string, limit = 8): Promise<any[]> {
+  const query = (q || '').trim().toLowerCase();
+  if (!query) return [];
+  const n = Math.min(Math.max(Number(limit) || 8, 1), 12);
+  const params: any[] = [];
+  const conditions = textConditions(query, params);
+  if (!conditions.length) return [];
+  const result = await env.DB.prepare(
+    `SELECT id, slug, name, developer, category, type, icon_key, rating
+       FROM apps WHERE ${conditions.join(' AND ')}
+       ORDER BY downloads DESC, rating DESC, name_lower ASC LIMIT ?`
+  ).bind(...params, n).all();
+  return result.results || [];
+}
+
 export async function getAppBySlug(env: Env, slug: string): Promise<any | null> {
   const row = await env.DB.prepare('SELECT * FROM apps WHERE slug = ?').bind(slug).first();
   return row ? rowToApp(row) : null;

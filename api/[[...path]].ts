@@ -5,6 +5,7 @@ import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
   getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport, deleteReview,
+  searchApps, suggestApps,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -423,6 +424,73 @@ app.get('/categories', async (c) => {
   }
   const source = type === 'app' ? APP_CATEGORIES : type === 'game' ? GAME_CATEGORIES : DEFAULT_CATEGORIES;
   return c.json({ categories: source.map(cat => ({ ...cat, count: counts[cat.slug] || 0 })) });
+});
+
+/* =========================================================================
+   Advanced search — GET /api/search  (+ /api/search/suggest for autocomplete)
+   q            fuzzy LIKE over name / developer / short_description /
+                description / search_terms (all tokens must match)
+   category     exact slug
+   type         all | app | game
+   sort         recent | popular | rating | name (plus aliases)
+   min_rating   0..5
+   limit        1..60 (default 24), offset >= 0
+   All values are bound; sort uses a whitelist in lib/d1.ts.
+   ========================================================================= */
+app.get('/search/suggest', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'search-suggest', 90, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const q = (c.req.query('q') || '').trim().slice(0, 80).toLowerCase();
+  const limit = safeInt(c.req.query('limit') || '8', 1, 12);
+  if (!q) { c.header('Cache-Control', 'public, max-age=30'); return c.json({ suggestions: [], q: '' }); }
+  try {
+    const rows = await suggestApps(c.env, q, limit);
+    const suggestions = rows.map((r: any) => ({
+      slug: r.slug,
+      name: r.name,
+      developer: r.developer || '',
+      category: r.category,
+      type: r.type === 'game' ? 'game' : 'app',
+      rating: Number(r.rating) || 0,
+      icon_url: icon_url(r.icon_key, c.env, 96),
+    }));
+    c.header('Cache-Control', 'public, max-age=30');
+    return c.json({ suggestions, q });
+  } catch (e: any) {
+    return c.json({ error: 'd1_error', message: e.message }, 500);
+  }
+});
+
+app.get('/search', async (c) => {
+  const q = (c.req.query('q') || '').trim().slice(0, 120);
+  const category = (c.req.query('category') || '').trim().slice(0, 60);
+  const type = (c.req.query('type') || '').trim();
+  const sort = (c.req.query('sort') || 'recent').trim();
+  const minRatingRaw = Number(c.req.query('min_rating') || 0);
+  const minRating = Number.isFinite(minRatingRaw) ? Math.max(0, Math.min(5, minRatingRaw)) : 0;
+  const limit = safeInt(c.req.query('limit') || '24', 1, 60);
+  const offset = safeInt(c.req.query('offset') || '0', 0, 1000000);
+
+  try {
+    const result = await searchApps(c.env, { q, category, type, sort, minRating, limit, offset });
+    const apps = result.apps.map((a) => ({
+      ...appPublic(a),
+      icon_url: icon_url(a.icon_key, c.env),
+      feature_url: feature_url(a.feature_key, c.env),
+    }));
+    c.header('Cache-Control', q ? 'public, max-age=60' : 'public, max-age=120');
+    return c.json({
+      apps,
+      total: result.total,
+      limit,
+      offset,
+      hasMore: offset + apps.length < result.total,
+      query: q,
+      filters: { category, type: type || 'all', sort, min_rating: minRating },
+    });
+  } catch (e: any) {
+    return c.json({ error: 'd1_error', message: e.message }, 500);
+  }
 });
 
 app.get('/apps', async (c) => {

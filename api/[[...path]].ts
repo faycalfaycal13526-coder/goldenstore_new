@@ -8,6 +8,8 @@ import {
   searchApps, suggestApps,
   createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
   addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
+  getSupportAttachment, getSupportThreadDeletionStats,
+  type NewSupportAttachment,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -71,14 +73,19 @@ app.use('*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff'); c.header('X-Frame-Options', 'DENY');
   c.header('X-XSS-Protection', '1; mode=block'); c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
-  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  c.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()');
 });
 
-// Body size limit
+// Body size limit. Chat attachments are base64 in JSON, so support routes get
+// a larger (still bounded) allowance; all other endpoints keep the 1 MB cap.
 const MAX_BODY_SIZE = 1024 * 1024;
+const MAX_SUPPORT_BODY_SIZE = 4 * 1024 * 1024;
 app.use('*', async (c, next) => {
   const cl = c.req.header('content-length');
-  if (cl && Number(cl) > MAX_BODY_SIZE) return c.json({ error: 'payload_too_large' }, 413);
+  const path = c.req.path || '';
+  const isSupportWrite = path.startsWith('/api/support/') || path.startsWith('/api/admin/support/');
+  const limit = isSupportWrite ? MAX_SUPPORT_BODY_SIZE : MAX_BODY_SIZE;
+  if (cl && Number(cl) > limit) return c.json({ error: 'payload_too_large' }, 413);
   await next();
 });
 
@@ -715,6 +722,68 @@ app.post('/setup-r2-cors', async (c) => {
 });
 
 
+/* ------------------------- Support attachments ------------------------- */
+const SUPPORT_MAX_ATTACHMENTS = 4;
+const SUPPORT_MAX_ATTACHMENT_BYTES = 900 * 1024;
+const SUPPORT_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']);
+const SUPPORT_AUDIO_MIMES = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac']);
+const SUPPORT_DATA_URL = /^data:([^,]+);base64,([A-Za-z0-9+/=\s]+)$/;
+
+/** Validate client attachments. Only raster images and voice-note audio. */
+function parseSupportAttachments(raw: unknown): { items: NewSupportAttachment[]; error?: string } {
+  if (raw == null) return { items: [] };
+  if (!Array.isArray(raw)) return { items: [], error: 'invalid_attachments' };
+  if (raw.length > SUPPORT_MAX_ATTACHMENTS) return { items: [], error: 'too_many_attachments' };
+  const items: NewSupportAttachment[] = [];
+  for (const rawItem of raw) {
+    const a: any = rawItem || {};
+    const kind = a.kind === 'image' || a.kind === 'audio' ? a.kind : '';
+    const dataUrl = typeof a.data_url === 'string' ? a.data_url : '';
+    const match = SUPPORT_DATA_URL.exec(dataUrl);
+    if (!kind || !match) return { items: [], error: 'invalid_attachment' };
+    const fullMime = match[1].toLowerCase();
+    const baseMime = fullMime.split(';')[0].trim();
+    const allowed = kind === 'image' ? SUPPORT_IMAGE_MIMES.has(baseMime) : SUPPORT_AUDIO_MIMES.has(baseMime);
+    if (!allowed || fullMime.length > 120) return { items: [], error: 'unsupported_attachment_type' };
+    let sizeBytes = 0;
+    try { sizeBytes = atob(match[2].replace(/\s/g, '')).length; }
+    catch { return { items: [], error: 'invalid_attachment_data' }; }
+    if (sizeBytes < 1 || sizeBytes > SUPPORT_MAX_ATTACHMENT_BYTES) {
+      return { items: [], error: 'attachment_too_large' };
+    }
+    const fallback = kind === 'image' ? 'photo.jpg' : 'voice.webm';
+    items.push({
+      kind,
+      mime: fullMime,
+      name: sanitizeText(a.name, 120) || fallback,
+      size_bytes: sizeBytes,
+      data_url: dataUrl,
+    });
+  }
+  return { items };
+}
+
+function supportAttachmentResponse(att: { mime: string; name: string; data_url: string }): Response {
+  const match = /^data:([^,]+);base64,([\s\S]+)$/.exec(att.data_url || '');
+  if (!match) return new Response('', { status: 404 });
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(match[2].replace(/\s/g, ''));
+    bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  } catch {
+    return new Response('', { status: 404 });
+  }
+  const asciiName = (att.name || 'attachment').replace(/[^\x20-\x7E]/g, '_').replace(/["'\r\n]/g, '_').slice(0, 100);
+  const headers = new Headers({
+    'Content-Type': att.mime || 'application/octet-stream',
+    'Content-Length': String(bytes.byteLength),
+    'Content-Disposition': `inline; filename="${asciiName}"`,
+    'Cache-Control': 'private, max-age=300',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  return new Response(bytes.buffer as ArrayBuffer, { status: 200, headers });
+}
+
 /* ---------------------------- Support chat ---------------------------- */
 // Users authenticate with their Firebase ID token (Store.authedApi sends it).
 app.post('/support/threads', async (c) => {
@@ -725,9 +794,12 @@ app.post('/support/threads', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const subject = sanitizeText(body.subject, 120) || 'رسالة دعم';
   const message = sanitizeText(body.message, 2000);
-  if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
+  const parsed = parseSupportAttachments(body.attachments);
+  if (parsed.error) return c.json({ error: parsed.error }, 400);
+  if (message.length < 2 && !parsed.items.length) return c.json({ error: 'invalid_message' }, 400);
   const { thread, messages } = await createSupportThread(c.env, {
     uid: user.uid, email: user.email, name: user.name, subject, message,
+    attachments: parsed.items,
   });
   c.header('Cache-Control', 'no-store');
   return c.json({ thread: { ...thread, messages } }, 201);
@@ -748,11 +820,21 @@ app.post('/support/threads/:id/messages', async (c) => {
   if (!user) return c.json({ error: 'unauthorized' }, 401);
   const body = await c.req.json().catch(() => ({}));
   const message = sanitizeText(body.message, 2000);
-  if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
-  const out = await addSupportMessage(c.env, c.req.param('id'), 'user', message, user.uid);
+  const parsed = parseSupportAttachments(body.attachments);
+  if (parsed.error) return c.json({ error: parsed.error }, 400);
+  if (message.length < 2 && !parsed.items.length) return c.json({ error: 'invalid_message' }, 400);
+  const out = await addSupportMessage(c.env, c.req.param('id'), 'user', message, user.uid, parsed.items);
   if (!out) return c.json({ error: 'thread_not_found_or_closed' }, 404);
   c.header('Cache-Control', 'no-store');
   return c.json({ thread: out.thread, messages: out.messages }, 201);
+});
+
+app.get('/support/attachments/:id', async (c) => {
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const att = await getSupportAttachment(c.env, c.req.param('id'));
+  if (!att || att.uid !== user.uid) return c.json({ error: 'not_found' }, 404);
+  return supportAttachmentResponse(att);
 });
 
 app.post('/support/threads/:id/read', async (c) => {
@@ -765,6 +847,12 @@ app.post('/support/threads/:id/read', async (c) => {
 });
 
 app.use('/admin/*', requireAdmin);
+
+app.get('/admin/support/attachments/:id', async (c) => {
+  const att = await getSupportAttachment(c.env, c.req.param('id'));
+  if (!att) return c.json({ error: 'not_found' }, 404);
+  return supportAttachmentResponse(att);
+});
 
 /* --------------------- Review reports (admin only) --------------------- */
 
@@ -786,8 +874,10 @@ app.get('/admin/support/threads/:id', async (c) => {
 app.post('/admin/support/threads/:id/messages', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const message = sanitizeText(body.message, 2000);
-  if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
-  const out = await addSupportMessage(c.env, c.req.param('id'), 'admin', message);
+  const parsed = parseSupportAttachments(body.attachments);
+  if (parsed.error) return c.json({ error: parsed.error }, 400);
+  if (message.length < 2 && !parsed.items.length) return c.json({ error: 'invalid_message' }, 400);
+  const out = await addSupportMessage(c.env, c.req.param('id'), 'admin', message, '', parsed.items);
   if (!out) return c.json({ error: 'not_found' }, 404);
   c.header('Cache-Control', 'no-store');
   return c.json({ thread: out.thread, messages: out.messages }, 201);
@@ -803,9 +893,12 @@ app.patch('/admin/support/threads/:id', async (c) => {
 });
 
 app.delete('/admin/support/threads/:id', async (c) => {
-  const ok = await deleteSupportThread(c.env, c.req.param('id'));
+  const id = c.req.param('id');
+  const deleted = await getSupportThreadDeletionStats(c.env, id);
+  const ok = await deleteSupportThread(c.env, id);
   if (!ok) return c.json({ error: 'not_found' }, 404);
-  return c.json({ ok: true });
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true, deleted });
 });
 
 app.get('/admin/reports', async (c) => {

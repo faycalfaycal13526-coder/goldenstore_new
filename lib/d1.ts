@@ -357,9 +357,34 @@ export async function deleteReview(env: Env, reviewId: string): Promise<{ delete
 
 /* =========================================================================
  * Support chat (2026-11) — user ↔ admin conversation stored in D1.
- * Two tables: a thread per topic and an ordered list of messages. Both user
- * and admin can append messages; polling on the account page picks up replies.
+ * Threads, ordered messages, and attachment blobs (images + voice notes).
+ * Both user and admin can append messages/attachments; deleting a thread
+ * removes its messages, attachments and counters in one batch.
  * ========================================================================= */
+
+export type SupportAttachmentKind = 'image' | 'audio';
+
+export interface SupportAttachment {
+  id: string;
+  message_id: string;
+  thread_id: string;
+  sender: 'user' | 'admin';
+  kind: SupportAttachmentKind;
+  mime: string;
+  name: string;
+  size_bytes: number;
+  position: number;
+  created_at: number;
+}
+
+/** Attachment payload sent by the chat UI (base64 data URL, validated in API). */
+export interface NewSupportAttachment {
+  kind: SupportAttachmentKind;
+  mime: string;
+  name: string;
+  size_bytes: number;
+  data_url: string;
+}
 
 export interface SupportThread {
   id: string;
@@ -372,6 +397,7 @@ export interface SupportThread {
   updated_at: number;
   last_message_at: number;
   last_message?: string;
+  last_kind?: SupportAttachmentKind;
   message_count?: number;
   unread_admin: number;
   unread_user: number;
@@ -384,6 +410,7 @@ export interface SupportMessage {
   sender: 'user' | 'admin';
   body: string;
   created_at: number;
+  attachments?: SupportAttachment[];
 }
 
 const SUPPORT_SCHEMA = [
@@ -407,9 +434,24 @@ const SUPPORT_SCHEMA = [
      body TEXT NOT NULL,
      created_at INTEGER NOT NULL
    )`,
+  `CREATE TABLE IF NOT EXISTS support_attachments (
+     id TEXT PRIMARY KEY,
+     message_id TEXT NOT NULL,
+     thread_id TEXT NOT NULL,
+     sender TEXT NOT NULL,
+     kind TEXT NOT NULL,
+     mime TEXT NOT NULL,
+     name TEXT NOT NULL,
+     size_bytes INTEGER NOT NULL,
+     position INTEGER NOT NULL DEFAULT 0,
+     data_url TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   )`,
   `CREATE INDEX IF NOT EXISTS idx_support_threads_uid ON support_threads(uid, last_message_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_support_threads_admin ON support_threads(last_message_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_attachments_thread ON support_attachments(thread_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_attachments_message ON support_attachments(message_id, position)`,
 ];
 
 // Remember which D1 binding already has the schema (per isolate / per test DB).
@@ -430,6 +472,7 @@ function supportThreadFromRow(r: any): SupportThread {
     created_at: Number(r.created_at) || 0, updated_at: Number(r.updated_at) || 0,
     last_message_at: Number(r.last_message_at) || 0,
     last_message: r.last_message || undefined,
+    last_kind: r.last_kind === 'image' || r.last_kind === 'audio' ? r.last_kind : undefined,
     message_count: r.message_count != null ? Number(r.message_count) : undefined,
     unread_admin: Number(r.unread_admin) || 0, unread_user: Number(r.unread_user) || 0,
   };
@@ -440,7 +483,38 @@ function supportMessageFromRow(r: any): SupportMessage {
     id: String(r.id), thread_id: String(r.thread_id),
     sender: r.sender === 'admin' ? 'admin' : 'user',
     body: String(r.body || ''), created_at: Number(r.created_at) || 0,
+    attachments: [],
   };
+}
+
+function supportAttachmentFromRow(r: any): SupportAttachment {
+  return {
+    id: String(r.id), message_id: String(r.message_id), thread_id: String(r.thread_id),
+    sender: r.sender === 'admin' ? 'admin' : 'user',
+    kind: r.kind === 'audio' ? 'audio' : 'image',
+    mime: String(r.mime || 'application/octet-stream'),
+    name: String(r.name || ''),
+    size_bytes: Number(r.size_bytes) || 0,
+    position: Number(r.position) || 0,
+    created_at: Number(r.created_at) || 0,
+  };
+}
+
+/** Public attachment metadata only — never returns the stored data URL. */
+async function supportAttachmentsForThreads(env: Env, ids: string[]): Promise<Record<string, SupportAttachment[]>> {
+  const out: Record<string, SupportAttachment[]> = {};
+  if (!ids.length) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const res: any = await env.DB.prepare(
+    `SELECT id, message_id, thread_id, sender, kind, mime, name, size_bytes, position, created_at
+     FROM support_attachments
+     WHERE thread_id IN (${placeholders}) ORDER BY created_at ASC, position ASC, rowid ASC`
+  ).bind(...ids).all();
+  for (const r of res.results || []) {
+    const a = supportAttachmentFromRow(r);
+    (out[a.message_id] ||= []).push(a);
+  }
+  return out;
 }
 
 async function supportMessagesFor(env: Env, ids: string[]): Promise<Record<string, SupportMessage[]>> {
@@ -451,21 +525,52 @@ async function supportMessagesFor(env: Env, ids: string[]): Promise<Record<strin
     `SELECT id, thread_id, sender, body, created_at FROM support_messages
      WHERE thread_id IN (${placeholders}) ORDER BY created_at ASC, rowid ASC`
   ).bind(...ids).all();
+  const attachments = await supportAttachmentsForThreads(env, ids);
   for (const r of res.results || []) {
     const m = supportMessageFromRow(r);
+    m.attachments = attachments[m.id] || [];
     (out[m.thread_id] ||= []).push(m);
   }
   return out;
 }
 
+async function insertSupportAttachments(
+  env: Env,
+  threadId: string,
+  messageId: string,
+  sender: 'user' | 'admin',
+  attachments: NewSupportAttachment[],
+  ts: number,
+): Promise<SupportAttachment[]> {
+  if (!attachments.length) return [];
+  const rows: SupportAttachment[] = attachments.map((a, i) => ({
+    id: randomId(), message_id: messageId, thread_id: threadId, sender,
+    kind: a.kind, mime: a.mime, name: a.name, size_bytes: a.size_bytes,
+    position: i, created_at: ts,
+  }));
+  await env.DB.batch(rows.map((a) => env.DB.prepare(
+    `INSERT INTO support_attachments
+     (id, message_id, thread_id, sender, kind, mime, name, size_bytes, position, data_url, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    a.id, a.message_id, a.thread_id, a.sender, a.kind, a.mime, a.name,
+    a.size_bytes, a.position, attachments[a.position].data_url, a.created_at,
+  )));
+  return rows;
+}
+
 export async function createSupportThread(
   env: Env,
-  input: { uid: string; email?: string; name?: string; subject: string; message: string },
+  input: {
+    uid: string; email?: string; name?: string; subject: string; message: string;
+    attachments?: NewSupportAttachment[];
+  },
 ): Promise<{ thread: SupportThread; messages: SupportMessage[] }> {
   await ensureSupportSchema(env);
   const ts = nowSec();
   const threadId = randomId();
   const messageId = randomId();
+  const attachments = Array.isArray(input.attachments) ? input.attachments : [];
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO support_threads
@@ -476,12 +581,16 @@ export async function createSupportThread(
       `INSERT INTO support_messages (id, thread_id, sender, body, created_at) VALUES (?, ?, 'user', ?, ?)`
     ).bind(messageId, threadId, input.message, ts),
   ]);
+  const stored = await insertSupportAttachments(env, threadId, messageId, 'user', attachments, ts);
   const thread: SupportThread = {
     id: threadId, uid: input.uid, user_email: input.email || '', user_name: input.name || '',
     subject: input.subject, status: 'open', created_at: ts, updated_at: ts, last_message_at: ts,
     unread_admin: 1, unread_user: 0,
   };
-  const messages: SupportMessage[] = [{ id: messageId, thread_id: threadId, sender: 'user', body: input.message, created_at: ts }];
+  const messages: SupportMessage[] = [{
+    id: messageId, thread_id: threadId, sender: 'user', body: input.message,
+    created_at: ts, attachments: stored,
+  }];
   return { thread, messages };
 }
 
@@ -503,6 +612,10 @@ export async function listAdminSupportThreads(env: Env, limit = 100): Promise<Su
   const res: any = await env.DB.prepare(
     `SELECT t.*,
        (SELECT body FROM support_messages m WHERE m.thread_id = t.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_message,
+       (SELECT a.kind FROM support_attachments a
+          JOIN support_messages m ON m.id = a.message_id
+         WHERE m.thread_id = t.id
+         ORDER BY m.created_at DESC, m.rowid DESC, a.position ASC, a.rowid ASC LIMIT 1) AS last_kind,
        (SELECT COUNT(*) FROM support_messages m WHERE m.thread_id = t.id) AS message_count
      FROM support_threads t ORDER BY t.last_message_at DESC, t.rowid DESC LIMIT ?`
   ).bind(Math.min(Math.max(limit, 1), 200)).all();
@@ -528,11 +641,13 @@ export async function addSupportMessage(
   sender: 'user' | 'admin',
   body: string,
   uid = '',
+  attachments: NewSupportAttachment[] = [],
 ): Promise<{ thread: SupportThread; messages: SupportMessage[] } | null> {
   await ensureSupportSchema(env);
   const r: any = await env.DB.prepare('SELECT * FROM support_threads WHERE id = ?').bind(threadId).first();
   if (!r) return null;
   if (sender === 'user' && (String(r.uid) !== uid || r.status === 'closed')) return null;
+  const items = Array.isArray(attachments) ? attachments : [];
   const ts = nowSec();
   const messageId = randomId();
   const unreadAdmin = sender === 'user' ? 1 : 0;
@@ -548,6 +663,7 @@ export async function addSupportMessage(
        WHERE id = ?`
     ).bind(ts, ts, unreadAdmin, unreadUser, threadId),
   ]);
+  await insertSupportAttachments(env, threadId, messageId, sender, items, ts);
   return getSupportThread(env, threadId);
 }
 
@@ -566,11 +682,43 @@ export async function markSupportThreadRead(env: Env, threadId: string, who: 'us
   await env.DB.prepare(`UPDATE support_threads SET ${column} = 0 WHERE id = ?`).bind(threadId).run();
 }
 
+/** One attachment with its private data URL and the owning thread's uid. */
+export async function getSupportAttachment(
+  env: Env,
+  attachmentId: string,
+): Promise<(SupportAttachment & { data_url: string; uid: string }) | null> {
+  await ensureSupportSchema(env);
+  const r: any = await env.DB.prepare(
+    `SELECT a.*, t.uid FROM support_attachments a
+     JOIN support_threads t ON t.id = a.thread_id WHERE a.id = ?`
+  ).bind(attachmentId).first();
+  if (!r) return null;
+  return { ...supportAttachmentFromRow(r), data_url: String(r.data_url || ''), uid: String(r.uid || '') };
+}
+
+export async function getSupportThreadDeletionStats(
+  env: Env,
+  threadId: string,
+): Promise<{ messages: number; attachments: number }> {
+  await ensureSupportSchema(env);
+  const r: any = await env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM support_messages WHERE thread_id = ?) AS messages,
+       (SELECT COUNT(*) FROM support_attachments WHERE thread_id = ?) AS attachments`
+  ).bind(threadId, threadId).first();
+  return { messages: Number(r?.messages) || 0, attachments: Number(r?.attachments) || 0 };
+}
+
+/** Hard delete: thread + every message + every attachment blob. */
 export async function deleteSupportThread(env: Env, threadId: string): Promise<boolean> {
   await ensureSupportSchema(env);
   const existing: any = await env.DB.prepare('SELECT id FROM support_threads WHERE id = ?').bind(threadId).first();
   if (!existing) return false;
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM support_attachments WHERE thread_id = ?').bind(threadId),
+    env.DB.prepare(
+      'DELETE FROM support_attachments WHERE message_id IN (SELECT id FROM support_messages WHERE thread_id = ?)'
+    ).bind(threadId),
     env.DB.prepare('DELETE FROM support_messages WHERE thread_id = ?').bind(threadId),
     env.DB.prepare('DELETE FROM support_threads WHERE id = ?').bind(threadId),
   ]);

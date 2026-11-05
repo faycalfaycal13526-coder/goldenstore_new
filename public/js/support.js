@@ -4,6 +4,7 @@
 (function () {
   'use strict';
   const S = window.Store;
+  const C = window.GSChat;
   const { el, ico, t, toast, formatDate } = S;
   const root = document.getElementById('root');
 
@@ -48,6 +49,7 @@
   let lastSignature = '';
   let lastReadSignature = '';
   let pollTimer = null;
+  let attachmentComposer = null;
 
   S.ready((user) => {
     if (!user) { S.goToLogin(); return; }
@@ -62,6 +64,7 @@
     });
     window.addEventListener('pagehide', () => {
       if (pollTimer) window.clearInterval(pollTimer);
+      if (attachmentComposer) attachmentComposer.destroy();
     }, { once: true });
   });
 
@@ -109,10 +112,21 @@
     sendBtn = el('button', {
       class: 'wa-send', type: 'submit',
       'aria-label': t('إرسال'), title: t('إرسال'),
-    }, ico('plane', 'icon'));
+    }, ico('ship', 'icon'));
+    if (attachmentComposer) attachmentComposer.destroy();
+    attachmentComposer = C.createAttachmentComposer({
+      el, ico, t, toast, isAdmin: false,
+      onChanged: (state) => { sendBtn.disabled = sending || state.recording; },
+    });
     const form = el('form', {
       class: 'wa-compose', onsubmit: (e) => { e.preventDefault(); send(); },
-    }, el('div', { class: 'wa-input-wrap' }, input), sendBtn);
+    },
+      el('div', { class: 'wa-compose-main' },
+        attachmentComposer.node,
+        el('div', { class: 'wa-input-row' },
+          el('div', { class: 'wa-input-wrap' }, input),
+          sendBtn)),
+    );
 
     root.append(head, chatEl, form);
     input.addEventListener('input', () => autoGrow(input));
@@ -147,13 +161,22 @@
         lastDay = dk;
       }
       const out = m.sender !== 'admin';
+      const bubbleKids = [];
+      if (m.body) {
+        const textEl = el('div', { class: 'wa-bubble-text', 'data-noi18n': '' });
+        C.linkifyInto(textEl, m.body, { title: t('فتح الرابط') });
+        bubbleKids.push(textEl);
+      }
+      const attachments = C.renderAttachments(m.attachments, { el, ico, t, isAdmin: false });
+      if (attachments.length) {
+        bubbleKids.push(el('div', { class: 'wa-bubble-attachments', 'data-noi18n': '' }, attachments));
+      }
+      bubbleKids.push(el('div', { class: 'wa-meta' },
+        el('span', { class: 'wa-time' }, timeOf(m.created_at)),
+        out ? el('span', { class: 'wa-ticks', 'aria-hidden': 'true' }, '✓✓') : null));
       chatEl.append(
         el('div', { class: 'wa-row ' + (out ? 'out' : 'in') },
-          el('div', { class: 'wa-bubble ' + (out ? 'out' : 'in') },
-            el('div', { class: 'wa-bubble-text', 'data-noi18n': '' }, m.body || ''),
-            el('div', { class: 'wa-meta' },
-              el('span', { class: 'wa-time' }, timeOf(m.created_at)),
-              out ? el('span', { class: 'wa-ticks', 'aria-hidden': 'true' }, '✓✓') : null))),
+          el('div', { class: 'wa-bubble ' + (out ? 'out' : 'in') }, bubbleKids)),
       );
     });
     chatEl.append(el('div', { class: 'wa-notice wa-notice-foot' }, t(AUTO_NOTE)));
@@ -172,7 +195,8 @@
       const next = threads.find((th) => th.status !== 'closed') || null;
       const list = next && Array.isArray(next.messages) ? next.messages : [];
       const signature = (next ? next.id + ':' + next.status : 'new') + '|'
-        + list.map((m) => m.id + ':' + m.sender + ':' + m.created_at).join('|');
+        + list.map((m) => m.id + ':' + m.sender + ':' + m.created_at + ':'
+          + (Array.isArray(m.attachments) ? m.attachments.map((a) => a.id).join('.') : '')).join('|');
       activeThread = next;
       messages = list;
       const changed = signature !== lastSignature;
@@ -199,23 +223,29 @@
 
   async function send() {
     if (sending || !input) return;
+    if (attachmentComposer && attachmentComposer.isRecording()) {
+      toast(t('إيقاف التسجيل'), 'info');
+      return;
+    }
     const message = input.value.trim();
-    if (message.length < 2) { input.focus(); return; }
+    const attachments = attachmentComposer ? attachmentComposer.getAttachments() : [];
+    if (message.length < 2 && !attachments.length) { input.focus(); return; }
     sending = true;
     sendBtn.disabled = true;
     sendBtn.classList.add('is-busy');
     try {
       if (activeThread) {
         await S.authedApi('/api/support/threads/' + encodeURIComponent(activeThread.id) + '/messages', {
-          method: 'POST', body: { message },
+          method: 'POST', body: { message, attachments },
         });
       } else {
         await S.authedApi('/api/support/threads', {
-          method: 'POST', body: { subject: t(SUBJECT), message },
+          method: 'POST', body: { subject: t(SUBJECT), message, attachments },
         });
       }
       input.value = '';
       autoGrow(input);
+      if (attachmentComposer) attachmentComposer.clear();
       await load(false, true);
       toast(t('تم إرسال الرسالة'), 'success');
     } catch (err) {

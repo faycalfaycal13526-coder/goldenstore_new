@@ -2881,8 +2881,75 @@ html[dir="ltr"] .wa-admin-back .icon { transform: scaleX(-1); }
 .wa-send.is-busy .icon { animation: wa-pulse .8s ease-in-out infinite; }
 @keyframes wa-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 
+/* Composer tools, attachment chips, media bubbles and detected links */
+.wa-compose-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.wa-input-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; }
+.wa-input-row .wa-input-wrap { flex: 1; min-width: 0; }
+.wa-attach-tools { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wa-compose-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wa-tool {
+  width: 34px; height: 34px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--wa-line); border-radius: 50%;
+  background: var(--wa-input); color: var(--wa-text); cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.wa-tool:hover { border-color: var(--wa-accent); color: var(--wa-accent); }
+.wa-tool .icon { width: 18px; height: 18px; }
+.wa-tool.is-recording {
+  background: #b3261e; border-color: #b3261e; color: #fff;
+  animation: wa-record-pulse 1s ease-in-out infinite;
+}
+@keyframes wa-record-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(179,38,30,.45); } 50% { box-shadow: 0 0 0 6px rgba(179,38,30,0); } }
+.wa-file-input { display: none; }
+.wa-attach-status {
+  font-size: 11px; color: var(--wa-sub); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wa-attach-preview { display: flex; flex-wrap: wrap; gap: 6px; }
+.wa-attach-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 4px 6px; border-radius: 999px;
+  background: var(--wa-input); border: 1px solid var(--wa-line);
+  font-size: 11px; color: var(--wa-sub);
+}
+.wa-attach-thumb { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }
+.wa-attach-thumb.wa-attach-audio { display: inline-flex; align-items: center; justify-content: center; background: var(--wa-day-bg); color: var(--wa-accent); }
+.wa-attach-thumb.wa-attach-audio .icon { width: 14px; height: 14px; }
+.wa-attach-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-attach-remove {
+  width: 20px; height: 20px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%; background: transparent; color: var(--wa-sub); cursor: pointer;
+}
+.wa-attach-remove .icon { width: 13px; height: 13px; }
+.wa-attach-remove:hover { color: #ffb4ab; }
+
+.wa-bubble-attachments { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.wa-attachment-image-link {
+  display: block; width: fit-content; max-width: 100%;
+  border-radius: 10px; overflow: hidden; border: 1px solid var(--wa-line);
+}
+.wa-attachment-image {
+  display: block; max-width: 100%; max-height: 260px; width: auto; height: auto;
+  object-fit: contain; background: var(--wa-input);
+}
+.wa-bubble.out .wa-attachment-image-link { border-color: rgba(255,255,255,.22); }
+.wa-attachment-audio { display: flex; flex-direction: column; gap: 4px; }
+.wa-attachment-player { width: min(260px, 100%); min-width: 200px; }
+.wa-attachment-caption { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--wa-sub); }
+.wa-attachment-caption .icon { width: 13px; height: 13px; }
+.wa-link {
+  color: var(--wa-tick); text-decoration: underline; text-underline-offset: 2px;
+  overflow-wrap: anywhere; direction: ltr; unicode-bidi: isolate;
+}
+.wa-bubble.out .wa-link { color: #fff6d8; }
+
 @media (max-width: 420px) {
   .wa-chat, .wa-admin-msgs { padding: 12px 8px 16px; }
   .wa-bubble { max-width: 86%; }
   .wa-head-title { font-size: 15px; }
+  .wa-tool { width: 32px; height: 32px; }
+  .wa-attach-name { max-width: 80px; }
+  .wa-attachment-player { min-width: 0; width: 100%; }
 }

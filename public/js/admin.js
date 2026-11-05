@@ -1,5 +1,6 @@
 (async function () {
   const { api, el, ico, toast, formatBytes, formatNum, formatDate, themeToggleBtn } = window.GS;
+  const C = window.GSChat;
   // Late-bound lookup: all report-tab strings (including toasts, confirmations
   // and title/aria attributes) resolve through the manual GSI18N dictionary.
   const t = (source) => {
@@ -534,6 +535,8 @@
   let supportAdminTimer = null;
   let supportSelectedId = null;
   let supportMobileChat = false;
+  let supportComposer = null;
+  let supportComposerThreadId = null;
   const supportAdminDrafts = Object.create(null);
 
   function waLang() { return (window.GSI18N && window.GSI18N.lang) || 'ar'; }
@@ -559,12 +562,21 @@
     node.style.height = Math.min(node.scrollHeight || 44, 120) + 'px';
   }
   function waBubble(m, out) {
+    const kids = [];
+    if (m.body) {
+      const textEl = el('div', { class: 'wa-bubble-text', 'data-noi18n': '' });
+      C.linkifyInto(textEl, m.body, { title: t('فتح الرابط') });
+      kids.push(textEl);
+    }
+    const attachments = C.renderAttachments(m.attachments, { el, ico, t, isAdmin: true });
+    if (attachments.length) {
+      kids.push(el('div', { class: 'wa-bubble-attachments', 'data-noi18n': '' }, attachments));
+    }
+    kids.push(el('div', { class: 'wa-meta' },
+      el('span', { class: 'wa-time' }, waTime(m.created_at)),
+      out ? el('span', { class: 'wa-ticks', 'aria-hidden': 'true' }, '✓✓') : null));
     return el('div', { class: 'wa-row ' + (out ? 'out' : 'in') },
-      el('div', { class: 'wa-bubble ' + (out ? 'out' : 'in') },
-        el('div', { class: 'wa-bubble-text', 'data-noi18n': '' }, m.body || ''),
-        el('div', { class: 'wa-meta' },
-          el('span', { class: 'wa-time' }, waTime(m.created_at)),
-          out ? el('span', { class: 'wa-ticks', 'aria-hidden': 'true' }, '✓✓') : null)));
+      el('div', { class: 'wa-bubble ' + (out ? 'out' : 'in') }, kids));
   }
 
   // The conversation header shows the store logo; list rows keep the user icon.
@@ -584,6 +596,11 @@
 
   async function renderSupport(body) {
     body.innerHTML = '';
+    if (supportComposer) {
+      supportComposer.destroy();
+      supportComposer = null;
+      supportComposerThreadId = null;
+    }
     if (supportAdminTimer) { clearInterval(supportAdminTimer); supportAdminTimer = null; }
 
     const countEl = el('div', { class: 'wa-admin-count' }, t('جارٍ تحميل رسائل الدعم…'));
@@ -617,6 +634,11 @@
 
     function threadItem(th) {
       const unread = Number(th.unread_admin) || 0;
+      const previewText = th.last_message
+        || (th.last_kind === 'image' ? t('صورة')
+          : th.last_kind === 'audio' ? t('رسالة صوتية') : '—');
+      const previewEl = el('span', { class: 'wa-admin-item-preview', 'data-noi18n': '' });
+      C.linkifyInto(previewEl, previewText, { title: t('فتح الرابط') });
       return el('button', {
         type: 'button',
         class: 'wa-admin-item' + (th.id === supportSelectedId ? ' active' : '') + (unread ? ' unread' : ''),
@@ -629,7 +651,7 @@
               th.user_name || th.user_email || th.uid || t('مستخدم')),
             el('span', { class: 'wa-admin-item-time' }, waTime(th.last_message_at))),
           el('span', { class: 'wa-admin-item-bottom' },
-            el('span', { class: 'wa-admin-item-preview', 'data-noi18n': '' }, th.last_message || '—'),
+            previewEl,
             unread ? el('span', { class: 'wa-admin-unread' }, formatNum(unread)) : null)),
         el('span', {
           class: 'wa-admin-status-dot ' + (th.status === 'open' ? 'is-open' : 'is-closed'),
@@ -640,9 +662,22 @@
     }
 
     async function openThread(id) {
+      const sameThread = !!supportComposer && supportComposerThreadId === id;
+      const composerNode = supportComposer ? supportComposer.node : null;
+      if (composerNode) composerNode.remove();
+      if (supportComposer && !sameThread) {
+        supportComposer.destroy();
+        supportComposer = null;
+        supportComposerThreadId = null;
+      }
       let res;
       try { res = await api('/api/admin/support/threads/' + encodeURIComponent(id)); }
       catch (e) {
+        if (supportComposer) {
+          supportComposer.destroy();
+          supportComposer = null;
+          supportComposerThreadId = null;
+        }
         chatPanel.innerHTML = '';
         chatPanel.append(emptyMsg(t('تعذّر تحميل رسائل الدعم'), e.message || t('حاول مجدداً')));
         return;
@@ -673,11 +708,13 @@
         class: 'btn btn-danger btn-sm', type: 'button', onclick: async () => {
           if (typeof window.confirm === 'function' && !window.confirm(t('تأكيد حذف المحادثة'))) return;
           try {
-            await api('/api/admin/support/threads/' + encodeURIComponent(id), { method: 'DELETE' });
+            const out = await api('/api/admin/support/threads/' + encodeURIComponent(id), { method: 'DELETE' });
             supportSelectedId = null;
             supportMobileChat = false;
             delete supportAdminDrafts['admin:' + id];
-            toast(t('تم حذف المحادثة'), 'success');
+            const total = out && out.deleted ? Number(out.deleted.messages || 0) + Number(out.deleted.attachments || 0) : 0;
+            toast(total ? `${t('تم حذف المحادثة وكل محتواها')} · ${formatNum(total)}`
+              : t('تم حذف المحادثة وكل محتواها'), 'success');
             await load(false, true);
           } catch (e) { toast(t('تعذّر حذف المحادثة'), 'error'); }
         },
@@ -715,35 +752,64 @@
         const replyBtn = el('button', {
           class: 'wa-send', type: 'submit',
           'aria-label': t('إرسال الرد'), title: t('إرسال الرد'),
-        }, ico('plane', 'icon'));
+        }, ico('ship', 'icon'));
         let sendingReply = false;
+        if (!supportComposer) {
+          supportComposer = C.createAttachmentComposer({
+            el, ico, t, toast, isAdmin: true,
+            onChanged: (state) => { replyBtn.disabled = sendingReply || state.recording; },
+          });
+          supportComposerThreadId = id;
+        } else if (!sameThread) {
+          supportComposer.clear();
+        }
         const doReply = async () => {
           if (sendingReply) return;
+          if (supportComposer && supportComposer.isRecording()) {
+            toast(t('إيقاف التسجيل'), 'info');
+            return;
+          }
           const message = replyInput.value.trim();
-          if (message.length < 2) { replyInput.focus(); return; }
+          const attachments = supportComposer ? supportComposer.getAttachments() : [];
+          if (message.length < 2 && !attachments.length) { replyInput.focus(); return; }
           sendingReply = true;
           replyBtn.disabled = true;
           try {
             await api('/api/admin/support/threads/' + encodeURIComponent(id) + '/messages', {
-              method: 'POST', body: { message },
+              method: 'POST', body: { message, attachments },
             });
             replyInput.value = '';
             supportAdminDrafts['admin:' + id] = '';
+            if (supportComposer) supportComposer.clear();
             toast(t('تم إرسال الرد'), 'success');
             await load(false, true);
           } catch (err) { toast(t('تعذّر إرسال الرد'), 'error'); }
-          finally { sendingReply = false; replyBtn.disabled = false; }
+          finally {
+            sendingReply = false;
+            replyBtn.disabled = !!(supportComposer && supportComposer.isRecording());
+          }
         };
         const replyForm = el('form', {
           class: 'wa-admin-compose', onsubmit: (e) => { e.preventDefault(); doReply(); },
-        }, el('div', { class: 'wa-input-wrap' }, replyInput), replyBtn);
+        },
+          el('div', { class: 'wa-compose-main' },
+            supportComposer.node,
+            el('div', { class: 'wa-input-row' },
+              el('div', { class: 'wa-input-wrap' }, replyInput),
+              replyBtn)));
         replyInput.addEventListener('input', () => waAutoGrow(replyInput));
         replyInput.addEventListener('keydown', (e) => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doReply(); }
         });
+        replyBtn.disabled = sendingReply || !!(supportComposer && supportComposer.isRecording());
         chatPanel.append(replyForm);
         waAutoGrow(replyInput);
       } else {
+        if (supportComposer) {
+          supportComposer.destroy();
+          supportComposer = null;
+          supportComposerThreadId = null;
+        }
         chatPanel.append(el('div', { class: 'wa-admin-closed' }, t('المحادثة مغلقة')));
       }
       restoreDrafts();
@@ -754,6 +820,11 @@
     async function load(silent, force) {
       if (!document.body.contains(body)) {
         if (supportAdminTimer) { clearInterval(supportAdminTimer); supportAdminTimer = null; }
+        if (supportComposer) {
+          supportComposer.destroy();
+          supportComposer = null;
+          supportComposerThreadId = null;
+        }
         return;
       }
       if (loading && !force) return;
@@ -768,6 +839,11 @@
         layout.classList.toggle('chat-open', waIsMobile() && supportMobileChat);
         itemsEl.innerHTML = '';
         if (!threads.length) {
+          if (supportComposer) {
+            supportComposer.destroy();
+            supportComposer = null;
+            supportComposerThreadId = null;
+          }
           itemsEl.append(emptyMsg(t('لا توجد رسائل دعم'),
             t('تظهر هنا رسائل المستخدمين ويمكنك الرد عليها مباشرة.')));
           supportSelectedId = null;
@@ -779,6 +855,11 @@
           if (!threads.some((x) => x.id === supportSelectedId)) supportSelectedId = threads[0].id;
           threads.forEach((th) => itemsEl.append(threadItem(th)));
           if (waIsMobile() && !supportMobileChat) {
+            if (supportComposer) {
+              supportComposer.destroy();
+              supportComposer = null;
+              supportComposerThreadId = null;
+            }
             chatPanel.innerHTML = '';
             chatPanel.append(el('div', { class: 'wa-admin-placeholder' },
               t('اختر محادثة لعرض الرسائل')));

@@ -559,10 +559,10 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 
 .d-note { margin-top: 12px; font-size: 12px; color: var(--text-3); text-align: center; }
 
-/* screenshots — portrait cards use their original height (280px mobile,
-   340px desktop). Landscape images use the EXACT SAME height and an automatic
-   width derived from their own aspect ratio, so they are never letterboxed
-   small, never cropped, and never stretched. */
+/* screenshots — one shared height for every orientation (220px mobile,
+   270px desktop, ~20% smaller than the previous build). Portrait widths scale
+   with it to keep the 9:16 ratio; landscape uses width: auto so its own aspect
+   ratio determines the width. object-fit: contain never crops or stretches. */
 .shots {
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
@@ -573,13 +573,13 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .shots::-webkit-scrollbar { height: 8px; }
 .shots::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
 .shot-card {
-  --shot-h: 280px;   /* ONE height value shared by portrait AND landscape */
-  --shot-w: 158px;
+  --shot-h: 220px;   /* ONE height value shared by portrait AND landscape */
+  --shot-w: 124px;   /* scaled with the height: keeps the 9:16 card ratio */
   position: relative; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;  /* centered card */
   width: var(--shot-w); height: var(--shot-h);
   /* content-box keeps the 1px border outside the declared height, so the
-     image really is 280px / 340px tall for BOTH orientations. */
+     image really is 220px / 270px tall for BOTH orientations. */
   box-sizing: content-box;
   padding: 0; border: 1px solid var(--line); border-radius: 20px;
   background: #08080a; overflow: hidden; cursor: zoom-in;
@@ -596,12 +596,12 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .shot-card.is-landscape .shot-img {
   width: auto;                 /* aspect ratio determines the width automatically */
-  height: var(--shot-h);       /* 280px mobile / 340px desktop — same as portrait */
+  height: var(--shot-h);       /* 220px mobile / 270px desktop — same as portrait */
   max-width: none;             /* override the global img { max-width: 100% } */
   flex: 0 0 auto;
   object-fit: contain;         /* never crop, never stretch */
 }
-.shot-card.is-square { --shot-w: 280px; }
+.shot-card.is-square { --shot-w: 220px; }
 .shot-img {
   display: block; width: 100%; height: 100%;
   object-fit: contain;              /* never crop or stretch */
@@ -1225,8 +1225,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
     line-height: 1.9;
     max-width: 700px;
   }
-  .shot-card { --shot-h: 340px; --shot-w: 190px; }
-  .shot-card.is-square { --shot-w: 340px; }
+  .shot-card { --shot-h: 270px; --shot-w: 151px; }
+  .shot-card.is-square { --shot-w: 270px; }
 
   /* --- Login gate desktop --- */
   .gate .logo {
@@ -2299,7 +2299,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .applist > a.approw[href^="/search?category="] > .icon:last-child { display: none; }
 
 @media (max-width: 540px) {
-  /* portrait AND landscape both inherit --shot-h: 280px here */
+  /* portrait AND landscape both inherit --shot-h: 220px here */
   .lb-stage { padding: 68px 12px 8px; }
   .lb-footer { padding-bottom: 12px; }
   .lb-thumb { width: 52px; height: 52px; }

@@ -2,6 +2,10 @@ name = "goldenstore-api"
 main = "api/[[...path]].ts"
 compatibility_date = "2026-10-05"
 compatibility_flags = ["nodejs_compat"]
+
+# Process scheduled pushes every 5 minutes (Advanced Push System).
+[triggers]
+crons = ["*/5 * * * *"]
 workers_dev = true
 
 # The website routes keep same-origin /api/* calls working on the custom domain.

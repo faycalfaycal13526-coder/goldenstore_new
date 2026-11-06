@@ -1,4 +1,5 @@
 import { importPKCS8, SignJWT } from 'jose';
+import { recordFirebaseUsage } from './usage.js';
 import type { Env } from './env.js';
 
 type FirebaseCredentials = {
@@ -126,6 +127,12 @@ function getCredentials(env: Env): FirebaseCredentials {
     );
   }
   return { projectId, clientEmail, privateKey };
+}
+
+export async function getServiceAccountToken(
+  env: Env, scope = 'https://www.googleapis.com/auth/cloud-platform',
+): Promise<string> {
+  return getAccessToken(env, scope);
 }
 
 async function getAccessToken(env: Env, scope: string): Promise<string> {
@@ -751,6 +758,8 @@ export function getFieldValue() {
 }
 
 async function identityToolkitRequest(env: Env, endpoint: string, body: Record<string, unknown>): Promise<any> {
+  // Track Firebase REST consumption in D1 (best effort, never breaks auth).
+  await recordFirebaseUsage(env, 'reads', 1);
   const apiKey = env.FIREBASE_API_KEY;
   if (!apiKey) throw new Error('FIREBASE_API_KEY is required for Firebase Auth REST verification.');
   const url = new URL(`https://identitytoolkit.googleapis.com/v1/${endpoint}`);
@@ -1032,6 +1041,63 @@ export async function unsubscribeTokenFromTopic(
     });
     return response.ok || response.status === 404;
   } catch { return false; }
+}
+
+/* -------------------------------------------------------------------
+   Unified sender for the ADVANCED push system. One call handles both
+   native (notification + android) and web (data-only + webpush) tokens,
+   with bounded concurrency. Rich fields travel in `data` so the service
+   worker and the native app can render image + click_action themselves.
+   ------------------------------------------------------------------- */
+export type FcmEntry = { token: string; channel: 'native' | 'web' };
+export type FcmEntryPayload = {
+  data: Record<string, string>;
+  notification: Record<string, string>;
+  android: Record<string, unknown>;
+};
+
+export async function sendFcmToEntries(
+  env: Env, entries: FcmEntry[], payload: FcmEntryPayload,
+): Promise<{ success: number; failure: number; invalid: string[];
+  errors: string[]; error_counts: Record<string, number> }> {
+  const result = { success: 0, failure: 0, invalid: [] as string[],
+    errors: [] as string[], error_counts: {} as Record<string, number> };
+  if (!entries.length) return result;
+  const credentials = getCredentials(env);
+  const accessToken = await getAccessToken(env, FCM_SCOPE);
+  const endpoint = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}/messages:send`;
+
+  await mapWithConcurrency(entries, 20, async (entry) => {
+    const message: Record<string, unknown> = { token: entry.token, data: payload.data };
+    if (entry.channel === 'native') {
+      message.notification = payload.notification;
+      message.android = payload.android;
+    } else {
+      // Data-only: firebase-messaging-sw.js renders it (icon, RTL, click URL).
+      message.webpush = { headers: { TTL: String(WEB_PUSH_TTL_SECONDS), Urgency: 'high' } };
+    }
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      if (response.ok) { result.success++; return; }
+      const body: any = await response.json().catch(() => ({}));
+      const code = String(body?.error?.status || `HTTP_${response.status}`);
+      result.failure++;
+      result.error_counts[code] = (result.error_counts[code] || 0) + 1;
+      if (result.errors.length < 8) {
+        result.errors.push(`${code}: ${String(body?.error?.message || response.statusText || '').slice(0, 160)}`);
+      }
+      if (classifyFcmError(response.status, code) === 'permanent') result.invalid.push(entry.token);
+    } catch (error: any) {
+      result.failure++;
+      result.error_counts.network_exception = (result.error_counts.network_exception || 0) + 1;
+      if (result.errors.length < 8) result.errors.push('send_exception: ' + (error?.message || String(error)));
+    }
+  });
+  return result;
 }
 
 export type WebPushResult = {

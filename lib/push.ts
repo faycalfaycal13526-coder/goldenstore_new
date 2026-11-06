@@ -174,6 +174,8 @@ export async function registerPushToken(env: Env, input: TokenRegistration): Pro
         VALUES (?, ?, 'web', ?, ?, ?, ?)`)
       .bind(input.uid, token, String(input.userAgent || '').slice(0, 300),
         nowSec(), permission, enabled ? 1 : 0).run();
+    await db.prepare('UPDATE web_tokens SET last_seen_at = ? WHERE uid = ?')
+      .bind(nowSec(), input.uid).run().catch(() => {});
   } else {
     // Preserve an existing successful subscription: a transient failure on
     // re-registration must not turn a topic device into a direct-only device
@@ -206,6 +208,8 @@ export async function registerPushToken(env: Env, input: TokenRegistration): Pro
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(id, token, input.uid, platform, permission, enabled ? 1 : 0,
         topicSubscribed ? 1 : 0, nowSec()).run();
+    await db.prepare('UPDATE fcm_tokens SET last_seen_at = ? WHERE id = ?')
+      .bind(nowSec(), id).run().catch(() => {});
   }
 
   // Structured, privacy-safe registration log: visible in `wrangler tail` and
@@ -239,13 +243,20 @@ export async function setPushPreference(
   // CRITICAL: a browser tab reporting permission "default" must NOT disable
   // the same user's Android device. Each platform owns its own consent state.
   if (isWeb) {
-    await db.prepare('UPDATE web_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
-      .bind(permission, enabled, uid).run().catch(() => {});
+    await db.prepare('UPDATE web_tokens SET permission = ?, notifications_enabled = ?, last_seen_at = ? WHERE uid = ?')
+      .bind(permission, enabled, nowSec(), uid).run().catch(() => {
+        // Column may not exist yet on a legacy DB; retry without it.
+        return db.prepare('UPDATE web_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
+          .bind(permission, enabled, uid).run().catch(() => {});
+      });
     return { ok: true, platform: 'web', permission, notifications_enabled: !!enabled };
   }
 
-  await db.prepare('UPDATE fcm_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
-    .bind(permission, enabled, uid).run().catch(() => {});
+  await db.prepare('UPDATE fcm_tokens SET permission = ?, notifications_enabled = ?, last_seen_at = ? WHERE uid = ?')
+    .bind(permission, enabled, nowSec(), uid).run().catch(async () => {
+      await db.prepare('UPDATE fcm_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
+        .bind(permission, enabled, uid).run().catch(() => {});
+    });
 
   // Keep topic membership in sync; only rows whose state actually differs
   // are touched, so calling this on every app launch issues no extra requests.
@@ -283,23 +294,25 @@ function storeLogoUrl(env: Env): string {
 }
 
 export function buildPushPayload(env: Env, n: any) {
+  const image = String(n.image_url || n.image || '').slice(0, 2000);
+  const click = String(n.click_url || (n.app_slug ? `/app?slug=${encodeURIComponent(n.app_slug)}` : '')).slice(0, 2000);
   const data: Record<string, string> = {
     title: String(n.title || ''), body: String(n.body || ''),
     type: String(n.type || 'announcement'), app_slug: String(n.app_slug || ''),
-    notification_id: String(n.id || ''), image: String(n.image || ''),
+    notification_id: String(n.id || ''), image,
+    click_url: click,
     store_logo: storeLogoUrl(env),
   };
   if (n.data) { try { data.extra = JSON.stringify(n.data); } catch { /* ignore */ } }
+  const androidNotification: Record<string, unknown> = {
+    title: String(n.title || ''), body: String(n.body || ''),
+    channelId: 'goldenstore_notifications', color: '#f4c01f', visibility: 'public',
+  };
+  if (image) androidNotification.image = image;
   return {
     data,
     notification: { title: String(n.title || ''), body: String(n.body || '') },
-    android: {
-      priority: 'high',
-      notification: {
-        title: String(n.title || ''), body: String(n.body || ''),
-        channelId: 'goldenstore_notifications', color: '#f4c01f', visibility: 'public',
-      },
-    },
+    android: { priority: 'high', notification: androidNotification },
   };
 }
 

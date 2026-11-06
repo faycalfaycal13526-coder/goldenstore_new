@@ -7,6 +7,11 @@ import {
   pushTokenStats, pushDiagnostics, listPushLogs, listPushRegistrations,
 } from '../lib/push.js';
 import {
+  sendAdvancedPush, processAdvancedJob, schedulePush, listScheduledPushes,
+  cancelScheduledPush, processScheduledPushes, recordPushClick, pushHistory,
+  followApp, unfollowApp, appFollowerCount, analyticsOverview, resolveAudience,
+} from '../lib/advanced-push.js';
+import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
   getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport, deleteReview,
@@ -227,9 +232,17 @@ async function addNotification(env: Env, data: any) {
   
   // The notification row is already persisted. An FCM outage must never make
   // the admin publish request fail — report the delivery result instead.
+  const rich = {
+    title, body, type, app_slug, id, image,
+    image_url: data.image_url || image,
+    click_url: data.click_url || (app_slug ? `/app?slug=${encodeURIComponent(app_slug)}` : ''),
+    data: data.data,
+  };
   let push: any;
   try {
-    push = await broadcastPush(env, { title, body, type, app_slug, id, image, data: data.data });
+    push = data.segment && data.segment.mode && data.segment.mode !== 'all'
+      ? await sendAdvancedPush(env, rich, data.segment)
+      : await broadcastPush(env, rich);
   } catch (error: any) {
     console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
     push = { error: 'push_failed', message: String(error?.message || error), targeted: 0, success: 0, failure: 0 };
@@ -1199,7 +1212,16 @@ app.post('/admin/apps', async (c) => {
     }
   }
 
-  if ((await getStoreSettings(c.env)).notify_new_publications) await addNotification(c.env, { type: 'new_app', title: body.name, body: '', app_slug: slug, created_at: now });
+  // Automated push on app upload (behind the store setting), with a rich
+  // image + deep link into the new app's page.
+  if ((await getStoreSettings(c.env)).notify_new_publications) {
+    await addNotification(c.env, {
+      type: 'new_app', title: body.name, body: '', app_slug: slug,
+      image_url: icon_url(body.icon_key, c.env) || '',
+      click_url: `/app?slug=${encodeURIComponent(slug)}`,
+      created_at: now,
+    });
+  }
   
   // إبطال الكاش بعد الإضافة
   invalidateAppsCache();
@@ -1221,7 +1243,11 @@ app.patch('/admin/apps/:id', async (c) => {
   await c.env.DB.prepare(`UPDATE apps SET name=?, name_lower=?, search_terms=?, package_name=?, short_description=?, description=?, category=?, type=?, developer=?, version_name=?, version_code=?, min_sdk=?, updated_at=? WHERE id=?`)
     .bind(name, name_lower, search_terms, body.package_name||old.package_name, body.short_description !== undefined ? sanitizeText(body.short_description, 500) : old.short_description, body.description !== undefined ? sanitizeText(body.description, 10000) : old.description, body.category||old.category, body.type ? (body.type==='game'?'game':'app') : old.type, body.developer !== undefined ? sanitizeText(body.developer, 120) : old.developer, body.version_name !== undefined ? sanitizeText(body.version_name, 60) : old.version_name, body.version_code !== undefined ? safeInt(body.version_code,0,999999999) : old.version_code, body.min_sdk !== undefined ? safeInt(body.min_sdk,1,99) : old.min_sdk, nowSec(), id).run();
 
-  if (versionChanged) await addNotification(c.env, { type: 'update', title: name, body: `إصدار ${body.version_name||old.version_name}`, app_slug: old.slug, created_at: nowSec() });
+  if (versionChanged) await addNotification(c.env, {
+    type: 'update', title: name, body: `إصدار ${body.version_name||old.version_name}`,
+    app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
+    click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
+  });
   
   // إبطال الكاش بعد التعديل
   invalidateAppsCache();
@@ -1239,7 +1265,11 @@ app.post('/admin/apps/:id/apk', async (c) => {
     .bind(body.apk_key, head.size, body.version_name||old.version_name, body.version_code!==undefined?body.version_code:old.version_code, nowSec(), old.id).run();
   
   if (old.apk_key && old.apk_key !== body.apk_key) await r2Delete(c.env, old.apk_key).catch(()=>{});
-  await addNotification(c.env, { type: 'update', title: old.name, body: `إصدار ${body.version_name||old.version_name}`, app_slug: old.slug, created_at: nowSec() });
+  await addNotification(c.env, {
+    type: 'update', title: old.name, body: `إصدار ${body.version_name||old.version_name}`,
+    app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
+    click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
+  });
   return c.json({ ok: true });
 });
 
@@ -1358,7 +1388,106 @@ app.delete('/admin/apps/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// =========================================================================
+// Advanced Push System
+// =========================================================================
+app.post('/admin/push/send-advanced', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!body.title) return c.json({ error: 'title_required' }, 400);
+  const segment = body.segment && typeof body.segment === 'object' ? body.segment : { mode: 'all' };
+  try {
+    const push = await sendAdvancedPush(c.env, {
+      id: randomId(), title: String(body.title).slice(0, 200),
+      body: sanitizeText(body.body, 1000), type: 'announcement',
+      image_url: body.image_url, click_url: body.click_url,
+      app_slug: segment.app_slug || '',
+    }, segment);
+    // sendAdvancedPush persists the notification with the SAME id used for
+    // delivery logs and click tracking, so history always joins correctly.
+    return c.json({ ok: true, push });
+  } catch (error: any) {
+    console.error('[push] send-advanced failed:', error?.message || error);
+    return c.json({ ok: false, error: 'send_failed', message: String(error?.message || error) });
+  }
+});
+
+app.post('/admin/push/flush-advanced', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const jobId = String(body.job_id || '');
+  if (!jobId) return c.json({ error: 'job_id_required' }, 400);
+  return c.json({ ok: true, ...(await processAdvancedJob(c.env, jobId, Number(body.limit) || 300)) });
+});
+
+// Audience preview before sending (so the admin sees the real count).
+app.post('/admin/push/audience-preview', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const segment = body.segment && typeof body.segment === 'object' ? body.segment : { mode: 'all' };
+  if (segment.mode === 'all') {
+    const stats = await pushDiagnostics(c.env);
+    return c.json({ ok: true, targeted: stats.total_eligible, native_count: stats.native_eligible,
+      web_count: stats.web_eligible });
+  }
+  const a = await resolveAudience(c.env, segment);
+  return c.json({ ok: true, targeted: a.targeted, native_count: a.native_count, web_count: a.web_count });
+});
+
+app.post('/admin/push/schedule', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json({ ok: true, ...(await schedulePush(c.env, body)) }); }
+  catch (error: any) { return c.json({ ok: false, error: String(error?.message || error) }, 400); }
+});
+app.get('/admin/push/scheduled', async (c) =>
+  c.json({ scheduled: await listScheduledPushes(c.env, Number(c.req.query('limit')) || 30) }));
+app.delete('/admin/push/scheduled/:id', async (c) =>
+  c.json({ ok: await cancelScheduledPush(c.env, c.req.param('id')) }));
+// Manual cron trigger (useful in environments where Cron Triggers are off).
+app.post('/admin/push/cron-run', async (c) =>
+  c.json({ ok: true, ...(await processScheduledPushes(c.env)) }));
+
+app.get('/admin/push/history', async (c) =>
+  c.json({ history: await pushHistory(c.env, Number(c.req.query('limit')) || 30) }));
+app.get('/admin/push/analytics', async (c) =>
+  c.json({ ok: true, analytics: await analyticsOverview(c.env) }));
+
+// Click tracking — public, rate limited, no token/PII required.
+app.post('/notifications/click', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'push-click', 60, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const body = await c.req.json().catch(() => ({}));
+  const id = sanitizeText(body.notification_id, 120);
+  if (!id) return c.json({ error: 'invalid' }, 400);
+  await recordPushClick(c.env, id, String(body.uid || ''), String(body.platform || ''));
+  return c.json({ ok: true });
+});
+
+// Per-app subscription (users who want updates about a specific app).
+app.post('/apps/:slug/follow', async (c) => {
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  return c.json({ ok: await followApp(c.env, user.uid, c.req.param('slug')) });
+});
+app.delete('/apps/:slug/follow', async (c) => {
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  return c.json({ ok: await unfollowApp(c.env, user.uid, c.req.param('slug')) });
+});
+app.get('/admin/apps/:slug/followers', async (c) =>
+  c.json({ count: await appFollowerCount(c.env, c.req.param('slug')) }));
+
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => { console.error('[api error]', err); return c.json({ error: 'internal_error' }, 500); });
 
-export default app;
+// Cloudflare Workers module entry: HTTP + Cron Triggers.
+export async function scheduled(_controller: any, env: Env, ctx: any) {
+  try {
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(processScheduledPushes(env));
+    else await processScheduledPushes(env);
+  } catch (error: any) {
+    console.error('[push] cron failed:', error?.message || error);
+  }
+}
+
+export default {
+  fetch: (request: Request, env: Env, ctx: any) => app.fetch(request, env, ctx),
+  scheduled,
+};

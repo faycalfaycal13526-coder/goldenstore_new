@@ -378,6 +378,8 @@
       tabBtn('reports', 'message', t('بلاغات المراجعات')),
       tabBtn('support', 'message', t('رسائل الدعم')),
       tabBtn('notifications', 'bell', 'الإشعارات'),
+      tabBtn('advanced-push', 'bell', 'إشعارات متقدمة'),
+      tabBtn('analytics', 'dashboard', 'الإحصائيات'),
       tabBtn('app-update', 'download', 'رابط تحميل التطبيق'),
       tabBtn('settings', 'settings', 'إعدادات المتجر'),
       el('span', { class: 'tab-spacer' }),
@@ -396,6 +398,14 @@
     else if (activeTab === 'reports') await renderReports(body);
     else if (activeTab === 'support') await renderSupport(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
+    else if (activeTab === 'advanced-push') {
+      if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderPush(body);
+      else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإشعارات المتقدمة — أعد تحميل الصفحة.</div>';
+    }
+    else if (activeTab === 'analytics') {
+      if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderAnalytics(body);
+      else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإحصائيات — أعد تحميل الصفحة.</div>';
+    }
     else if (activeTab === 'app-update') await renderAppUpdate(body);
     else if (activeTab === 'settings') await renderStoreSettings(body);
     else if (activeTab.startsWith('edit:')) await renderEditApp(body, activeTab.slice(5));

@@ -152,7 +152,8 @@
                 type: String(data.type || ''),
                 app_slug: slug,
                 notification_id: String(data.notification_id || ''),
-                url: slug ? '/app?slug=' + encodeURIComponent(slug) : '/',
+                click_url: String(data.click_url || ''),
+                url: String(data.click_url || '') || (slug ? '/app?slug=' + encodeURIComponent(slug) : '/'),
               },
             });
           })

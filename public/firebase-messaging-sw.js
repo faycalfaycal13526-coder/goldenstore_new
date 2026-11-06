@@ -32,6 +32,16 @@ var SITE_HOME = SITE_ORIGIN + '/';
 var FALLBACK_ICON = SITE_ORIGIN + '/images/logo.png';
 
 function notificationTargetUrl(data) {
+  // Advanced push: honour data.click_url but keep it on our own origin so a
+  // malicious payload can never turn a notification into an open redirect.
+  var raw = String((data && data.click_url) || '');
+  if (raw) {
+    if (raw.charAt(0) === '/' && raw.charAt(1) !== '/') return SITE_ORIGIN + raw;
+    try {
+      var u = new URL(raw, SITE_ORIGIN);
+      if (u.origin === SITE_ORIGIN) return u.toString();
+    } catch (e) {}
+  }
   var slug = String((data && data.app_slug) || '');
   if (slug) return SITE_HOME + 'app?slug=' + encodeURIComponent(slug);
   return SITE_HOME;
@@ -66,6 +76,19 @@ self.addEventListener('notificationclick', function (event) {
   event.notification.close();
   var data = (event.notification && event.notification.data) || {};
   var targetUrl = String(data.url || SITE_HOME);
+
+  // Advanced push: record the click for the analytics dashboard.
+  var notificationId = String(data.notification_id || '');
+  if (notificationId) {
+    try {
+      event.waitUntil(fetch(SITE_ORIGIN + '/api/notifications/click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: notificationId, platform: 'web' }),
+        keepalive: true,
+      }).catch(function () {}));
+    } catch (e) {}
+  }
 
   event.waitUntil(
     clients

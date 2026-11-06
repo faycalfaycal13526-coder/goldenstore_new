@@ -79,12 +79,6 @@ const PUSH_SCHEMA = [
      duration_ms INTEGER NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_fcm_tokens_eligible
-     ON fcm_tokens(notifications_enabled, topic_subscribed, id)`,
-  `CREATE INDEX IF NOT EXISTS idx_web_tokens_eligible
-     ON web_tokens(notifications_enabled, permission, uid)`,
-  `CREATE INDEX IF NOT EXISTS idx_push_send_log_created
-     ON push_send_log(created_at DESC)`,
 ];
 // CREATE TABLE IF NOT EXISTS cannot add a column to an existing table. Each
 // ALTER is safe to fail with "duplicate column name".
@@ -95,14 +89,33 @@ const PUSH_UPGRADES = [
   `ALTER TABLE web_tokens ADD COLUMN permission TEXT NOT NULL DEFAULT 'granted'`,
   `ALTER TABLE web_tokens ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1`,
 ];
+// Indexes MUST run AFTER the upgrades: on a legacy database the tables already
+// exist without the new columns, so CREATE INDEX referencing them fails with
+// "no such column" and would break EVERY push endpoint.
+const PUSH_INDEXES = [
+  `CREATE INDEX IF NOT EXISTS idx_fcm_tokens_eligible
+     ON fcm_tokens(notifications_enabled, topic_subscribed, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_web_tokens_eligible
+     ON web_tokens(notifications_enabled, permission, uid)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_send_log_created
+     ON push_send_log(created_at DESC)`,
+];
 const pushSchemaReady = new WeakSet<object>();
 
 export async function ensurePushSchema(env: Env): Promise<void> {
   const db: any = env.DB;
   if (pushSchemaReady.has(db)) return;
+  // 1) tables  2) add missing columns  3) THEN indexes. Never reorder.
   for (const sql of PUSH_SCHEMA) await db.prepare(sql).run();
   for (const sql of PUSH_UPGRADES) {
     try { await db.prepare(sql).run(); } catch { /* column already exists */ }
+  }
+  for (const sql of PUSH_INDEXES) {
+    try { await db.prepare(sql).run(); }
+    catch (error: any) {
+      // A missing index degrades performance, never delivery.
+      console.warn('[fcm] optional index skipped:', error?.message || String(error));
+    }
   }
   pushSchemaReady.add(db);
 }

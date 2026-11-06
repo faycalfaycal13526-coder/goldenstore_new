@@ -225,7 +225,15 @@ async function addNotification(env: Env, data: any) {
     if (app?.icon_key) image = icon_url(app.icon_key as string, env) || '';
   }
   
-  const push = await broadcastPush(env, { title, body, type, app_slug, id, image, data: data.data });
+  // The notification row is already persisted. An FCM outage must never make
+  // the admin publish request fail — report the delivery result instead.
+  let push: any;
+  try {
+    push = await broadcastPush(env, { title, body, type, app_slug, id, image, data: data.data });
+  } catch (error: any) {
+    console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
+    push = { error: 'push_failed', message: String(error?.message || error), targeted: 0, success: 0, failure: 0 };
+  }
   return { id, push };
 }
 
@@ -1056,14 +1064,24 @@ app.get('/admin/push/status', async (c) => {
 
 app.post('/admin/push/test', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  return c.json({ ok: true, push: await broadcastPush(c.env, { title: body.title || 'Test', body: body.body || 'Test', type: 'announcement', id: 'test' }) });
+  try {
+    return c.json({ ok: true, push: await broadcastPush(c.env, { title: body.title || 'Test', body: body.body || 'Test', type: 'announcement', id: 'test' }) });
+  } catch (error: any) {
+    console.error('[fcm] test broadcast failed:', error?.message || error);
+    return c.json({ ok: false, error: 'push_failed', message: String(error?.message || error) });
+  }
 });
 
 // One-off backfill: subscribe tokens registered before this fix to topic `all`.
 // Repeat until `remaining` is 0; each call stays inside the subrequest budget.
 app.post('/admin/push/sync-topics', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  return c.json({ ok: true, ...(await syncTopicSubscriptions(c.env, Number(body.limit) || 100)) });
+  try {
+    return c.json({ ok: true, ...(await syncTopicSubscriptions(c.env, Number(body.limit) || 100)) });
+  } catch (error: any) {
+    console.error('[fcm] sync-topics failed:', error?.message || error);
+    return c.json({ ok: false, error: 'sync_failed', message: String(error?.message || error) });
+  }
 });
 
 // Drain queued direct sends when a broadcast had more than one invocation's

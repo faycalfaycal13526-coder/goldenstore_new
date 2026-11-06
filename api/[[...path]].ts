@@ -288,14 +288,45 @@ const CURRENT_RELEASE = { version_name: '1.18', version_code: 19, apk_url: 'http
 const DOWNLOAD_STATS_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS app_download_stats (
      id TEXT PRIMARY KEY,
-     downloads INTEGER NOT NULL DEFAULT 0
+     downloads INTEGER NOT NULL DEFAULT 0,
+     restored INTEGER NOT NULL DEFAULT 0
    )`,
 ];
+// Older deployments created the table without `restored`; this ALTER is safe
+// to fail with "duplicate column name".
+const DOWNLOAD_STATS_UPGRADES = [
+  `ALTER TABLE app_download_stats ADD COLUMN restored INTEGER NOT NULL DEFAULT 0`,
+];
+/* One-time restoration of the historic total. The admin publish endpoint
+   used INSERT OR REPLACE, which reset app_updates.downloads; the store owner
+   confirmed the real count had already passed 4,000. We add that floor back
+   EXACTLY ONCE and keep every real download recorded since the reset. The
+   `restored` flag makes the UPSERT idempotent across cold starts/deploys. */
+const DOWNLOAD_RESTORE_BASELINE = 4000;
 const downloadStatsReady = new WeakSet<object>();
 async function ensureDownloadStatsSchema(env: Env): Promise<void> {
   const db: any = env.DB;
   if (downloadStatsReady.has(db)) return;
   for (const sql of DOWNLOAD_STATS_SCHEMA) await db.prepare(sql).run();
+  for (const sql of DOWNLOAD_STATS_UPGRADES) { try { await db.prepare(sql).run(); } catch { /* already present */ } }
+  // If the durable row does not exist yet, carry over the legacy column so
+  // no real download is lost. Single atomic, idempotent statement:
+  //   fresh row      -> 4,000 + legacy
+  //   existing row   -> +4,000 once, then +0 forever. The `downloads < 4000`
+  //   guard also protects against an admin who already entered the historic
+  //   total with the previously deployed code (no double counting).
+  let legacySeed = 0;
+  try {
+    const lr: any = await db.prepare("SELECT downloads FROM app_updates WHERE id = 'current'").first();
+    legacySeed = Number(lr?.downloads) || 0;
+  } catch {}
+  await db.prepare(`INSERT INTO app_download_stats (id, downloads, restored)
+      VALUES ('current', ?, 1)
+      ON CONFLICT(id) DO UPDATE SET
+        downloads = downloads + CASE WHEN restored = 0 AND downloads < ? THEN ? ELSE 0 END,
+        restored = 1`)
+    .bind(DOWNLOAD_RESTORE_BASELINE + legacySeed,
+          DOWNLOAD_RESTORE_BASELINE, DOWNLOAD_RESTORE_BASELINE).run();
   downloadStatsReady.add(db);
 }
 async function bumpDownloadCount(env: Env): Promise<number> {
@@ -310,8 +341,8 @@ async function bumpDownloadCount(env: Env): Promise<number> {
   const sr: any = await env.DB.prepare("SELECT downloads FROM app_download_stats WHERE id = 'current'").first();
   const durable = Number(sr?.downloads) || 0;
   const total = Math.max(legacy, durable) + 1;
-  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads) VALUES ('current', ?)
-    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads`).bind(total).run();
+  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads, restored) VALUES ('current', ?, 1)
+    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads, restored = 1`).bind(total).run();
   await env.DB.prepare("UPDATE app_updates SET downloads = ? WHERE id = 'current'").bind(total).run().catch(() => {});
   return total;
 }
@@ -332,8 +363,8 @@ async function setDownloadBaseline(env: Env, requested: number): Promise<number>
   const current = await readDownloadCount(env, legacy);
   // Monotonic: an admin can restore a lost historic total but never decrease it.
   const total = Math.max(current, Math.floor(requested));
-  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads) VALUES ('current', ?)
-    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads`).bind(total).run();
+  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads, restored) VALUES ('current', ?, 1)
+    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads, restored = 1`).bind(total).run();
   await env.DB.prepare("UPDATE app_updates SET downloads = ? WHERE id = 'current'").bind(total).run().catch(() => {});
   return total;
 }

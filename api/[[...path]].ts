@@ -1,6 +1,11 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
-import { verifyFirebaseToken, messaging, getAuthAdmin, sendWebPush } from '../lib/firebase.js';
+import { verifyFirebaseToken, getAuthAdmin } from '../lib/firebase.js';
+import {
+  broadcastPush, sendDirectPush, buildPushPayload, registerPushToken, setPushPreference,
+  unregisterPushToken, ensurePushSchema, processPushJob, syncTopicSubscriptions,
+  pushTokenStats, listPushLogs,
+} from '../lib/push.js';
 import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
@@ -202,55 +207,9 @@ function shot_url(shot_key: string | undefined, env: Env, width: number = 720): 
   return cdnImageUrl(shot_key, env, width);
 }
 
-function storeLogoUrl(env: Env): string { return env.STORE_LOGO_URL || `https://${storeDomain(env)}/images/logo.png`; }
-
-// Notifications Helper
-async function sendPushToTokens(tokens: string[], n: any, env: Env): Promise<any> {
-  const result = { targeted: tokens.length, success: 0, failure: 0, errors: [] as string[], invalid_tokens: [] as string[] };
-  if (tokens.length === 0) return result;
-  const msg = await messaging(env);
-  const dataPayload: any = { title: n.title, body: n.body || '', type: n.type, app_slug: n.app_slug || '', notification_id: n.id, image: n.image || '', store_logo: storeLogoUrl(env) };
-  if (n.data) try { dataPayload.extra = JSON.stringify(n.data); } catch {}
-  
-  for (let i = 0; i < tokens.length; i += 500) {
-    const batch = tokens.slice(i, i + 500);
-    try {
-      const resp = await msg.sendEachForMulticast({ tokens: batch, data: dataPayload, notification: { title: n.title, body: n.body || '' }, android: { priority: 'high', notification: { title: n.title, body: n.body || '', channelId: 'goldenstore_notifications', color: '#f4c01f', visibility: 'public' } } });
-      result.success += resp.successCount || 0; result.failure += resp.failureCount || 0;
-      resp.responses.forEach((r: any, idx: number) => {
-        if (!r.success) {
-          const code = r.error?.code || '';
-          if (result.errors.length < 5) result.errors.push(code);
-          if (code.includes('registration-token-not-registered') || code.includes('invalid-argument')) result.invalid_tokens.push(batch[idx]);
-        }
-      });
-    } catch (err: any) { result.failure += batch.length; result.errors.push('multicast_error'); }
-  }
-  return result;
-}
-
-async function sendPushToRegistered(env: Env, n: any): Promise<any> {
-  const result = { targeted: 0, success: 0, failure: 0, errors: [] as string[] };
-  try {
-    const tokens = await env.DB.prepare('SELECT token FROM fcm_tokens LIMIT 1000').all();
-    result.targeted = tokens.results?.length || 0;
-  } catch {}
-
-  const msg = await messaging(env);
-  const dataPayload: any = { title: n.title, body: n.body || '', type: n.type, app_slug: n.app_slug || '', notification_id: n.id, image: n.image || '', store_logo: storeLogoUrl(env) };
-  if (n.data) try { dataPayload.extra = JSON.stringify(n.data); } catch {}
-
-  try {
-    await msg.send({ topic: 'all', data: dataPayload, notification: { title: n.title, body: n.body || '' }, android: { priority: 'high', notification: { title: n.title, body: n.body || '', channelId: 'goldenstore_notifications', color: '#f4c01f' } } });
-    result.success = Math.max(1, result.targeted);
-  } catch { result.failure = Math.max(1, result.targeted); }
-
-  try {
-    const web = await sendWebPush(env, n.title, n.body || '', { type: n.type, app_slug: n.app_slug || '', notification_id: n.id, image: n.image || '', store_logo: storeLogoUrl(env) });
-    result.targeted += web.targeted; result.success += web.success; result.failure += web.failure;
-  } catch {}
-  return result;
-}
+/* FCM delivery now lives in lib/push.ts. Keeping it in one module means the
+   admin broadcast, the "new version" notification and the self-test all use
+   the same targeting, batching, pruning and logging rules. */
 
 async function addNotification(env: Env, data: any) {
   const id = randomId();
@@ -266,7 +225,7 @@ async function addNotification(env: Env, data: any) {
     if (app?.icon_key) image = icon_url(app.icon_key as string, env) || '';
   }
   
-  const push = await sendPushToRegistered(env, { title, body, type, app_slug, id, image, data: data.data });
+  const push = await broadcastPush(env, { title, body, type, app_slug, id, image, data: data.data });
   return { id, push };
 }
 
@@ -472,10 +431,14 @@ app.post('/notifications/register-token', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const token = String(body.token || '').trim();
   if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
-  const docId = await sha256Hex(token);
-  await c.env.DB.prepare(`INSERT OR REPLACE INTO fcm_tokens (id, token, uid, platform, updated_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(docId, token, user.uid, body.platform || 'android', nowSec()).run();
-  return c.json({ ok: true });
+  // Android 13+ POST_NOTIFICATIONS: the client reports the OS permission and
+  // the opt-in flag. Denied tokens are removed and never targeted again.
+  const res = await registerPushToken(c.env, {
+    token, uid: user.uid, platform: String(body.platform || 'android'),
+    permission: String(body.permission || 'granted'),
+    enabled: body.notifications_enabled !== false,
+  });
+  return c.json(res);
 });
 
 app.post('/notifications/register-web', async (c) => {
@@ -486,15 +449,34 @@ app.post('/notifications/register-web', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const token = String(body.token || '').trim();
   if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
-  await c.env.DB.prepare(`INSERT OR REPLACE INTO web_tokens (uid, token, platform, userAgent, updatedAt) VALUES (?, ?, ?, ?, ?)`)
-    .bind(user.uid, token, 'web', String(c.req.header('user-agent')).slice(0,300), nowSec()).run();
-  return c.json({ ok: true });
+  // D1 is the single source of truth: sendWebPush() reads this exact table.
+  const res = await registerPushToken(c.env, {
+    token, uid: user.uid, web: true,
+    permission: String(body.permission || 'granted'),
+    enabled: body.notifications_enabled !== false,
+    userAgent: String(c.req.header('user-agent') || ''),
+  });
+  return c.json(res);
 });
 
 app.post('/notifications/unregister-token', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  if (body.token) await c.env.DB.prepare('DELETE FROM fcm_tokens WHERE id = ?').bind(await sha256Hex(String(body.token))).run().catch(() => {});
+  if (body.token) await unregisterPushToken(c.env, String(body.token));
   return c.json({ ok: true });
+});
+
+// Persist the OS/browser notification permission for the signed-in user.
+// Called on every page load and whenever Notification.permission changes, so
+// broadcasts never target a user who revoked POST_NOTIFICATIONS (Android 13+).
+app.post('/notifications/preference', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'push-pref', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  const res = await setPushPreference(c.env, user.uid,
+    String(body.permission || 'granted'), body.notifications_enabled !== false);
+  return c.json(res);
 });
 
 app.post('/notifications/self-test', async (c) => {
@@ -502,8 +484,8 @@ app.post('/notifications/self-test', async (c) => {
   const snaps = await c.env.DB.prepare('SELECT token FROM fcm_tokens WHERE uid = ?').bind(user.uid).all();
   const tokens = (snaps.results || []).map(r => r.token as string).filter(Boolean);
   if (!tokens.length) return c.json({ error: 'no_registered_devices' }, 400);
-  const push = await sendPushToTokens(tokens, { title: 'إشعار تجريبي', body: 'يعمل ✓', type: 'announcement', id: 'test' }, c.env);
-  delete (push as any).invalid_tokens;
+  const note = { title: 'إشعار تجريبي', body: 'يعمل ✓', type: 'announcement', id: 'test' };
+  const push = await sendDirectPush(c.env, tokens, buildPushPayload(c.env, note));
   return c.json({ ok: true, push });
 });
 
@@ -1060,18 +1042,42 @@ app.post('/admin/app-update', async (c) => {
 });
 
 app.get('/admin/push/status', async (c) => {
-  const res = await c.env.DB.prepare('SELECT platform, uid, token, updated_at FROM fcm_tokens LIMIT 500').all();
+  const stats = await pushTokenStats(c.env);
+  const res = await c.env.DB.prepare('SELECT platform, uid, token, updated_at, permission, notifications_enabled, topic_subscribed FROM fcm_tokens LIMIT 500').all().catch(() => ({ results: [] }));
   const plats: Record<string, number> = {};
   const tokens = (res.results || []).map(r => {
     plats[r.platform as string] = (plats[r.platform as string] || 0) + 1;
-    return { platform: r.platform, uid_masked: String(r.uid).slice(0, 10), updated_at: r.updated_at, token_tail: String(r.token).slice(-6) };
+    return { platform: r.platform, uid_masked: String(r.uid).slice(0, 10), updated_at: r.updated_at,
+      token_tail: String(r.token).slice(-6), permission: r.permission,
+      notifications_enabled: r.notifications_enabled, topic_subscribed: r.topic_subscribed };
   }).sort((a, b) => (b.updated_at as number) - (a.updated_at as number));
-  return c.json({ registered_tokens: tokens.length, platforms: plats, tokens });
+  return c.json({ registered_tokens: stats.native_total + stats.web_total, stats, platforms: plats, tokens });
 });
 
 app.post('/admin/push/test', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  return c.json({ ok: true, push: await sendPushToRegistered(c.env, { title: body.title || 'Test', body: body.body || 'Test', type: 'announcement', id: 'test' }) });
+  return c.json({ ok: true, push: await broadcastPush(c.env, { title: body.title || 'Test', body: body.body || 'Test', type: 'announcement', id: 'test' }) });
+});
+
+// One-off backfill: subscribe tokens registered before this fix to topic `all`.
+// Repeat until `remaining` is 0; each call stays inside the subrequest budget.
+app.post('/admin/push/sync-topics', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  return c.json({ ok: true, ...(await syncTopicSubscriptions(c.env, Number(body.limit) || 100)) });
+});
+
+// Drain queued direct sends when a broadcast had more than one invocation's
+// worth of unsubscribed tokens. The admin UI calls this until pending === 0.
+app.post('/admin/push/flush', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const jobId = String(body.job_id || '');
+  if (!jobId) return c.json({ error: 'job_id_required' }, 400);
+  return c.json({ ok: true, ...(await processPushJob(c.env, jobId, Number(body.limit) || 300)) });
+});
+
+// Structured delivery history for troubleshooting failed notifications.
+app.get('/admin/push/logs', async (c) => {
+  return c.json({ logs: await listPushLogs(c.env, Number(c.req.query('limit')) || 20) });
 });
 
 app.delete('/admin/notifications/:id', async (c) => { await c.env.DB.prepare('DELETE FROM notifications WHERE id = ?').bind(c.req.param('id')).run().catch(()=>{}); return c.json({ ok: true }); });

@@ -843,6 +843,46 @@ export async function verifyFirebaseToken(
   }
 }
 
+/* -------------------------------------------------------------------
+   FCM error classification. Permanent errors mean the token must be
+   DELETED; transient ones are worth one bounded retry.
+   ------------------------------------------------------------------- */
+export type FcmErrorKind = 'permanent' | 'transient' | 'unknown';
+
+export function classifyFcmError(status: number, rawCode: string): FcmErrorKind {
+  const code = String(rawCode || '').toUpperCase();
+  if (code.includes('UNREGISTERED') || code.includes('NOT_FOUND')
+      || code.includes('INVALID_ARGUMENT') || code.includes('SENDER_ID_MISMATCH')
+      || code.includes('THIRD_PARTY_AUTH_ERROR') || status === 404 || status === 400) {
+    return 'permanent';
+  }
+  if (code.includes('QUOTA_EXCEEDED') || code.includes('RESOURCE_EXHAUSTED')
+      || code.includes('UNAVAILABLE') || code.includes('INTERNAL')
+      || code.includes('DEADLINE_EXCEEDED') || status === 429 || status >= 500) {
+    return 'transient';
+  }
+  return 'unknown';
+}
+
+/** Run `fn` over all items with at most `limit` requests in flight.
+    Promise.all() over 500 tokens used to open 500 simultaneous subrequests
+    from one Worker invocation and hit Cloudflare's subrequest limit. */
+export async function mapWithConcurrency<T, R>(
+  items: T[], limit: number, fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      out[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 export async function messaging(env: Env) {
   const credentials = getCredentials(env);
   const accessToken = await getAccessToken(env, FCM_SCOPE);
@@ -890,6 +930,9 @@ export async function messaging(env: Env) {
       const failure: any = new Error(detail);
       failure.code = code;
       failure.status = response.status;
+      failure.httpStatus = response.status;
+      failure.fcmCode = String(err.status || errorCode || '');
+      failure.kind = classifyFcmError(response.status, `${err.status} ${errorCode}`);
       throw failure;
     }
     return payload;
@@ -903,35 +946,100 @@ export async function messaging(env: Env) {
       notification?: Record<string, string>;
       android?: Record<string, unknown>;
     }): Promise<{ successCount: number; failureCount: number; responses: any[] }> {
-      const responses = await Promise.all(input.tokens.map(async (token) => {
+      const sendOne = (token: string) => send({
+        token,
+        ...(input.data ? { data: input.data } : {}),
+        ...(input.notification ? { notification: input.notification } : {}),
+        ...(input.android ? { android: input.android } : {}),
+      });
+      const responses = await mapWithConcurrency(input.tokens, 20, async (token) => {
+        let error: any = null;
         try {
-          await send({
-            token,
-            ...(input.data ? { data: input.data } : {}),
-            ...(input.notification ? { notification: input.notification } : {}),
-            ...(input.android ? { android: input.android } : {}),
-          });
+          await sendOne(token);
           return { success: true };
-        } catch (error) {
-          return {
-            success: false,
-            error: {
-              code: (error as any)?.code || 'messaging/unknown-error',
-              message: (error as any)?.message || String(error),
-            },
-          };
+        } catch (first) { error = first; }
+        // One bounded retry only for transient (429 / 5xx / UNAVAILABLE) errors.
+        if ((error as any)?.kind === 'transient') {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          try {
+            await sendOne(token);
+            return { success: true };
+          } catch (second) { error = second; }
         }
-      }));
+        return {
+          success: false,
+          error: {
+            code: (error as any)?.code || 'messaging/unknown-error',
+            message: (error as any)?.message || String(error),
+            kind: (error as any)?.kind || 'unknown',
+            httpStatus: (error as any)?.httpStatus || 0,
+          },
+        };
+      });
       const successCount = responses.filter((response) => response.success).length;
       return { successCount, failureCount: responses.length - successCount, responses };
     },
   };
 }
 
+/* -------------------------------------------------------------------
+   FCM v1 topic subscription API (modern replacement for the deprecated
+   iid.googleapis.com/v1:batchAdd, which stops working on 2027-09-29).
+   One registration token per call; ALREADY_EXISTS/409 counts as success.
+   Docs: https://firebase.google.com/docs/cloud-messaging/manage-topic-subscriptions
+   ------------------------------------------------------------------- */
+export type TopicSubResult = {
+  ok: boolean; permanent: boolean; status: number; code: string;
+};
+
+export async function subscribeTokenToTopic(
+  env: Env, token: string, topic: string,
+): Promise<TopicSubResult> {
+  const credentials = getCredentials(env);
+  const accessToken = await getAccessToken(env, FCM_SCOPE);
+  const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}`
+    + `/registrations/${encodeURIComponent(token)}/topicSubscriptions?topic_name=${encodeURIComponent(topic)}`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (response.ok || response.status === 409) {
+      return { ok: true, permanent: false, status: response.status, code: response.status === 409 ? 'ALREADY_EXISTS' : 'OK' };
+    }
+    const payload: any = await response.json().catch(() => ({}));
+    const code = String(payload?.error?.status || payload?.error?.message || response.statusText || '');
+    const kind = classifyFcmError(response.status, code);
+    return { ok: false, permanent: kind === 'permanent', status: response.status, code };
+  } catch (error: any) {
+    return { ok: false, permanent: false, status: 0, code: 'network_error: ' + (error?.message || String(error)) };
+  }
+}
+
+export async function unsubscribeTokenFromTopic(
+  env: Env, token: string, topic: string,
+): Promise<boolean> {
+  const credentials = getCredentials(env);
+  const accessToken = await getAccessToken(env, FCM_SCOPE);
+  const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}`
+    + `/registrations/${encodeURIComponent(token)}/topicSubscriptions/${encodeURIComponent(topic)}?allow_missing=true`;
+  try {
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    return response.ok || response.status === 404;
+  } catch { return false; }
+}
+
 export type WebPushResult = {
   targeted: number;
   success: number;
   failure: number;
+  invalid_removed: number;
+  error_counts: Record<string, number>;
   errors: string[];
 };
 
@@ -948,37 +1056,44 @@ function isWebTokenGone(status: number, payload: any): boolean {
   return codes.some((code) => code.includes('UNREGISTERED'));
 }
 
-// Web Push (browser) delivery. Reads every document in the `web_tokens`
-// collection (written by POST /api/notifications/register-web), then sends the
-// message to each token individually through FCM HTTP v1 using the service
-// account access token. Tokens reported as UNREGISTERED / 404 are deleted so
-// the collection self-cleans.
+// Web Push (browser) delivery — D1 is the SINGLE source of truth.
 //
-// Messages are data-only on purpose: public/firebase-messaging-sw.js renders
-// them in onBackgroundMessage, which lets the service worker control the icon,
-// RTL direction, and the click-through URL (app page vs home).
+// BUGFIX: POST /api/notifications/register-web writes the token into the D1
+// `web_tokens` table, while the old implementation read Firestore
+// `web_tokens` documents. In this D1-only deployment that collection is
+// empty, so every browser subscriber was silently skipped on broadcast.
+// Reads now come from D1, permanent failures delete the row, and sending is
+// bounded-concurrent instead of one huge Promise.all().
+//
+// Messages stay data-only: firebase-messaging-sw.js renders them in
+// onBackgroundMessage so it controls the icon, RTL direction and click URL.
 export async function sendWebPush(
   env: Env,
   title: string,
   body: string,
   data?: Record<string, string>,
 ): Promise<WebPushResult> {
-  const result: WebPushResult = { targeted: 0, success: 0, failure: 0, errors: [] };
+  const result: WebPushResult = {
+    targeted: 0, success: 0, failure: 0, invalid_removed: 0,
+    error_counts: {}, errors: [],
+  };
+  const db: any = env.DB;
 
-  const db = await firestore(env);
-  let docs: any[] = [];
+  let entries: { uid: string; token: string }[] = [];
   try {
-    const snap = await db.collection('web_tokens').get();
-    docs = snap.docs;
+    const rows: any = await db.prepare(
+      `SELECT uid, token FROM web_tokens
+        WHERE notifications_enabled = 1 AND permission != 'denied' AND token != ''
+        ORDER BY uid`,
+    ).all();
+    entries = (rows.results || [])
+      .map((r: any) => ({ uid: String(r.uid), token: String(r.token || '') }))
+      .filter((e: any) => e.token.length > 0);
   } catch (error: any) {
-    console.error('[fcm] web_tokens read failed:', error?.message || error);
+    console.error('[fcm] web_tokens (D1) read failed:', error?.message || error);
     result.errors.push('web_tokens_read_failed: ' + (error?.message || String(error)));
     return result;
   }
-
-  const entries = docs
-    .map((doc) => ({ id: doc.id, token: String(doc.data()?.token || '') }))
-    .filter((entry) => entry.token.length > 0);
   result.targeted = entries.length;
   if (!entries.length) return result;
 
@@ -986,43 +1101,51 @@ export async function sendWebPush(
   const accessToken = await getAccessToken(env, FCM_SCOPE);
   const endpoint = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}/messages:send`;
   const payloadData: Record<string, string> = { title, body: body || '', ...(data || {}) };
+  const gone: string[] = [];
 
-  for (const entry of entries) {
+  await mapWithConcurrency(entries, 20, async (entry) => {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: {
             token: entry.token,
             data: payloadData,
-            webpush: { headers: { TTL: String(WEB_PUSH_TTL_SECONDS) } },
+            webpush: {
+              headers: { TTL: String(WEB_PUSH_TTL_SECONDS), Urgency: 'high' },
+            },
           },
         }),
       });
-      if (response.ok) {
-        result.success++;
-        continue;
-      }
-      const payload = (await response.json().catch(() => ({}))) as any;
+      if (response.ok) { result.success++; return; }
+
+      const payload: any = await response.json().catch(() => ({}));
+      const code = String(payload?.error?.status || `HTTP_${response.status}`);
       result.failure++;
-      if (result.errors.length < 5) {
-        const detail = String(payload?.error?.message || response.statusText || 'unknown error');
-        result.errors.push(`web_send_failed(${response.status}): ${detail}`);
+      result.error_counts[code] = (result.error_counts[code] || 0) + 1;
+      if (result.errors.length < 8) {
+        result.errors.push(`web_send_failed(${response.status}): ${String(payload?.error?.message || response.statusText || code)}`);
       }
-      if (isWebTokenGone(response.status, payload)) {
-        await db.collection('web_tokens').doc(entry.id).delete().catch(() => {});
-      }
+      if (isWebTokenGone(response.status, payload)) gone.push(entry.uid);
     } catch (error: any) {
       result.failure++;
-      if (result.errors.length < 5) {
-        result.errors.push('web_send_exception: ' + (error?.message || String(error)));
+      const code = 'network_exception';
+      result.error_counts[code] = (result.error_counts[code] || 0) + 1;
+      if (result.errors.length < 8) result.errors.push('web_send_exception: ' + (error?.message || String(error)));
+    }
+  });
+
+  // Prune dead browser tokens from D1 (never from Firestore).
+  if (gone.length) {
+    try {
+      await db.batch(gone.map((uid) => db.prepare('DELETE FROM web_tokens WHERE uid = ?').bind(uid)));
+    } catch {
+      for (const uid of gone) {
+        await db.prepare('DELETE FROM web_tokens WHERE uid = ?').bind(uid).run().catch(() => {});
       }
     }
+    result.invalid_removed = gone.length;
   }
-
   return result;
 }

@@ -74,6 +74,46 @@
     });
   }
 
+  // ---------- permission persistence (Android 13+ / browser) ----------
+  // The backend must target opted-in users ONLY. Notification.permission is a
+  // device-local fact, so we mirror it into D1 on every page load and on every
+  // change. Without this, a user who revokes POST_NOTIFICATIONS still has a
+  // stored token and would keep being counted as eligible.
+  async function syncPermissionState(permission, enabled) {
+    try {
+      if (!window.GAuth || typeof window.GAuth.getIdToken !== 'function') return;
+      var idToken = await window.GAuth.getIdToken();
+      if (!idToken) return;
+      await fetch('/api/notifications/preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken },
+        body: JSON.stringify({ permission: permission, notifications_enabled: enabled }),
+        credentials: 'same-origin',
+      });
+    } catch (e) {
+      console.warn('[notifications] permission sync failed:', (e && e.message) || e);
+    }
+  }
+
+  function currentPermission() {
+    try { return Notification.permission || 'default'; } catch (e) { return 'default'; }
+  }
+
+  // Chrome/Android exposes a `change` event on the Notifications permission.
+  function watchPermissionChanges() {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return;
+      navigator.permissions.query({ name: 'notifications' }).then(function (status) {
+        if (!status || typeof status.addEventListener !== 'function') return;
+        status.addEventListener('change', function () {
+          var p = currentPermission();
+          syncPermissionState(p, p === 'granted');
+          if (p === 'denied') _attemptedUid = null;
+        });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   // ---------- foreground delivery ----------
 
   function hookForegroundMessages(messaging) {
@@ -124,7 +164,15 @@
       });
       return;
     }
-    if (permission !== 'granted') return; // denied / unsupported
+    if (permission !== 'granted') {
+      // Explicit refusal (or unsupported): mark the user as opted-out in D1
+      // so the backend never counts this device as eligible.
+      if (permission === 'denied') await syncPermissionState('denied', false);
+      return;
+    }
+
+    // Mirror the granted permission before attempting to get a token.
+    await syncPermissionState('granted', true);
 
     var registration = await navigator.serviceWorker.register(SW_URL);
 
@@ -137,7 +185,7 @@
 
     hookForegroundMessages(messaging);
 
-    // Persist the token on the Worker → Firestore web_tokens/{uid}.
+    // Persist the token in D1 web_tokens (the same table sendWebPush reads).
     var idToken = await window.GAuth.getIdToken();
     if (!idToken) return;
     var res = await fetch('/api/notifications/register-web', {
@@ -146,7 +194,12 @@
         'Content-Type': 'application/json',
         Authorization: 'Bearer ' + idToken,
       },
-      body: JSON.stringify({ token: token }),
+      body: JSON.stringify({
+        token: token,
+        platform: 'web',
+        permission: 'granted',
+        notifications_enabled: true,
+      }),
       credentials: 'same-origin',
     });
     if (!res.ok) {
@@ -163,8 +216,16 @@
     if (!isBrowserWithPushSupport()) return;
     if (!window.GAuth || typeof window.GAuth.onAuthChange !== 'function') return;
 
+    watchPermissionChanges();
+
     window.GAuth.onAuthChange(function (user) {
       if (!user || !user.uid) return;          // signed out → do nothing
+
+      // Always mirror the current OS permission, even when the token is
+      // already registered or when the prompt was previously dismissed.
+      var p = currentPermission();
+      syncPermissionState(p, p === 'granted');
+
       if (_attemptedUid === user.uid) return;  // already handled this user
       _attemptedUid = user.uid;
       registerWebPush(user).catch(function (err) {

@@ -1023,23 +1023,67 @@
       });
       const publishBtn = el('button', { class: 'btn btn-primary', type: 'button' }, ico('bell'), 'نشر إشعار');
       const testBtn = el('button', { class: 'btn btn-secondary', type: 'button' }, ico('bell'), 'إشعار تجريبي');
+      const syncBtn = el('button', { class: 'btn btn-secondary', type: 'button' }, ico('refresh'), 'مزامنة الاشتراكات');
       const pushInfo = el('div', { class: 'push-info', style: { fontSize: '13px', marginTop: '8px', lineHeight: '1.6' } });
       const listWrap = el('div', { class: 'panel' });
       const list = el('div', { class: 'notif-list' });
 
-      function showPush(push) {
-        if (!push) { pushInfo.textContent = ''; return; }
+      function renderPush(push, suffix) {
         const parts = [
           `الأجهزة المستهدفة: ${push.targeted || 0}`,
           `نجح: ${push.success || 0}`,
           `فشل: ${push.failure || 0}`,
         ];
-        if (push.errors && push.errors.length) parts.push(`أخطاء: ${push.errors.join(' | ')}`);
-        pushInfo.textContent = parts.join(' • ');
+        if (push.topic_targeted) parts.push(`عبر الموضوع: ${push.topic_targeted}`);
+        if (push.direct_targeted) parts.push(`إرسال مباشر: ${push.direct_targeted}`);
+        if (push.web_targeted) parts.push(`متصفح: ${push.web_targeted}`);
+        if (push.invalid_removed) parts.push(`رموز ميتة محذوفة: ${push.invalid_removed}`);
+        if (push.pending) parts.push(`قيد الانتظار: ${push.pending}`);
+        if (push.errors && push.errors.length) parts.push(`أخطاء: ${push.errors.slice(0, 3).join(' | ')}`);
+        pushInfo.textContent = parts.join(' • ') + (suffix || '');
         if ((push.targeted || 0) === 0) {
-          pushInfo.textContent += ' — لا يوجد أي جهاز مسجّل. افتح تطبيق الأندرويد، اسمح بالإشعارات، وسجّل الدخول.';
+          pushInfo.textContent += ' — لا يوجد أي جهاز مؤهل. افتح التطبيق، اسمح بالإشعارات، وسجّل الدخول.';
         }
       }
+
+      // A large audience is split across Worker invocations. Drain the queued
+      // batches so EVERY eligible device receives the message before we stop.
+      async function showPush(push) {
+        if (!push) { pushInfo.textContent = ''; return; }
+        renderPush(push);
+        let rounds = 0;
+        while (push.job_id && (push.pending || 0) > 0 && rounds < 20) {
+          rounds++;
+          try {
+            const more = await api('/api/admin/push/flush', {
+              method: 'POST', body: { job_id: push.job_id },
+            });
+            push.success = (push.success || 0) + (more.success || 0);
+            push.failure = (push.failure || 0) + (more.failure || 0);
+            push.invalid_removed = (push.invalid_removed || 0) + (more.invalid_removed || 0);
+            push.direct_targeted = (push.direct_targeted || 0) + (more.processed || 0);
+            push.pending = more.pending || 0;
+            renderPush(push, ' — جارٍ استكمال الإرسال…');
+            if (more.done) break;
+          } catch (e) {
+            renderPush(push, ' — تعذّر استكمال الإرسال: ' + (e.message || ''));
+            break;
+          }
+        }
+      }
+
+      syncBtn.onclick = async () => {
+        syncBtn.disabled = true;
+        try {
+          const r = await api('/api/admin/push/sync-topics', { method: 'POST', body: { limit: 100 } });
+          toast(`تم الاشتراك في الموضوع: ${r.subscribed || 0} • رموز ميتة: ${r.invalid || 0} • متبقٍ: ${r.remaining || 0}`, 'success');
+          await refreshStatus();
+        } catch (e) {
+          toast(e.message || 'تعذّرت المزامنة', 'error');
+        } finally {
+          syncBtn.disabled = false;
+        }
+      };
 
       async function refreshStatus() {
         try {
@@ -1135,7 +1179,7 @@
               el('label', null, 'النص'),
               bodyInput,
             ),
-            el('div', { class: 'btn-row', style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, publishBtn, testBtn),
+            el('div', { class: 'btn-row', style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, publishBtn, testBtn, syncBtn),
             pushInfo,
           ),
         ),

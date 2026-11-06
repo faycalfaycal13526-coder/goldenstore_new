@@ -504,9 +504,7 @@
     },
       closeBtn,
       stage,
-      el('div', { class: 'gs-video-bar' },
-        el('span', { class: 'gs-video-label' }, ico('youtube', 'icon icon-sm'), label),
-        openLink),
+      el('div', { class: 'gs-video-bar' }, openLink),
     );
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); close(); }
@@ -559,6 +557,9 @@
         'data-thumb': v.thumb_url ? 'custom' : 'youtube',
         'data-orient': isShort ? 'portrait' : 'landscape',
       });
+      // The thumbnail carries ONLY the play triangle. All type/platform
+      // badges (YouTube logo, «شورت» pill, title strip) were intentionally
+      // removed; a11y metadata stays on the button/iframe instead.
       const card = el('button', {
         class: `shot-card gs-video-card is-${isShort ? 'short' : 'video'} ${orient}`,
         type: 'button', role: 'listitem',
@@ -567,9 +568,6 @@
       },
         img,
         el('span', { class: 'gs-video-play', 'aria-hidden': 'true' }, ico('play', 'icon')),
-        el('span', { class: 'gs-video-yt', 'aria-hidden': 'true' }, ico('youtube', 'icon icon-sm')),
-        isShort ? el('span', { class: 'gs-video-short' }, t('شورت')) : null,
-        v.title ? el('span', { class: 'gs-video-title' }, v.title) : null,
       );
       img.addEventListener('error', () => card.classList.add('is-error'));
       shots.append(card);

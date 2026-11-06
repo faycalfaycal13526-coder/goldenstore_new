@@ -2391,6 +2391,7 @@ html[dir="ltr"] .support-entry-chevron { transform: scaleX(-1); }
   /* Video cards inherit the exact phone .shot-card geometry (132 × 234,
      8px corners) — no separate size is declared for them. */
   .gs-video-play { width: 48px; height: 48px; }
+  .gs-video-play .icon { width: 22px; height: 22px; }
 
   /* Google Play-style landscape screenshots on PHONES ONLY.
      The desktop 1280px width is completely unused here: every property that
@@ -3426,29 +3427,18 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
 }
 .gs-video-card.is-error .gs-video-thumb { opacity: 0; }
 .gs-video-play {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  /* inset:0 + margin:auto centres the button in BOTH axes against the card's
+     padding box, in LTR and RTL alike, with no transform/rounding drift. */
+  position: absolute; inset: 0; margin: auto;
   width: 56px; height: 56px; border-radius: 50%;
   display: grid; place-items: center;
-  background: rgba(244,192,31,.96); color: #1a1400;
+  background: #ffffff; color: #1a1400;
   box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
-.gs-video-play .icon { width: 26px; height: 26px; margin-inline-start: 3px; }
-.gs-video-yt {
-  position: absolute; top: 10px; inset-inline-start: 10px;
-  width: 32px; height: 32px; border-radius: 9px;
-  display: grid; place-items: center; background: rgba(0,0,0,.6); color: #ff0033;
-}
-.gs-video-yt .icon { width: 20px; height: 20px; fill: currentColor; stroke: none; }
-.gs-video-short {
-  position: absolute; top: 10px; inset-inline-end: 10px;
-  padding: 4px 9px; border-radius: 999px;
-  font-size: 11px; font-weight: 800; background: #f4c01f; color: #1a1400;
-}
-.gs-video-title {
-  position: absolute; inset-inline: 0; bottom: 0;
-  padding: 12px 12px 10px; font-size: 12px; font-weight: 600; line-height: 1.4;
-  background: linear-gradient(transparent, rgba(0,0,0,.82));
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* No inline-start nudge: the glyph is now truly centred inside the circle.
+   display:block removes the inline SVG baseline gap in every browser. */
+.gs-video-play .icon {
+  width: 26px; height: 26px; display: block; margin: 0;
 }
 
 /* Inline player: embedded iframe + explicit "open on YouTube" action. */
@@ -3481,15 +3471,10 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
   width: min(100%, 420px); aspect-ratio: 9/16; max-height: 100%;
 }
 .gs-video-bar {
-  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end;
   gap: 12px; padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(255,255,255,.1);
 }
-.gs-video-label {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 13px; font-weight: 700; color: #f4c01f;
-}
-.gs-video-label .icon { width: 20px; height: 20px; fill: currentColor; stroke: none; }
 .gs-video-open {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 9px 14px; border-radius: 12px;

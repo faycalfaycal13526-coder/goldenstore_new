@@ -514,30 +514,106 @@ app.post('/notifications/self-test', async (c) => {
   return c.json({ ok: true, push });
 });
 
+// ---- Translation helpers -------------------------------------------------
+// Google's unofficial gtx endpoint answers Cloudflare Worker IPs with an HTML
+// "Sorry..." bot-block page instead of JSON. The old route mistook that failure
+// for a valid translation and cached the unchanged Arabic source forever, so
+// any string missing from the curated dictionary could never be translated.
+const translateReady = new WeakSet<object>();
+async function ensureTranslateCache(db: any) {
+  if (!db || translateReady.has(db)) return;
+  translateReady.add(db);
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS i18n_cache (
+      id TEXT PRIMARY KEY,
+      target TEXT,
+      src TEXT,
+      out TEXT,
+      ts INTEGER
+    )`).run();
+  } catch { /* table already exists / D1 unavailable: still serve translations */ }
+}
+
+const ARABIC_CHARS = /[\u0600-\u06FF]/;
+
+// Circuit breaker: once gtx answers with its bot-block HTML, stop calling it for
+// a few minutes instead of paying that latency for every batch on every page.
+let googleBackoffUntil = 0;
+
+async function googleTranslate(text: string, target: string): Promise<string | null> {
+  if (Date.now() < googleBackoffUntil) return null;
+  try {
+    const res = await fetch(
+      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${target}&dt=t&q=${encodeURIComponent(text)}`,
+      { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; GoldenStore/1.0)' } },
+    );
+    const raw = await res.text();
+    // A blocked response is HTML ("<html>…Sorry…"), not JSON. Never accept it.
+    if (!raw || raw.charAt(0) !== '[') {
+      googleBackoffUntil = Date.now() + 5 * 60 * 1000;
+      return null;
+    }
+    const data: any = JSON.parse(raw);
+    const tr = Array.isArray(data[0])
+      ? data[0].map((seg: any) => (seg && typeof seg[0] === 'string' ? seg[0] : '')).join('')
+      : '';
+    return tr && tr !== text ? tr : null;
+  } catch { return null; }
+}
+
+async function myMemoryTranslate(text: string, target: string): Promise<string | null> {
+  // Anonymous MyMemory quota is per-IP; only short Arabic UI strings are worth it.
+  if (!ARABIC_CHARS.test(text) || encodeURIComponent(text).length > 450) return null;
+  try {
+    const res = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=ar%7C${target}`,
+      { headers: { Accept: 'application/json' } },
+    );
+    const data: any = await res.json();
+    if (!data || Number(data.responseStatus) !== 200 || data.quotaFinished) return null;
+    const tr = String((data.responseData && data.responseData.translatedText) || '');
+    if (!tr || tr === text || /MYMEMORY WARNING|QUERY LENGTH|INVALID|QUOTA|PLEASE SELECT/i.test(tr)) return null;
+    return tr;
+  } catch { return null; }
+}
+
 app.post('/translate', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const target = String(body.target || '').toLowerCase();
   const q = Array.isArray(body.q) ? body.q.slice(0, 60).map((x: any) => String(x||'')) : [];
   if (!['en','fr','es'].includes(target) || !q.length) return c.json({ t: q });
 
+  const db: any = c.env.DB;
+  await ensureTranslateCache(db);
+
   const out = new Array(q.length).fill(null);
   const toFetch: any[] = [];
   for (let i=0; i<q.length; i++) {
     if (!q[i] || q[i].length > 5000) { out[i] = q[i]; continue; }
     const id = await sha1Hex(target + '::' + q[i]);
-    const row: any = await c.env.DB.prepare('SELECT out FROM i18n_cache WHERE id = ?').bind(id).first();
-    if (row) out[i] = row.out; else toFetch.push({ i, text: q[i], id });
+    let cached: string | null = null;
+    try {
+      const row: any = await db.prepare('SELECT out FROM i18n_cache WHERE id = ?').bind(id).first();
+      // Self-heal rows poisoned by the old code (out === source text).
+      if (row && row.out && row.out !== q[i]) cached = String(row.out);
+    } catch { /* no cache table: fall through to live translation */ }
+    if (cached != null) out[i] = cached;
+    else toFetch.push({ i, text: q[i], id });
   }
 
   for (let k=0; k<toFetch.length; k+=6) {
     await Promise.all(toFetch.slice(k, k+6).map(async (item) => {
-      try {
-        const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${target}&dt=t&q=${encodeURIComponent(item.text)}`);
-        const data: any = await res.json();
-        const tr = Array.isArray(data[0]) ? data[0].map((s: any) => s[0]).join('') : item.text;
-        out[item.i] = tr;
-        c.env.DB.prepare('INSERT INTO i18n_cache (id, target, src, out, ts) VALUES (?, ?, ?, ?, ?)').bind(item.id, target, item.text, tr, nowSec()).run().catch(()=>{});
-      } catch { out[item.i] = item.text; }
+      let tr = await googleTranslate(item.text, target);
+      if (!tr) tr = await myMemoryTranslate(item.text, target);
+      out[item.i] = tr || item.text;
+      // Persist only real translations. INSERT OR REPLACE overwrites stale
+      // poisoned rows so subsequent requests are served from cache.
+      if (tr) {
+        try {
+          await db.prepare('INSERT OR REPLACE INTO i18n_cache (id, target, src, out, ts) VALUES (?, ?, ?, ?, ?)')
+            .bind(item.id, target, item.text, tr, nowSec()).run();
+        } catch { /* caching is best-effort */ }
+      }
     }));
   }
   for (let i=0; i<q.length; i++) if (out[i] == null) out[i] = q[i];

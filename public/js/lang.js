@@ -758,6 +758,27 @@
     'تعذّر حذف البلاغ': { en: 'Could not delete the report', fr: 'Impossible de supprimer le signalement', es: 'No se pudo eliminar la denuncia' },
     'تم حذف التعليق': { en: 'Review deleted', fr: 'Avis supprimé', es: 'Reseña eliminada' },
     'تعذّر حذف التعليق': { en: 'Could not delete the review', fr: 'Impossible de supprimer l’avis', es: 'No se pudo eliminar la reseña' },
+
+    // ---- Play-style top tabs (Home + Games) ---------------------------------
+    // Both shaped and unshaped spellings are registered. norm() already strips
+    // diacritics (including the shadda), but listing both guards against future
+    // label edits and makes the intent explicit. Without these keys t() falls
+    // through to /api/translate and the label stays Arabic in EN/FR/ES.
+    'محتوى يهمّك': { en: 'For you', fr: 'Pour vous', es: 'Para ti' },
+    'محتوى يهمك': { en: 'For you', fr: 'Pour vous', es: 'Para ti' },
+    'العربية': { en: 'Arabic', fr: 'Arabe', es: 'Árabe' },
+    'مرسلة': { en: 'Sent', fr: 'Envoyées', es: 'Enviadas' },
+    'ناجحة': { en: 'Delivered', fr: 'Livrées', es: 'Entregadas' },
+
+    // ---- Admin upload form (all remaining static t() literals) -------------
+    'أضف لقطات جديدة': { en: 'Add new screenshots', fr: 'Ajouter de nouvelles captures', es: 'Añadir nuevas capturas' },
+    'اختر أيقونة (PNG/JPG)': { en: 'Choose an icon (PNG/JPG)', fr: 'Choisir une icône (PNG/JPG)', es: 'Elegir un icono (PNG/JPG)' },
+    'اختر أيقونة جديدة': { en: 'Choose a new icon', fr: 'Choisir une nouvelle icône', es: 'Elegir un icono nuevo' },
+    'اختر صورة عرضية (يفضّل 1024×500)': { en: 'Choose a feature graphic (1024×500 recommended)', fr: 'Choisir une image de présentation (1024×500 recommandé)', es: 'Elegir imagen destacada (1024×500 recomendado)' },
+    'اختر لقطات الشاشة (متعددة)': { en: 'Choose screenshots (multiple)', fr: 'Choisir des captures d’écran (plusieurs)', es: 'Elegir capturas de pantalla (varias)' },
+    'استبدل ملف APK': { en: 'Replace APK file', fr: 'Remplacer le fichier APK', es: 'Reemplazar el archivo APK' },
+    'اسحب أو اختر ملف APK': { en: 'Drag or choose an APK file', fr: 'Glisser ou choisir un fichier APK', es: 'Arrastra o elige un archivo APK' },
+    'اسحب أو اختر ملف APK للتطبيق': { en: 'Drag or choose the app APK file', fr: 'Glisser ou choisir le fichier APK de l’application', es: 'Arrastra o elige el archivo APK de la aplicación' },
   };
 
   // Number/size unit labels per language.
@@ -771,7 +792,9 @@
   var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, CODE: 1, PRE: 1 };
 
   // ---- translation cache (per-language, persisted) ----
-  var cacheKey = 'gs_tr_' + lang;
+  // v2: v1 cached unchanged Arabic results permanently (translation outage).
+  // A fresh key lets every string be re-fetched now that failures are not cached.
+  var cacheKey = 'gs_tr2_' + lang;
   var cache = {};
   try { cache = JSON.parse(localStorage.getItem(cacheKey) || '{}') || {}; } catch (e) { cache = {}; }
   var cacheDirty = false;
@@ -818,7 +841,11 @@
   var scheduled = false;
   var applying = false;
 
+  // Short negative cache: avoid hammering the translation endpoint for strings
+  // the provider could not translate, while still retrying 10 minutes later.
+  var failedUntil = {};
   function queue(core, applyFn) {
+    if (failedUntil[core] && failedUntil[core] > Date.now()) return;
     if (!pending[core]) { pending[core] = []; pendingKeys.push(core); }
     pending[core].push(applyFn);
     if (!scheduled) { scheduled = true; setTimeout(flush, 80); }
@@ -846,9 +873,10 @@
       var t = (data && data.t) || [];
       todo.forEach(function (core, i) {
         var v = t[i];
-        // Cache any non-empty string (even if unchanged) so we never re-request
-        // it and never blank out content. Empty results are ignored.
-        if (typeof v === 'string' && v) { cache[core] = v; cacheDirty = true; }
+        // Only cache a REAL translation. Caching an unchanged (still Arabic)
+        // string permanently blocks retries once the service recovers.
+        if (typeof v === 'string' && v && v !== core) { cache[core] = v; cacheDirty = true; }
+        else failedUntil[core] = Date.now() + 10 * 60 * 1000;
       });
       applyAll();
       saveCache();

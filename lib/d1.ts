@@ -596,17 +596,23 @@ const VIDEO_SCHEMA = [
      kind TEXT NOT NULL DEFAULT 'video',
      url TEXT NOT NULL,
      title TEXT,
+     thumb_key TEXT,
      position INTEGER NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS idx_app_videos_app ON app_videos(app_id, position ASC)`,
 ];
+// CREATE TABLE IF NOT EXISTS cannot add a column to a table created by the
+// first deployment, so the upgrade ALTER runs separately and is allowed to
+// fail with "duplicate column name" on fresh databases.
+const VIDEO_UPGRADES = [`ALTER TABLE app_videos ADD COLUMN thumb_key TEXT`];
 const videoSchemaReady = new WeakSet<object>();
 
 export async function ensureVideosSchema(env: Env): Promise<void> {
   const db: any = env.DB;
   if (videoSchemaReady.has(db)) return;
   for (const sql of VIDEO_SCHEMA) await db.prepare(sql).run();
+  for (const sql of VIDEO_UPGRADES) { try { await db.prepare(sql).run(); } catch { /* already present */ } }
   videoSchemaReady.add(db);
 }
 
@@ -614,7 +620,8 @@ function videoFromRow(r: any): AppVideo {
   return {
     id: String(r.id), app_id: String(r.app_id), video_id: String(r.video_id),
     kind: r.kind === 'short' ? 'short' : 'video', url: String(r.url),
-    title: String(r.title || ''), position: Number(r.position) || 0,
+    title: String(r.title || ''), thumb_key: r.thumb_key ? String(r.thumb_key) : null,
+    position: Number(r.position) || 0,
     created_at: Number(r.created_at) || 0,
   };
 }
@@ -626,16 +633,38 @@ export async function listAppVideos(env: Env, app_id: string): Promise<AppVideo[
 }
 
 export async function addAppVideo(env: Env, app_id: string, v: {
-  video_id: string; kind: 'video' | 'short'; url: string; title?: string; position?: number;
+  video_id: string; kind: 'video' | 'short'; url: string;
+  title?: string; thumb_key?: string | null; position?: number;
 }): Promise<AppVideo> {
   await ensureVideosSchema(env);
   const row: AppVideo = {
     id: randomId(), app_id, video_id: v.video_id, kind: v.kind, url: v.url,
-    title: v.title || '', position: Number(v.position) || 0, created_at: nowSec(),
+    title: v.title || '', thumb_key: v.thumb_key || null,
+    position: Number(v.position) || 0, created_at: nowSec(),
   };
-  await env.DB.prepare('INSERT INTO app_videos (id, app_id, video_id, kind, url, title, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(row.id, row.app_id, row.video_id, row.kind, row.url, row.title, row.position, row.created_at).run();
+  await env.DB.prepare('INSERT INTO app_videos (id, app_id, video_id, kind, url, title, thumb_key, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(row.id, row.app_id, row.video_id, row.kind, row.url, row.title,
+      row.thumb_key, row.position, row.created_at).run();
   return row;
+}
+
+export async function updateAppVideo(env: Env, app_id: string, id: string, patch: {
+  thumb_key?: string | null; title?: string;
+}): Promise<AppVideo | null> {
+  await ensureVideosSchema(env);
+  const old: any = await env.DB.prepare('SELECT * FROM app_videos WHERE id = ? AND app_id = ?').bind(id, app_id).first();
+  if (!old) return null;
+  const thumb_key = patch.thumb_key === undefined ? (old.thumb_key || null) : patch.thumb_key;
+  const title = patch.title === undefined ? String(old.title || '') : String(patch.title).slice(0, 120);
+  await env.DB.prepare('UPDATE app_videos SET thumb_key = ?, title = ? WHERE id = ? AND app_id = ?')
+    .bind(thumb_key, title, id, app_id).run();
+  return { ...videoFromRow(old), thumb_key, title };
+}
+
+export async function listVideoThumbKeys(env: Env, app_id: string): Promise<string[]> {
+  await ensureVideosSchema(env);
+  const r = await env.DB.prepare('SELECT thumb_key FROM app_videos WHERE app_id = ? AND thumb_key IS NOT NULL').bind(app_id).all();
+  return (r.results || []).map((x: any) => String(x.thumb_key)).filter(Boolean);
 }
 
 export async function deleteAppVideo(env: Env, app_id: string, id: string): Promise<boolean> {

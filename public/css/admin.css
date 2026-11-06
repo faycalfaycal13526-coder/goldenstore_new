@@ -603,3 +603,21 @@
   .gs-admin-video-form { grid-template-columns: 1fr; }
   .gs-admin-video-thumb { width: 80px; height: 52px; flex-basis: 80px; }
 }
+
+
+/* ---------- Custom video thumbnail controls (2026-11-06) ---------- */
+.gs-admin-video-thumb-field { margin-top: 14px; }
+.gs-admin-video-dropzone .dropzone { padding: 14px; min-height: 0; }
+.gs-admin-video-dropzone .icon { width: 22px; height: 22px; }
+.gs-admin-video-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.gs-admin-video-badge.is-custom {
+  background: rgba(76,175,80,.16); color: #4caf50;
+}
+.gs-admin-video-actions {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  flex: 0 0 auto; justify-content: flex-end;
+}
+@media (max-width: 900px) {
+  .gs-admin-video-row { flex-wrap: wrap; }
+  .gs-admin-video-actions { width: 100%; justify-content: flex-start; }
+}

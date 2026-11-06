@@ -42,6 +42,7 @@ export interface AppVideo {
   kind: 'video' | 'short';
   url: string;
   title: string;
+  thumb_key: string | null;        // optional custom thumbnail in R2 (vthumb/)
   position: number;
   created_at: number;
 }

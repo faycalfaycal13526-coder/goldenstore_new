@@ -12,8 +12,14 @@ CREATE TABLE IF NOT EXISTS app_videos (
   kind TEXT NOT NULL DEFAULT 'video',  -- 'video' | 'short'
   url TEXT NOT NULL,                   -- canonical watch/shorts URL
   title TEXT,
+  thumb_key TEXT,                       -- optional custom thumbnail in R2 (vthumb/)
   position INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_videos_app ON app_videos(app_id, position ASC);
+
+-- Upgrading an already-created table (CREATE TABLE IF NOT EXISTS never adds a
+-- column). The API also runs this ALTER with a safe catch on every cold start.
+-- It is fine if this reports "duplicate column name: thumb_key".
+ALTER TABLE app_videos ADD COLUMN thumb_key TEXT;

@@ -461,6 +461,13 @@
     return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : '';
   }
   function videoThumb(id) { return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`; }
+  // A custom thumbnail uploaded from the admin panel wins; otherwise fall
+  // back to YouTube's own poster. Both are drawn with the same card CSS.
+  function videoThumbSrc(v, id) {
+    const custom = v && typeof v.thumb_url === 'string' && /^https?:\/\//i.test(v.thumb_url)
+      ? v.thumb_url.trim() : '';
+    return custom || videoThumb(id);
+  }
 
   function openVideo(v, trigger) {
     const id = safeVideoId(v);
@@ -534,26 +541,31 @@
       'aria-label': safeVideos.length ? t('الفيديوهات واللقطات') : t('لقطات الشاشة'),
     });
 
-    // Play Store puts the video before the stills; Shorts get a portrait card.
+    // Play Store puts the video before the stills. Every video card carries
+    // the SAME .shot-card class as the stills, so it has the identical width,
+    // height, corners, background, hover, focus, snap and object-fit: contain.
     safeVideos.forEach((v, vi) => {
       const id = safeVideoId(v);
       const isShort = v.kind === 'short';
       const kindLabel = isShort ? t('شورت يوتيوب') : t('فيديو يوتيوب');
+      const img = el('img', {
+        class: 'shot-img gs-video-thumb', src: videoThumbSrc(v, id), alt: '',
+        draggable: 'false', decoding: 'async', loading: vi < 2 ? 'eager' : 'lazy',
+        'data-thumb': v.thumb_url ? 'custom' : 'youtube',
+      });
       const card = el('button', {
-        class: `gs-video-card is-${isShort ? 'short' : 'video'}`,
+        class: `shot-card gs-video-card is-${isShort ? 'short' : 'video'}`,
         type: 'button', role: 'listitem',
         'aria-label': v.title ? `${kindLabel} — ${v.title}` : kindLabel,
         onclick: () => openVideo(v, card),
       },
-        el('img', {
-          class: 'gs-video-thumb', src: videoThumb(id), alt: '',
-          draggable: 'false', decoding: 'async', loading: vi < 2 ? 'eager' : 'lazy',
-        }),
+        img,
         el('span', { class: 'gs-video-play', 'aria-hidden': 'true' }, ico('play', 'icon')),
         el('span', { class: 'gs-video-yt', 'aria-hidden': 'true' }, ico('youtube', 'icon icon-sm')),
         isShort ? el('span', { class: 'gs-video-short' }, t('شورت')) : null,
         v.title ? el('span', { class: 'gs-video-title' }, v.title) : null,
       );
+      img.addEventListener('error', () => card.classList.add('is-error'));
       shots.append(card);
     });
 

@@ -1366,7 +1366,7 @@
     const iconDz = dropzone({ accept: 'image/*', label: 'اختر أيقونة (PNG/JPG)' });
     const featDz = dropzone({ accept: 'image/*', label: 'اختر صورة عرضية (يفضّل 1024×500)' });
     const ssDz = dropzone({ accept: 'image/*', multiple: true, label: 'اختر لقطات الشاشة (متعددة)' });
-    const ve = videoEditor({ videos: [], onAdd: (v) => v, onDelete: () => true });
+    const ve = videoEditor({ videos: [], slugHint: 'video', onAdd: (v) => v, onDelete: () => true });
 
     const form = el('form', { class: 'form', onsubmit: async (e) => {
       e.preventDefault();
@@ -1641,11 +1641,25 @@
       // YouTube videos / Shorts
       const ve = videoEditor({
         videos,
+        slugHint: app.slug,
         onAdd: async (v) => {
           const r = await api(`/api/admin/apps/${id}/videos`, {
-            method: 'POST', body: { url: v.url, title: v.title, kind: v.kind },
+            method: 'POST',
+            body: { url: v.url, title: v.title, kind: v.kind, thumb_key: v.thumb_key || null },
           });
           return r.video;
+        },
+        onThumbSave: async (v, thumb_key) => {
+          const r = await api(`/api/admin/apps/${id}/videos/${v.id}`, {
+            method: 'PATCH', body: { thumb_key },
+          });
+          return r.video;
+        },
+        onThumbReset: async (v) => {
+          await api(`/api/admin/apps/${id}/videos/${v.id}`, {
+            method: 'PATCH', body: { thumb_key: null },
+          });
+          return true;
         },
         onDelete: async (v) => {
           await api(`/api/admin/apps/${id}/videos/${v.id}`, { method: 'DELETE' });
@@ -1751,8 +1765,47 @@
       el('option', { value: 'auto' }, t('اكتشاف تلقائي')),
       el('option', { value: 'video' }, t('فيديو عادي')),
       el('option', { value: 'short' }, t('شورت')));
+    // Optional custom thumbnail: uploaded to R2 (vthumb/) instead of using
+    // YouTube's automatic i.ytimg.com poster.
+    const thumbDz = dropzone({ accept: 'image/*', label: t('صورة مصغّرة مخصّصة (اختياري)') });
+    thumbDz.classList.add('gs-admin-video-dropzone');
     const addBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: add },
       ico('plus'), t('إضافة فيديو'));
+
+    function thumbSrc(v) { return v.thumb_preview || v.thumb_url || videoThumb(v.video_id); }
+    function hasCustomThumb(v) { return !!(v.thumb_preview || v.thumb_url || v.thumb_key); }
+
+    async function uploadThumb(file) {
+      if (!file || !/^image\//.test(file.type || '')) { toast(t('اختر صورة'), 'error'); return null; }
+      try {
+        return await r2Upload(file, 'video-thumb', opts.slugHint || 'video', () => {});
+      } catch { toast(t('فشل رفع الصورة المصغّرة'), 'error'); return null; }
+    }
+
+    async function applyThumb(v, file) {
+      const key = await uploadThumb(file);
+      if (!key) return;
+      try {
+        if (opts.onThumbSave) {
+          const saved = await opts.onThumbSave(v, key);
+          if (saved) { v.thumb_url = saved.thumb_url || null; delete v.thumb_preview; }
+        } else {
+          try { v.thumb_preview = URL.createObjectURL(file); } catch {}
+        }
+        v.thumb_key = key;
+        renderList();
+        toast(t('تم تحديث الصورة المصغّرة'), 'success');
+      } catch { toast(t('فشل تحديث الصورة المصغّرة'), 'error'); }
+    }
+
+    async function resetThumb(v) {
+      try {
+        if (opts.onThumbReset) await opts.onThumbReset(v);
+        v.thumb_key = null; v.thumb_url = null; delete v.thumb_preview;
+        renderList();
+        toast(t('تم تحديث الصورة المصغّرة'), 'success');
+      } catch { toast(t('فشل تحديث الصورة المصغّرة'), 'error'); }
+    }
 
     function renderList() {
       list.innerHTML = '';
@@ -1762,32 +1815,55 @@
       }
       items.forEach((v) => {
         const isShort = v.kind === 'short';
+        const fileInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+        fileInput.addEventListener('change', async () => {
+          const f = (fileInput.files || [])[0];
+          if (f) await applyThumb(v, f);
+          fileInput.value = '';
+        });
+        const changeBtn = el('button', {
+          class: 'btn btn-sm btn-secondary', type: 'button',
+          title: t('تغيير الصورة المصغّرة'), 'aria-label': t('تغيير الصورة المصغّرة'),
+          onclick: () => fileInput.click(),
+        }, ico('image'), t('تغيير الصورة المصغّرة'));
+        const resetBtn = hasCustomThumb(v) ? el('button', {
+          class: 'btn btn-sm btn-secondary', type: 'button',
+          title: t('استخدام صورة يوتيوب'), 'aria-label': t('استخدام صورة يوتيوب'),
+          onclick: () => resetThumb(v),
+        }, ico('youtube'), t('استخدام صورة يوتيوب')) : null;
         list.append(el('div', { class: 'gs-admin-video-row' },
           el('img', {
-            class: 'gs-admin-video-thumb', src: videoThumb(v.video_id),
+            class: 'gs-admin-video-thumb', src: thumbSrc(v),
             alt: t('صورة مصغّرة للفيديو'), loading: 'lazy',
           }),
           el('div', { class: 'gs-admin-video-meta' },
-            el('span', { class: `gs-admin-video-badge${isShort ? ' is-short' : ''}` },
-              isShort ? t('شورت') : t('فيديو')),
+            el('div', { class: 'gs-admin-video-badges' },
+              el('span', { class: `gs-admin-video-badge${isShort ? ' is-short' : ''}` },
+                isShort ? t('شورت') : t('فيديو')),
+              hasCustomThumb(v) ? el('span', { class: 'gs-admin-video-badge is-custom' },
+                t('صورة مخصّصة')) : null,
+            ),
             el('div', { class: 'gs-admin-video-title' }, v.title || v.url),
             el('a', { class: 'gs-admin-video-link', href: v.url, target: '_blank',
               rel: 'noopener noreferrer nofollow' }, v.url),
           ),
-          el('button', {
-            class: 'btn btn-sm btn-danger', type: 'button',
-            'aria-label': t('حذف الفيديو'), title: t('حذف الفيديو'),
-            onclick: async () => {
-              if (!confirm(t('حذف هذا الفيديو؟'))) return;
-              try {
-                const done = await opts.onDelete(v);
-                if (done === false) throw new Error('not_found');
-                items = items.filter((x) => x !== v);
-                renderList();
-                toast(t('تم حذف الفيديو'), 'success');
-              } catch { toast(t('فشل حذف الفيديو'), 'error'); }
-            },
-          }, ico('trash')),
+          el('div', { class: 'gs-admin-video-actions' },
+            fileInput, changeBtn, resetBtn,
+            el('button', {
+              class: 'btn btn-sm btn-danger', type: 'button',
+              'aria-label': t('حذف الفيديو'), title: t('حذف الفيديو'),
+              onclick: async () => {
+                if (!confirm(t('حذف هذا الفيديو؟'))) return;
+                try {
+                  const done = await opts.onDelete(v);
+                  if (done === false) throw new Error('not_found');
+                  items = items.filter((x) => x !== v);
+                  renderList();
+                  toast(t('تم حذف الفيديو'), 'success');
+                } catch { toast(t('فشل حذف الفيديو'), 'error'); }
+              },
+            }, ico('trash')),
+          ),
         ));
       });
     }
@@ -1798,10 +1874,18 @@
         toast(t('رابط يوتيوب غير صالح'), 'error'); return;
       }
       const v = { ...parsed, title: titleInput.value.trim() };
+      const thumbFiles = thumbDz.getFiles();
+      if (thumbFiles.length) {
+        const key = await uploadThumb(thumbFiles[0]);
+        if (!key) return;
+        v.thumb_key = key;
+        try { v.thumb_preview = URL.createObjectURL(thumbFiles[0]); } catch {}
+      }
       try {
         const saved = await opts.onAdd(v);
         items.push(saved || v);
         urlInput.value = ''; titleInput.value = ''; kindSelect.value = 'auto';
+        thumbDz.reset();
         renderList();
         toast(t('تمت إضافة الفيديو'), 'success');
       } catch { toast(t('فشل إضافة الفيديو'), 'error'); }
@@ -1820,13 +1904,22 @@
         el('div', { class: 'field' },
           el('label', null, t('نوع الفيديو')), kindSelect),
       ),
+      el('div', { class: 'field gs-admin-video-thumb-field' },
+        el('label', null, t('صورة مصغّرة مخصّصة (اختياري)')),
+        thumbDz,
+        el('div', { class: 'hint' }, t('تُستخدم صورة يوتيوب تلقائياً عند ترك هذا الحقل فارغاً')),
+      ),
       el('div', { class: 'mt-md' }, addBtn),
       list,
     );
     renderList();
     return {
       panel,
-      getVideos: () => items.map((v) => ({ url: v.url, title: v.title || '', kind: v.kind })),
+      getVideos: () => items.map((v) => {
+        const out = { url: v.url, title: v.title || '', kind: v.kind };
+        if (v.thumb_key) out.thumb_key = v.thumb_key;
+        return out;
+      }),
     };
   }
   function categoryField(name, value, typeSelectName) {

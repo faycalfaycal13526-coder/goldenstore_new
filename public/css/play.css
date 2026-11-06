@@ -2356,12 +2356,8 @@ html[dir="ltr"] .support-entry-chevron { transform: scaleX(-1); }
     border-radius: 8px;         /* was 20px — small corners for ALL cards */
   }
   .shot-card.is-square { --shot-w: 234px; }  /* stays square at the new height */
-  /* Video / Short cards share the phone card geometry. */
-  .gs-video-card, .gs-video-card.is-short {
-    --shot-h: 234px; --shot-w: 234px;
-    border-radius: 8px;
-  }
-  .gs-video-card.is-short { --shot-w: 132px; }
+  /* Video cards inherit the exact phone .shot-card geometry (132 × 234,
+     8px corners) — no separate size is declared for them. */
   .gs-video-play { width: 48px; height: 48px; }
 
   /* Google Play-style landscape screenshots on PHONES ONLY.
@@ -3380,24 +3376,21 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
    thumbnails. Video cards sit BEFORE the stills, like Google Play.
    ===================================================================== */
 .gs-video-card {
-  --shot-h: 220px; --shot-w: 220px;
-  position: relative; flex: 0 0 auto;
-  display: flex; align-items: center; justify-content: center;
-  width: var(--shot-w); height: var(--shot-h);
-  box-sizing: border-box; padding: 0; border: 0; border-radius: 20px;
-  background: #08080a; overflow: hidden; cursor: pointer;
-  color: #fff; font: inherit; text-align: start;
-  scroll-snap-align: start; scroll-snap-stop: always;
-  transition: transform .18s ease, box-shadow .18s ease;
+  /* The card ALSO carries .shot-card, so its width, height, corners,
+     background, snap, hover, focus and mobile geometry are literally the
+     screenshot-card rules. Only the video-specific bits differ here.
+     No separate --shot-w / radius: all media cards are the same size. */
+  cursor: pointer; color: #fff; font: inherit; text-align: start;
+  -webkit-appearance: none; appearance: none;
   -webkit-tap-highlight-color: transparent;
 }
-.gs-video-card.is-short { --shot-w: 124px; }
-.gs-video-card:hover { transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0,0,0,.45); }
-.gs-video-card:focus-visible { outline: 3px solid var(--nav); outline-offset: 3px; }
 .gs-video-thumb {
-  display: block; width: 100%; height: 100%; object-fit: cover;
+  display: block; width: 100%; height: 100%;
+  object-fit: contain;              /* same letterbox treatment as .shot-img */
+  background: #08080a;
   user-select: none; -webkit-user-drag: none;
 }
+.gs-video-card.is-error .gs-video-thumb { opacity: 0; }
 .gs-video-play {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
   width: 56px; height: 56px; border-radius: 50%;

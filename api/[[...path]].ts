@@ -9,7 +9,8 @@ import {
   createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
   addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
   ensureSupportSchema,
-  ensureVideosSchema, listAppVideos, addAppVideo, deleteAppVideo, deleteAppVideos,
+  ensureVideosSchema, listAppVideos, addAppVideo, updateAppVideo,
+  deleteAppVideo, deleteAppVideos, listVideoThumbKeys,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -128,12 +129,20 @@ function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
 }
 
 /** Never let a missing D1 table break a public app page. */
+function videoThumbKey(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;              // leave unchanged
+  if (raw === null || raw === '') return null;          // clear custom thumb
+  const k = String(raw);
+  return isValidR2Key(k, 'vthumb') ? k : undefined;     // invalid -> caller rejects
+}
+
 async function videosFor(env: Env, appId: string): Promise<any[]> {
   try {
     const rows = await listAppVideos(env, appId);
     return rows.map(v => ({
       id: v.id, video_id: v.video_id, kind: v.kind, url: v.url,
       title: v.title || '', position: v.position,
+      thumb_url: v.thumb_key ? shot_url(v.thumb_key, env) : null,
     }));
   } catch (e: any) {
     console.error('[videos] list failed:', e?.message || e);
@@ -955,7 +964,7 @@ app.get('/admin/apps/:id', async (c) => {
 app.post('/admin/upload-url', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
-  const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : 'ss';
+  const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : body.kind === 'video-thumb' ? 'vthumb' : 'ss';
   const key = `${folder}/${slugify(String(body.slug_hint || 'app'))}-${Date.now()}-${randomId().slice(0, 6)}.${ext}`;
   return c.json({ url: await r2PresignPut(c.env, key, String(body.content_type || 'application/octet-stream'), 7200), key });
 });
@@ -963,7 +972,7 @@ app.post('/admin/upload-url', async (c) => {
 app.post('/admin/multipart/create', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
-  const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : 'ss';
+  const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : body.kind === 'video-thumb' ? 'vthumb' : 'ss';
   const key = `${folder}/${slugify(String(body.slug_hint || 'app'))}-${Date.now()}-${randomId().slice(0, 6)}.${ext}`;
   const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
   const parts = [];
@@ -1013,7 +1022,11 @@ app.post('/admin/apps', async (c) => {
       const raw = body.videos[j];
       const parsed = parseYouTubeUrl(raw && raw.url, raw && raw.kind);
       if (!parsed) continue;
-      await addAppVideo(c.env, id, { ...parsed, title: sanitizeText(raw && raw.title, 120), position: j });
+      const tk = videoThumbKey(raw && raw.thumb_key);
+      await addAppVideo(c.env, id, {
+        ...parsed, title: sanitizeText(raw && raw.title, 120),
+        thumb_key: tk || null, position: j,
+      });
     }
   }
 
@@ -1109,16 +1122,45 @@ app.post('/admin/apps/:id/videos', async (c) => {
   await ensureVideosSchema(c.env);
   const max: any = await c.env.DB.prepare('SELECT MAX(position) AS max_pos FROM app_videos WHERE app_id = ?').bind(id).first();
   const pos = (Number(max?.max_pos) || -1) + 1;
-  const video = await addAppVideo(c.env, id, { ...parsed, title: sanitizeText(body.title, 120), position: pos });
+  if (body.thumb_key != null && body.thumb_key !== '' && videoThumbKey(body.thumb_key) === undefined)
+    return c.json({ error: 'invalid_thumb_key' }, 400);
+  const video = await addAppVideo(c.env, id, {
+    ...parsed, title: sanitizeText(body.title, 120),
+    thumb_key: videoThumbKey(body.thumb_key) || null, position: pos,
+  });
   c.header('Cache-Control', 'private, no-store');
-  return c.json({ ok: true, video });
+  return c.json({ ok: true, video: { ...video, thumb_url: video.thumb_key ? shot_url(video.thumb_key, c.env) : null } });
+});
+
+// Replace / clear a video's custom thumbnail (and optionally its title).
+app.patch('/admin/apps/:id/videos/:vid', async (c) => {
+  const id = c.req.param('id'), vid = c.req.param('vid');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(vid)) return c.json({ error: 'invalid_id' }, 400);
+  const body = await c.req.json().catch(() => ({}));
+  const tk = videoThumbKey(body.thumb_key);
+  if (body.thumb_key != null && body.thumb_key !== '' && tk === undefined)
+    return c.json({ error: 'invalid_thumb_key' }, 400);
+  await ensureVideosSchema(c.env);
+  const before: any = await c.env.DB.prepare('SELECT thumb_key FROM app_videos WHERE id = ? AND app_id = ?').bind(vid, id).first();
+  const patch: any = {};
+  if (tk !== undefined) patch.thumb_key = tk;
+  if (body.title !== undefined) patch.title = sanitizeText(body.title, 120);
+  const video = await updateAppVideo(c.env, id, vid, patch);
+  if (!video) return c.json({ error: 'not_found' }, 404);
+  if (tk !== undefined && before?.thumb_key && before.thumb_key !== tk)
+    await r2Delete(c.env, String(before.thumb_key)).catch(() => {});
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ ok: true, video: { ...video, thumb_url: video.thumb_key ? shot_url(video.thumb_key, c.env) : null } });
 });
 
 app.delete('/admin/apps/:id/videos/:vid', async (c) => {
   const id = c.req.param('id'), vid = c.req.param('vid');
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(vid)) return c.json({ error: 'invalid_id' }, 400);
+  await ensureVideosSchema(c.env);
+  const old: any = await c.env.DB.prepare('SELECT thumb_key FROM app_videos WHERE id = ? AND app_id = ?').bind(vid, id).first();
   const ok = await deleteAppVideo(c.env, id, vid);
   if (!ok) return c.json({ error: 'not_found' }, 404);
+  if (old?.thumb_key) await r2Delete(c.env, String(old.thumb_key)).catch(() => {});
   c.header('Cache-Control', 'private, no-store');
   return c.json({ ok: true });
 });
@@ -1130,6 +1172,10 @@ app.delete('/admin/apps/:id', async (c) => {
   const ss = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE app_id = ?').bind(id).all();
   for (const s of (ss.results||[])) if (s.r2_key) await r2Delete(c.env, s.r2_key as string).catch(()=>{});
   await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(id).run();
+  try {
+    const keys = await listVideoThumbKeys(c.env, id);
+    for (const k of keys) await r2Delete(c.env, k).catch(() => {});
+  } catch { /* table may not exist yet */ }
   await deleteAppVideos(c.env, id).catch(() => {});
   
   if (app.apk_key) await r2Delete(c.env, app.apk_key).catch(()=>{});

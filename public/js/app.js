@@ -543,18 +543,24 @@
 
     // Play Store puts the video before the stills. Every video card carries
     // the SAME .shot-card class as the stills, so it has the identical width,
-    // height, corners, background, hover, focus, snap and object-fit: contain.
+    // height, corners, background, hover, focus, snap and object-fit rules.
+    // A regular video takes the LANDSCAPE screenshot class (16:9 / 1280x720),
+    // a Short takes the PORTRAIT screenshot class (9:16). The thumbnail is a
+    // .shot-img too, so it inherits exactly the same fill/letterbox treatment
+    // as the corresponding screenshot — including a custom uploaded poster.
     safeVideos.forEach((v, vi) => {
       const id = safeVideoId(v);
       const isShort = v.kind === 'short';
+      const orient = isShort ? 'is-portrait' : 'is-landscape';
       const kindLabel = isShort ? t('شورت يوتيوب') : t('فيديو يوتيوب');
       const img = el('img', {
         class: 'shot-img gs-video-thumb', src: videoThumbSrc(v, id), alt: '',
         draggable: 'false', decoding: 'async', loading: vi < 2 ? 'eager' : 'lazy',
         'data-thumb': v.thumb_url ? 'custom' : 'youtube',
+        'data-orient': isShort ? 'portrait' : 'landscape',
       });
       const card = el('button', {
-        class: `shot-card gs-video-card is-${isShort ? 'short' : 'video'}`,
+        class: `shot-card gs-video-card is-${isShort ? 'short' : 'video'} ${orient}`,
         type: 'button', role: 'listitem',
         'aria-label': v.title ? `${kindLabel} — ${v.title}` : kindLabel,
         onclick: () => openVideo(v, card),

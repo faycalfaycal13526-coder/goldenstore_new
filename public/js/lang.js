@@ -433,6 +433,7 @@
     'تم تحديث الصورة المصغّرة': { en: 'Thumbnail updated', fr: 'Miniature mise à jour', es: 'Miniatura actualizada' },
     'فشل تحديث الصورة المصغّرة': { en: 'Could not update the thumbnail', fr: 'Impossible de mettre à jour la miniature', es: 'No se pudo actualizar la miniatura' },
     'تُستخدم صورة يوتيوب تلقائياً عند ترك هذا الحقل فارغاً': { en: 'YouTube\'s poster is used automatically when left empty', fr: 'La miniature YouTube est utilisée automatiquement si ce champ est vide', es: 'Se usa la miniatura de YouTube automáticamente si se deja vacío' },
+    'يفضّل صورة أفقية 16:9 للفيديو وعمودية 9:16 للشورت': { en: 'Prefer a 16:9 landscape poster for videos and 9:16 portrait for Shorts', fr: 'Préférez une image 16:9 paysage pour les vidéos et 9:16 portrait pour les Shorts', es: 'Prefiere una imagen 16:9 horizontal para videos y 9:16 vertical para Shorts' },
     'فشل رفع الصورة المصغّرة': { en: 'Could not upload the thumbnail', fr: 'Impossible de téléverser la miniature', es: 'No se pudo subir la miniatura' },
     'لا توجد فيديوهات بعد': { en: 'No videos yet', fr: 'Aucune vidéo pour le moment', es: 'Aún no hay videos' },
     'حذف هذا الفيديو؟': { en: 'Delete this video?', fr: 'Supprimer cette vidéo ?', es: '¿Eliminar este video?' },

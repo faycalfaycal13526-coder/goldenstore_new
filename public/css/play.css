@@ -3376,18 +3376,20 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
    thumbnails. Video cards sit BEFORE the stills, like Google Play.
    ===================================================================== */
 .gs-video-card {
-  /* The card ALSO carries .shot-card, so its width, height, corners,
-     background, snap, hover, focus and mobile geometry are literally the
-     screenshot-card rules. Only the video-specific bits differ here.
-     No separate --shot-w / radius: all media cards are the same size. */
+  /* The card ALSO carries .shot-card plus the matching orientation class:
+       is-video -> is-landscape (same 16:9 / 1280x720 HD frame as a landscape
+                   screenshot; full-width 16/9 on phones)
+       is-short -> is-portrait  (same 124x220 / 132x234 frame as a portrait
+                   screenshot)
+     Nothing here declares an independent width, height or radius. */
   cursor: pointer; color: #fff; font: inherit; text-align: start;
   -webkit-appearance: none; appearance: none;
   -webkit-tap-highlight-color: transparent;
 }
 .gs-video-thumb {
-  display: block; width: 100%; height: 100%;
-  object-fit: contain;              /* same letterbox treatment as .shot-img */
-  background: #08080a;
+  /* It is also a .shot-img, so it inherits the EXACT same object-fit,
+     letterbox background and orientation rules as any screenshot —
+     for YouTube posters and custom uploaded thumbnails alike. */
   user-select: none; -webkit-user-drag: none;
 }
 .gs-video-card.is-error .gs-video-thumb { opacity: 0; }

@@ -1833,8 +1833,9 @@
         }, ico('youtube'), t('استخدام صورة يوتيوب')) : null;
         list.append(el('div', { class: 'gs-admin-video-row' },
           el('img', {
-            class: 'gs-admin-video-thumb', src: thumbSrc(v),
-            alt: t('صورة مصغّرة للفيديو'), loading: 'lazy',
+            class: `gs-admin-video-thumb ${isShort ? 'is-short' : 'is-video'}`,
+            src: thumbSrc(v), alt: t('صورة مصغّرة للفيديو'), loading: 'lazy',
+            'data-orient': isShort ? 'portrait' : 'landscape',
           }),
           el('div', { class: 'gs-admin-video-meta' },
             el('div', { class: 'gs-admin-video-badges' },
@@ -1907,7 +1908,9 @@
       el('div', { class: 'field gs-admin-video-thumb-field' },
         el('label', null, t('صورة مصغّرة مخصّصة (اختياري)')),
         thumbDz,
-        el('div', { class: 'hint' }, t('تُستخدم صورة يوتيوب تلقائياً عند ترك هذا الحقل فارغاً')),
+        el('div', { class: 'hint' },
+          t('تُستخدم صورة يوتيوب تلقائياً عند ترك هذا الحقل فارغاً') + ' · ' +
+          t('يفضّل صورة أفقية 16:9 للفيديو وعمودية 9:16 للشورت')),
       ),
       el('div', { class: 'mt-md' }, addBtn),
       list,

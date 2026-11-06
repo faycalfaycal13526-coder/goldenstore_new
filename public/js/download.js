@@ -1,6 +1,6 @@
 /* Golden Store APK landing page — counted redirect, REAL durable download
    total, instant curated translation (no dependency on /api/translate),
-   release notes and a manual "check for updates" action.
+   and a manual "check for updates" action.
    Works without store.js / Firebase: this is a public, auth-free page. */
 (function () {
   'use strict';
@@ -19,7 +19,6 @@
   var counter = document.getElementById('downloadCounter');
   var help = document.getElementById('downloadHelp');
   var versionEl = document.getElementById('currentVersion');
-  var releaseNotes = document.getElementById('releaseNotes');
   var checkBtn = document.getElementById('checkUpdatesBtn');
   var status = document.getElementById('updateStatus');
 
@@ -44,12 +43,6 @@
     document.querySelectorAll('[data-i18n]').forEach(function (node) {
       var key = node.getAttribute('data-i18n');
       if (key) node.textContent = t(key);
-    });
-    // Dynamic API content (release notes): translate only the default copy.
-    // When the admin supplies notes they are shown exactly as published.
-    document.querySelectorAll('[data-default-i18n]').forEach(function (node) {
-      var key = node.getAttribute('data-default-i18n');
-      if (key && (!node.textContent.trim() || node.textContent.trim() === key)) node.textContent = t(key);
     });
     Object.keys(ATTR_HOOKS).forEach(function (hook) {
       document.querySelectorAll('[' + hook + ']').forEach(function (node) {
@@ -124,10 +117,6 @@
 
   function applyRelease(data) {
     if (versionEl && data.version_name) versionEl.textContent = String(data.version_name);
-    if (releaseNotes) {
-      var defaultKey = releaseNotes.getAttribute('data-default-i18n') || '';
-      releaseNotes.textContent = data.notes ? String(data.notes) : t(defaultKey);
-    }
     document.title = t('تحميل Golden Store — أحدث إصدار')
       + (data.version_name ? ' · ' + String(data.version_name) : '');
   }

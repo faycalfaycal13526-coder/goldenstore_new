@@ -105,7 +105,6 @@
     'الملفات تُحمّل من الخادم الرسمي عبر رابط مباشر وموثوق.': { en: 'Files are served from the official server through a trusted direct link.', fr: 'Les fichiers proviennent du serveur officiel via un lien direct fiable.', es: 'Los archivos se sirven desde el servidor oficial mediante un enlace directo fiable.' },
     'إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.': { en: 'New releases and improvements reach your device as soon as they land.', fr: 'Les nouvelles versions et améliorations arrivent sur votre appareil dès leur sortie.', es: 'Las nuevas versiones y mejoras llegan a tu dispositivo en cuanto se publican.' },
     'واجهة هادئة بأسلوب ذهبي وأسود/أبيض، بلا إعلانات مقاطِعة.': { en: 'A calm gold, black and white interface with no interruptive ads.', fr: 'Une interface sobre or, noir et blanc, sans publicités interruptives.', es: 'Una interfaz tranquila en oro, blanco y negro, sin anuncios que interrumpan.' },
-    'ما الجديد في هذا الإصدار': { en: 'What\'s new in this version', fr: 'Nouveautés de cette version', es: 'Novedades de esta versión' },
     'الدعم': { en: 'Support', fr: 'Assistance', es: 'Soporte' },
     '© Golden Store — جميع الحقوق محفوظة': { en: '© Golden Store — All rights reserved', fr: '© Golden Store — Tous droits réservés', es: '© Golden Store — Todos los derechos reservados' },
     'تعذّر تحميل عدد التنزيلات': { en: 'Could not load the download count', fr: 'Impossible de charger le compteur de téléchargements', es: 'No se pudo cargar el contador de descargas' },

@@ -322,6 +322,21 @@ async function readDownloadCount(env: Env, legacy: number): Promise<number> {
     return Math.max(Number(legacy) || 0, Number(row?.downloads) || 0);
   } catch { return Number(legacy) || 0; }
 }
+async function setDownloadBaseline(env: Env, requested: number): Promise<number> {
+  await ensureDownloadStatsSchema(env);
+  let legacy = 0;
+  try {
+    const lr: any = await env.DB.prepare("SELECT downloads FROM app_updates WHERE id = 'current'").first();
+    legacy = Number(lr?.downloads) || 0;
+  } catch {}
+  const current = await readDownloadCount(env, legacy);
+  // Monotonic: an admin can restore a lost historic total but never decrease it.
+  const total = Math.max(current, Math.floor(requested));
+  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads) VALUES ('current', ?)
+    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads`).bind(total).run();
+  await env.DB.prepare("UPDATE app_updates SET downloads = ? WHERE id = 'current'").bind(total).run().catch(() => {});
+  return total;
+}
 
 app.get('/app-update', async (c) => {
   // Never let a CDN/browser serve a stale total.
@@ -997,6 +1012,13 @@ app.post('/admin/app-update', async (c) => {
     .bind(sanitizeText(body.version_name, 60), safeInt(body.version_code, 0, 999999999),
       apk_url, apk_key, sanitizeText(body.notes, 1000), body.force ? 1 : 0,
       size_bytes, preserved, nowSec()).run();
+
+  // Optional: restore/set the real download total (e.g. after an older build
+  // reset it). The counter is monotonic, so this can only raise the value.
+  if (body.downloads !== undefined && body.downloads !== null && body.downloads !== '') {
+    const requested = Number(body.downloads);
+    if (Number.isFinite(requested) && requested >= 0) await setDownloadBaseline(c.env, requested);
+  }
 
   let push = null;
   if (body.send_notification) {

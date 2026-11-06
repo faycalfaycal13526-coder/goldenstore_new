@@ -1160,6 +1160,11 @@
       const apkDz = dropzone({ accept: '.apk', label: 'اسحب أو اختر ملف APK للتطبيق' });
       const versionInput = el('input', { class: 'input', type: 'text', placeholder: 'مثلاً: 1.2.0 (اختياري)', value: current && current.version_name || '', 'aria-label': t('إصدار التطبيق') });
       const notesInput = el('textarea', { class: 'input', rows: 3, placeholder: 'ملاحظات قصيرة تظهر في نافذة التحديث (اختياري)', 'aria-label': t('ملاحظات التحديث') }, current && current.notes || '');
+      const downloadsInput = el('input', {
+        class: 'input', type: 'number', min: '0', step: '1',
+        placeholder: t('اتركه فارغاً للإبقاء على العدد الحالي'),
+        'aria-label': t('العدد الحقيقي للتنزيلات'),
+      });
       const notifyInput = el('input', { type: 'checkbox' });
       notifyInput.checked = true;
 
@@ -1175,13 +1180,16 @@
         const version_name = versionInput.value.trim() || undefined;
         const version_code = version_name ? Math.floor(Date.now() / 1000) : 0;
         const notes = notesInput.value.trim();
+        const downloadsRaw = downloadsInput.value.trim();
+        const downloads = downloadsRaw !== '' && Number.isFinite(Number(downloadsRaw)) && Number(downloadsRaw) >= 0
+          ? Math.floor(Number(downloadsRaw)) : undefined;
         saveBtn.disabled = true;
         try {
           toast(t('جارٍ رفع APK…'));
           const apk_key = await r2Upload(files[0], 'apk', 'goldenstore-app', (r) => apkDz.setProgress(0, r));
           const res = await api('/api/admin/app-update', {
             method: 'POST',
-            body: { version_name, version_code, apk_key, notes, force: false, send_notification: notifyInput.checked },
+            body: { version_name, version_code, apk_key, notes, force: false, send_notification: notifyInput.checked, downloads },
           });
           resultInfo.textContent = t('تم حفظ الرابط') + (res && res.push ? ` — ${res.push.success || 0}/${res.push.targeted || 0} ` + t('إشعار') : '');
           toast(t('تم نشر التحديث'), 'success');
@@ -1208,6 +1216,14 @@
             el('div', { class: 'field' },
               el('label', null, t('ملاحظات التحديث')),
               notesInput,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, t('العدد الحقيقي للتنزيلات')),
+              downloadsInput,
+              el('div', { class: 'hint' },
+                t('العدد الحالي للتنزيلات') + ': ' +
+                (current && typeof current.downloads === 'number' ? current.downloads.toLocaleString('en-US') : '0') +
+                ' — ' + t('يمكن زيادة العدد لاستعادة الرقم الحقيقي ولا يمكن إنقاصه')),
             ),
             el('div', { class: 'field' },
               el('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' } }, notifyInput, t('إرسال إشعار للمستخدمين')),

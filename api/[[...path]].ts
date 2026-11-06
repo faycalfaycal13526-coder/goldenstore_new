@@ -280,23 +280,78 @@ app.get('/store', (c) => {
 
 const CURRENT_RELEASE = { version_name: '1.18', version_code: 19, apk_url: 'https://cdn.goldenstore.online/apk/goldenstore-app-1791319330825-c2d8f1.apk', notes: 'تحديث' };
 
-app.get('/app-update', async (c) => {
+/* -------------------------------------------------------------------
+   Durable download counter. `app_updates` used to be REPLACEd every time
+   an admin published a build, which reset `downloads` to 0. This separate
+   monotonic table is never replaced, so the real total survives releases.
+   ------------------------------------------------------------------- */
+const DOWNLOAD_STATS_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS app_download_stats (
+     id TEXT PRIMARY KEY,
+     downloads INTEGER NOT NULL DEFAULT 0
+   )`,
+];
+const downloadStatsReady = new WeakSet<object>();
+async function ensureDownloadStatsSchema(env: Env): Promise<void> {
+  const db: any = env.DB;
+  if (downloadStatsReady.has(db)) return;
+  for (const sql of DOWNLOAD_STATS_SCHEMA) await db.prepare(sql).run();
+  downloadStatsReady.add(db);
+}
+async function bumpDownloadCount(env: Env): Promise<number> {
+  await ensureDownloadStatsSchema(env);
+  // The legacy column may already hold a larger historic total (from before
+  // this table existed). Never let a sync overwrite it with a smaller value.
+  let legacy = 0;
   try {
-    const row: any = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").first();
-    if (!row) return c.json({ version_name: CURRENT_RELEASE.version_name, version_code: CURRENT_RELEASE.version_code, apk_url: CURRENT_RELEASE.apk_url, url: CURRENT_RELEASE.apk_url, notes: CURRENT_RELEASE.notes, force: false, downloads: 0 });
-    const out = { version_name: row.version_name || CURRENT_RELEASE.version_name, version_code: row.version_code || 0, apk_url: row.apk_url || CURRENT_RELEASE.apk_url, url: row.apk_url || CURRENT_RELEASE.apk_url, notes: row.notes || CURRENT_RELEASE.notes, force: row.force === 1, downloads: row.downloads || 0 };
-    return c.json({ ...out, update: { ...out } });
-  } catch { return c.json({}); }
+    const lr: any = await env.DB.prepare("SELECT downloads FROM app_updates WHERE id = 'current'").first();
+    legacy = Number(lr?.downloads) || 0;
+  } catch {}
+  const sr: any = await env.DB.prepare("SELECT downloads FROM app_download_stats WHERE id = 'current'").first();
+  const durable = Number(sr?.downloads) || 0;
+  const total = Math.max(legacy, durable) + 1;
+  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads) VALUES ('current', ?)
+    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads`).bind(total).run();
+  await env.DB.prepare("UPDATE app_updates SET downloads = ? WHERE id = 'current'").bind(total).run().catch(() => {});
+  return total;
+}
+async function readDownloadCount(env: Env, legacy: number): Promise<number> {
+  try {
+    await ensureDownloadStatsSchema(env);
+    const row: any = await env.DB.prepare("SELECT downloads FROM app_download_stats WHERE id = 'current'").first();
+    return Math.max(Number(legacy) || 0, Number(row?.downloads) || 0);
+  } catch { return Number(legacy) || 0; }
+}
+
+app.get('/app-update', async (c) => {
+  // Never let a CDN/browser serve a stale total.
+  c.header('Cache-Control', 'no-store');
+  let row: any = null;
+  try { row = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").first(); } catch {}
+  const legacy = Number(row?.downloads) || 0;
+  const downloads = await readDownloadCount(c.env, legacy);
+  const apkUrl = row?.apk_url || CURRENT_RELEASE.apk_url;
+  const out = {
+    version_name: row?.version_name || CURRENT_RELEASE.version_name,
+    version_code: Number(row?.version_code) || CURRENT_RELEASE.version_code,
+    apk_url: apkUrl, url: apkUrl,
+    notes: row?.notes || CURRENT_RELEASE.notes,
+    force: row?.force === 1,
+    downloads,                                  // always a real number, never undefined
+  };
+  return c.json({ ...out, update: { ...out } });
 });
 
 app.get('/app-update/download', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  let apkUrl = CURRENT_RELEASE.apk_url;
   try {
     const row: any = await c.env.DB.prepare("SELECT apk_url FROM app_updates WHERE id = 'current'").first();
-    const apkUrl = row?.apk_url || CURRENT_RELEASE.apk_url;
-    if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
-    await c.env.DB.prepare("UPDATE app_updates SET downloads = downloads + 1 WHERE id = 'current'").run().catch(() => {});
-    return c.redirect(apkUrl, 302);
-  } catch { return c.json({ error: 'not_found' }, 404); }
+    if (row?.apk_url) apkUrl = row.apk_url;
+  } catch {}
+  if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
+  await bumpDownloadCount(c.env).catch(() => {});
+  return c.redirect(apkUrl, 302);
 });
 
 /* ---- Legal consent (defence in depth) -----------------------------------
@@ -923,8 +978,25 @@ app.post('/admin/app-update', async (c) => {
   }
   if (!apk_url) return c.json({ error: 'apk_required' }, 400);
 
-  await c.env.DB.prepare(`INSERT OR REPLACE INTO app_updates (id, version_name, version_code, apk_url, apk_key, notes, force, size_bytes, created_at) VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(sanitizeText(body.version_name, 60), safeInt(body.version_code, 0, 999999999), apk_url, apk_key, sanitizeText(body.notes, 1000), body.force ? 1 : 0, size_bytes, nowSec()).run();
+  // UPSERT (never REPLACE): publishing a new build must NOT wipe the real
+  // download total. `downloads` is deliberately absent from the DO UPDATE
+  // list and the durable app_download_stats row is left untouched.
+  const preserved = await readDownloadCount(c.env, 0);
+  await c.env.DB.prepare(`INSERT INTO app_updates
+      (id, version_name, version_code, apk_url, apk_key, notes, force, size_bytes, downloads, created_at)
+      VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        version_name = excluded.version_name,
+        version_code = excluded.version_code,
+        apk_url      = excluded.apk_url,
+        apk_key      = excluded.apk_key,
+        notes        = excluded.notes,
+        force        = excluded.force,
+        size_bytes   = excluded.size_bytes,
+        created_at   = excluded.created_at`)
+    .bind(sanitizeText(body.version_name, 60), safeInt(body.version_code, 0, 999999999),
+      apk_url, apk_key, sanitizeText(body.notes, 1000), body.force ? 1 : 0,
+      size_bytes, preserved, nowSec()).run();
 
   let push = null;
   if (body.send_notification) {

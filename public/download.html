@@ -5,14 +5,14 @@
 <script src="/js/theme-init.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d0d0f">
-<title>تحميل Golden Store — أحدث إصدار</title>
-<meta name="description" content="حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي.">
+<title data-i18n="تحميل Golden Store — أحدث إصدار">تحميل Golden Store — أحدث إصدار</title>
+<meta name="description" data-i18n-content="حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي." content="حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي.">
 <link rel="icon" type="image/png" href="/images/logo.png">
 <link rel="apple-touch-icon" href="/images/logo.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta property="og:type" content="website">
-<meta property="og:title" content="تحميل Golden Store">
-<meta property="og:description" content="حمّل أحدث إصدار من Golden Store بأمان ومجاناً.">
+<meta property="og:title" data-i18n-content="تحميل Golden Store" content="تحميل Golden Store">
+<meta property="og:description" data-i18n-content="حمّل أحدث إصدار من Golden Store بأمان ومجاناً." content="حمّل أحدث إصدار من Golden Store بأمان ومجاناً.">
 <meta property="og:image" content="https://goldenstore.online/images/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -242,8 +242,8 @@ a { color: inherit; text-decoration: none; }
       <img src="/images/logo.png" alt="Golden Store"> Golden<b>Store</b>
     </a>
     <span class="dl-spacer"></span>
-    <a class="dl-home" href="/"><span class="icon" data-icon="home"></span><span>الصفحة الرئيسية</span></a>
-    <span id="languageSwitcher" class="lang-switch" aria-label="Language selector"></span>
+    <a class="dl-home" href="/"><span class="icon" data-icon="home"></span><span data-i18n="الصفحة الرئيسية">الصفحة الرئيسية</span></a>
+    <span id="languageSwitcher"></span>
   </div>
 </header>
 
@@ -251,26 +251,26 @@ a { color: inherit; text-decoration: none; }
   <section class="dl-hero">
     <div class="wrap dl-hero-grid">
       <div>
-        <span class="dl-eyebrow"><span class="dot"></span>متاح الآن</span>
+        <span class="dl-eyebrow"><span class="dot"></span><span data-i18n="متاح الآن">متاح الآن</span></span>
         <h1 class="dl-title" dir="ltr">Golden<b>Store</b></h1>
-        <p class="dl-lead">حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي، بتصميم عصري وتحديثات مستمرة.</p>
+        <p class="dl-lead" data-i18n="حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي، بتصميم عصري وتحديثات مستمرة.">حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي، بتصميم عصري وتحديثات مستمرة.</p>
         <div class="dl-version-row">
-          <span class="dl-pill"><span class="icon" data-icon="shieldCheck"></span>الإصدار <strong id="currentVersion">—</strong></span>
+          <span class="dl-pill"><span class="icon" data-icon="shieldCheck"></span><span data-i18n="الإصدار">الإصدار</span> <strong id="currentVersion">—</strong></span>
           <span class="dl-pill"><span class="icon" data-icon="android"></span>Android</span>
         </div>
         <section id="downloadCounter" class="dl-counter" role="status" aria-live="polite" aria-atomic="true">
           <span class="dl-counter-icon" aria-hidden="true"><span class="icon" data-icon="downloadCount"></span></span>
           <div class="dl-counter-copy">
-            <strong id="downloadCount" class="dl-counter-number">—</strong>
-            <span id="downloadCountLabel" class="dl-counter-label">إجمالي التنزيلات</span>
+            <strong id="downloadCount" class="dl-counter-number" data-count="0">—</strong>
+            <span id="downloadCountLabel" class="dl-counter-label" data-i18n="إجمالي التنزيلات">إجمالي التنزيلات</span>
           </div>
         </section>
         <div class="dl-actions">
           <a id="downloadBtn" class="dl-btn is-disabled" href="#" aria-disabled="true">
-            <span class="icon" data-icon="download"></span><span id="downloadBtnLabel">تحميل الآن</span>
+            <span class="icon" data-icon="download"></span><span id="downloadBtnLabel" data-i18n="تحميل الآن">تحميل الآن</span>
           </a>
           <button id="checkUpdatesBtn" class="dl-btn-secondary" type="button">
-            <span class="icon" data-icon="refresh"></span><span>التحقق من وجود تحديثات</span>
+            <span class="icon" data-icon="refresh"></span><span data-i18n="التحقق من وجود تحديثات">التحقق من وجود تحديثات</span>
           </button>
           <p id="downloadHelp" class="dl-help"></p>
           <p id="updateStatus" class="dl-check-status" role="status" aria-live="polite"></p>
@@ -285,25 +285,29 @@ a { color: inherit; text-decoration: none; }
   <section class="dl-section">
     <div class="wrap">
       <div class="dl-section-head">
-        <h2>لماذا Golden Store؟</h2>
-        <p>تجربة تحميل نظيفة وسريعة دون تعقيد.</p>
+        <h2 data-i18n="لماذا Golden Store؟">لماذا Golden Store؟</h2>
+        <p data-i18n="تجربة تحميل نظيفة وسريعة دون تعقيد.">تجربة تحميل نظيفة وسريعة دون تعقيد.</p>
       </div>
       <div class="dl-features">
         <article class="dl-feature">
           <div class="dl-feature-ico"><span class="icon" data-icon="gift"></span></div>
-          <h3>مجاني بالكامل</h3><p>كل التطبيقات والألعاب متاحة دون أي رسوم أو اشتراكات.</p>
+          <h3 data-i18n="مجاني بالكامل">مجاني بالكامل</h3>
+          <p data-i18n="كل التطبيقات والألعاب متاحة دون أي رسوم أو اشتراكات.">كل التطبيقات والألعاب متاحة دون أي رسوم أو اشتراكات.</p>
         </article>
         <article class="dl-feature">
           <div class="dl-feature-ico"><span class="icon" data-icon="shieldCheck"></span></div>
-          <h3>تحميل مباشر وآمن</h3><p>الملفات تُحمّل من الخادم الرسمي عبر رابط مباشر وموثوق.</p>
+          <h3 data-i18n="تحميل مباشر وآمن">تحميل مباشر وآمن</h3>
+          <p data-i18n="الملفات تُحمّل من الخادم الرسمي عبر رابط مباشر وموثوق.">الملفات تُحمّل من الخادم الرسمي عبر رابط مباشر وموثوق.</p>
         </article>
         <article class="dl-feature">
           <div class="dl-feature-ico"><span class="icon" data-icon="refresh"></span></div>
-          <h3>تحديثات مستمرة</h3><p>إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.</p>
+          <h3 data-i18n="تحديثات مستمرة">تحديثات مستمرة</h3>
+          <p data-i18n="إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.">إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.</p>
         </article>
         <article class="dl-feature">
           <div class="dl-feature-ico"><span class="icon" data-icon="spark"></span></div>
-          <h3>بدون إعلانات مزعجة</h3><p>واجهة هادئة بأسلوب ذهبي وأسود/أبيض، بلا إعلانات مقاطِعة.</p>
+          <h3 data-i18n="بدون إعلانات مزعجة">بدون إعلانات مزعجة</h3>
+          <p data-i18n="واجهة هادئة بأسلوب ذهبي وأسود/أبيض، بلا إعلانات مقاطِعة.">واجهة هادئة بأسلوب ذهبي وأسود/أبيض، بلا إعلانات مقاطِعة.</p>
         </article>
       </div>
     </div>
@@ -314,8 +318,8 @@ a { color: inherit; text-decoration: none; }
       <div id="releaseCard" class="dl-release">
         <div class="dl-release-ico"><span class="icon" data-icon="spark"></span></div>
         <div>
-          <h3 id="releaseTitle">ما الجديد في هذا الإصدار</h3>
-          <p id="releaseNotes">يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.</p>
+          <h3 id="releaseTitle" data-i18n="ما الجديد في هذا الإصدار">ما الجديد في هذا الإصدار</h3>
+          <p id="releaseNotes" data-default-i18n="يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.">يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.</p>
         </div>
       </div>
     </div>
@@ -325,22 +329,17 @@ a { color: inherit; text-decoration: none; }
 <footer class="dl-footer">
   <div class="wrap dl-footer-inner">
     <div class="dl-footer-links">
-      <a href="/about">من نحن</a>
-      <a href="/privacy">سياسة الخصوصية</a>
-      <a href="/terms">الشروط والأحكام</a>
-      <a href="/support">الدعم</a>
+      <a href="/about" data-i18n="من نحن">من نحن</a>
+      <a href="/privacy" data-i18n="سياسة الخصوصية">سياسة الخصوصية</a>
+      <a href="/terms" data-i18n="الشروط والأحكام">الشروط والأحكام</a>
+      <a href="/support" data-i18n="الدعم">الدعم</a>
     </div>
-    <span class="dl-footer-copy">© Golden Store — جميع الحقوق محفوظة</span>
+    <span class="dl-footer-copy" data-i18n="© Golden Store — جميع الحقوق محفوظة">© Golden Store — جميع الحقوق محفوظة</span>
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261106e"></script>
-<script src="/js/lang.js?v=20261106e"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
-<script src="/js/firebase-auth.js?v=20261106e"></script>
-<script src="/js/notifications.js?v=20261106e"></script>
-<script src="/js/download.js?v=20261106e"></script>
+<script src="/js/icons.js?v=20261106f"></script>
+<script src="/js/lang.js?v=20261106f"></script>
+<script src="/js/download.js?v=20261106f"></script>
 </body>
 </html>

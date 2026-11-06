@@ -536,6 +536,9 @@ async function ensureTranslateCache(db: any) {
 
 const ARABIC_CHARS = /[\u0600-\u06FF]/;
 let gtxBackoffUntil = 0;
+// All external providers rate-limit shared Cloudflare egress IPs with HTTP 429.
+// After a fully failed batch, stop calling them for a few minutes entirely.
+let providerCooldownUntil = 0;
 type TrResult = { tr: string | null; why: string };
 
 function pickTranslation(data: any, text: string): string | null {
@@ -624,6 +627,8 @@ app.post('/translate', async (c) => {
 
   const out = new Array(q.length).fill(null);
   const toFetch: any[] = [];
+  const paused = Date.now() < providerCooldownUntil;
+  if (debug) diag.push({ src: '__meta__', steps: [paused ? 'cooldown=active' : 'cooldown=off'], translated: false });
   for (let i=0; i<q.length; i++) {
     if (!q[i] || q[i].length > 5000) { out[i] = q[i]; continue; }
     const id = await sha1Hex(target + '::' + q[i]);
@@ -641,6 +646,11 @@ app.post('/translate', async (c) => {
 
   for (let k=0; k<toFetch.length; k+=6) {
     await Promise.all(toFetch.slice(k, k+6).map(async (item) => {
+      if (paused) {
+        out[item.i] = item.text;
+        if (debug) diag.push({ src: item.text, steps: ['cooldown'], translated: false });
+        return;
+      }
       const steps: string[] = [];
       const tr = await translateOne(item.text, target, debug ? steps : undefined);
       out[item.i] = tr || item.text;
@@ -654,6 +664,10 @@ app.post('/translate', async (c) => {
         } catch { /* caching is best-effort */ }
       }
     }));
+  }
+  if (!paused && toFetch.length) {
+    const anySuccess = toFetch.some((item) => out[item.i] !== item.text);
+    providerCooldownUntil = anySuccess ? 0 : Date.now() + 5 * 60 * 1000;
   }
   for (let i=0; i<q.length; i++) if (out[i] == null) out[i] = q[i];
   return c.json(debug ? { t: out, debug: diag } : { t: out });

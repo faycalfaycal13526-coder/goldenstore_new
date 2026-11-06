@@ -351,7 +351,7 @@
         'المصدر: ' + (x.source === 'zones' ? 'Zone' : x.source === 'accounts' ? 'Account' : '—'),
         'CF_API_TOKEN: ' + (c.has_token ? 'موجود (…' + (c.token_tail || '') + ')' : 'غير موجود'),
         'Account: ' + (c.has_account ? String(c.account_source || 'موجود') : 'غير موجود'),
-        'CF_ZONE_ID: ' + (c.has_zone ? 'موجود' : 'غير موجود'),
+        'CF_ZONE_ID: ' + (c.has_zone ? 'موجود (' + String(c.zone_source || '—') + ')' : 'غير موجود'),
       ];
       if (x.from) bits.push('الفترة: ' + x.from + ' → ' + (x.until_exclusive || ''));
       const attempts = x.attempts || [];

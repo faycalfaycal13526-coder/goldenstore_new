@@ -84,6 +84,8 @@
     'تم تحديثه': { en: 'Recently updated', fr: 'Mis à jour récemment', es: 'Actualizado recientemente' },
     'أحدث التطبيقات والتحديثات': { en: 'The newest apps and updates', fr: 'Les dernières apps et mises à jour', es: 'Las apps y actualizaciones más recientes' },
     'لا توجد تطبيقات جديدة بعد': { en: 'No new apps yet', fr: 'Pas encore de nouvelles apps', es: 'Aún no hay apps nuevas' },
+    'لا توجد ألعاب جديدة بعد': { en: 'No new games yet', fr: 'Pas encore de nouveaux jeux', es: 'Aún no hay juegos nuevos' },
+    'أحدث الألعاب والتحديثات': { en: 'The newest games and updates', fr: 'Les derniers jeux et mises à jour', es: 'Los juegos y actualizaciones más recientes' },
     'تطبيقات جديدة': { en: 'New apps', fr: 'Nouvelles applications', es: 'Apps nuevas' },
     'تطبيقات محدّثة': { en: 'Updated apps', fr: 'Applications mises à jour', es: 'Apps actualizadas' },
     'اكتشف ما وصل حديثاً إلى المتجر': { en: 'Discover what just arrived in the store', fr: 'Découvrez les nouveautés du store', es: 'Descubre lo nuevo en la tienda' },

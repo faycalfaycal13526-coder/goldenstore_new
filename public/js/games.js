@@ -10,6 +10,7 @@
     { key: 'foryou', label: 'محتوى يهمّك' },
     { key: 'top', label: 'الأكثر رواجًا' },
     { key: 'rated', label: 'الأعلى تقييماً' },
+    { key: 'new', label: 'الجديد والمحدّث' },
     { key: 'categories', label: 'الفئات' },
   ];
 
@@ -45,9 +46,10 @@
 
     async function renderContent() {
       content.innerHTML = '';
-      content.append(topTab === 'categories' ? S.skeletonList() : S.skeletonHome());
+      content.append((topTab === 'categories' || topTab === 'new') ? S.skeletonList() : S.skeletonHome());
       try {
         if (topTab === 'categories') return renderCategories();
+        if (topTab === 'new') return renderNewUpdated();
         if (topTab === 'top') return renderTop();
         if (topTab === 'rated') return renderTopRated();
         return renderForYou();
@@ -119,6 +121,39 @@
       content.innerHTML = '';
       if (!apps.length) { content.append(S.emptyState(t('لا توجد ألعاب مقيّمة بعد'), t('قيّم الألعاب لتظهر هنا الأعلى تقييماً.'), 'gamepad')); return; }
       content.append(rankedList(apps));
+    }
+
+    // «الجديد والمحدّث» — نفس تبويب التطبيقات، لكن محصور على type=game.
+    // يعرض أحدث الألعاب + those whose updated_at is newer than created_at،
+    // مع شريط «وصل حديثاً / تم تحديثه» ورابط عرض المزيد الخاص بالألعاب.
+    async function renderNewUpdated() {
+      const res = await api(q('sort=recent&limit=60'));
+      const apps = filt(res.apps).slice(0, 24);
+      content.innerHTML = '';
+      if (!apps.length) {
+        content.append(S.emptyState(t('لا توجد ألعاب جديدة بعد'),
+          t('اكتشف ما وصل حديثاً إلى المتجر'), 'gamepad'));
+        return;
+      }
+      const head = el('div', { class: 'section-head gs-new-section-head' },
+        ico('spark', 'icon'),
+        el('h2', null, t('الجديد والمحدّث')),
+        el('a', { class: 'more', href: '/more?section=new&type=game', 'aria-label': t('عرض المزيد') },
+          t('عرض المزيد'), ico('chevronStart', 'icon icon-sm')),
+      );
+      const list = el('div', { class: 'applist' });
+      apps.forEach((a) => {
+        const row = S.listRow(a);
+        const updated = Number(a.updated_at || 0) > Number(a.created_at || 0) + 60;
+        const info = row.querySelector('.info');
+        if (info) info.append(el('span', { class: `gs-new-ribbon${updated ? ' is-updated' : ''}` },
+          t(updated ? 'تم تحديثه' : 'وصل حديثاً')));
+        list.append(row);
+      });
+      content.append(
+        el('p', { class: 'gs-new-intro', 'data-noi18n': '' }, t('أحدث الألعاب والتحديثات')),
+        el('div', { class: 'section' }, head, list),
+      );
     }
 
     async function renderCategories() {

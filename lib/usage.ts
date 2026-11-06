@@ -89,10 +89,42 @@ const CF_ZONE_QUERY = `query GsUsage($tag: String!, $since: String!, $until: Str
   }
 }`;
 
-function cfConfig(env: Env) {
+/* Zone-scoped tokens cannot see viewer.accounts, so they need a zoneTag.
+   Resolve it automatically from the store domain instead of forcing the
+   owner to configure a third secret. Cached per isolate for 10 minutes. */
+const zoneCache = new Map<string, { tag: string; at: number }>();
+async function discoverZoneTag(env: Env, token: string): Promise<string> {
+  const domain = String(env.STORE_DOMAIN || '').trim().replace(/^www\./, '');
+  if (!domain) return '';
+  const key = `${domain}:${token.slice(-6)}`;
+  const hit = zoneCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.tag;
+  try {
+    const url = `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(domain)}&per_page=1`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const payload: any = await response.json().catch(() => ({}));
+    const tag = String(payload?.result?.[0]?.id || '');
+    if (response.ok && tag) {
+      zoneCache.set(key, { tag, at: Date.now() });
+      return tag;
+    }
+  } catch (error: any) {
+    console.warn('[usage] zone lookup failed:', error?.message || error);
+  }
+  return '';
+}
+
+async function cfConfig(env: Env) {
   const token = String(env.CF_API_TOKEN || '').trim();
   const accountTag = String(env.CF_ACCOUNT_ID || env.R2_ACCOUNT_ID || '').trim();
-  const zoneTag = String(env.CF_ZONE_ID || '').trim();
+  let zoneTag = String(env.CF_ZONE_ID || '').trim();
+  let zoneSource: string | null = zoneTag ? 'CF_ZONE_ID' : null;
+  if (!zoneTag && token) {
+    const found = await discoverZoneTag(env, token);
+    if (found) { zoneTag = found; zoneSource = 'auto_discovery'; }
+  }
   return { token, accountTag, zoneTag, config: {
     endpoint: CF_GRAPHQL_ENDPOINT,
     has_token: !!token,
@@ -100,6 +132,7 @@ function cfConfig(env: Env) {
     has_account: !!accountTag,
     account_source: env.CF_ACCOUNT_ID ? 'CF_ACCOUNT_ID' : (env.R2_ACCOUNT_ID ? 'R2_ACCOUNT_ID' : null),
     has_zone: !!zoneTag,
+    zone_source: zoneSource,
   } };
 }
 
@@ -117,7 +150,7 @@ async function cfRequest(token: string, query: string, variables: Record<string,
 
 /** Returns explicit zeros + a precise reason when it cannot fetch data. */
 export async function cloudflareUsage(env: Env, opts: { debug?: boolean } = {}): Promise<any> {
-  const { token, accountTag, zoneTag, config } = cfConfig(env);
+  const { token, accountTag, zoneTag, config } = await cfConfig(env);
   const empty = { configured: false, requests: 0, bytes: 0, cached_requests: 0,
     cached_bytes: 0, page_views: 0, threats: 0, series: [], source: null as string | null,
     config, attempts: [] as any[] };

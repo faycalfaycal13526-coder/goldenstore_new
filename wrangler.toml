@@ -27,6 +27,9 @@ R2_BUCKET = "goldenstore-apks"
 R2_ACCOUNT_ID = "3d6027f4b14f48a62a2dba1db3f8d082"
 R2_PUBLIC_URL = "https://cdn.goldenstore.online"
 FIREBASE_PROJECT_ID = "golden-store-40dd6"
+# Public zone identifier (NOT a secret). Also auto-discovered from
+# STORE_DOMAIN when absent. Only CF_API_TOKEN needs to be a Worker secret.
+CF_ZONE_ID = "82b8bc2ce85467ebf142cd63469b8d6e"
 
 # ============================================================
 # Cloudflare GraphQL Analytics (for the admin dashboard)

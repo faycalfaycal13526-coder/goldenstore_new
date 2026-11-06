@@ -617,7 +617,8 @@ class FirestoreClient {
     const url = new URL(`${this.baseUrl}/${encodePath(ref.path)}`);
     if (transaction) url.searchParams.set('transaction', transaction);
     const response = await this.authorizedFetch(url);
-    if (response.status === 404) return new DocumentSnapshot(ref);
+    await recordFirebaseUsage(this.env, 'reads', 1);
+    if (response.status === 404) return new DocumentSnapshot(ref);   // 404 is still a billed read
     const document = await this.checkedJson(response);
     return new DocumentSnapshot(ref, document);
   }
@@ -626,7 +627,7 @@ class FirestoreClient {
     const payload = splitWriteData(data);
     if (payload.transforms.length) {
       const write = this.makeWrite(ref, data, { merge: options?.merge, updateOnly: false });
-      await this.commitWrites([write]);
+      await this.commitWrites([write]);   // commitWrites counts the write
       return;
     }
     const url = new URL(`${this.baseUrl}/${encodePath(ref.path)}`);
@@ -636,6 +637,7 @@ class FirestoreClient {
     const body = { name: this.documentName(ref), fields: payload.fields };
     const response = await this.authorizedFetch(url, { method: 'PATCH', body: JSON.stringify(body) });
     await this.checkedJson(response);
+    await recordFirebaseUsage(this.env, 'writes', 1);
   }
 
   async updateDocument(ref: DocumentReference, data: Record<string, unknown>): Promise<void> {
@@ -651,12 +653,14 @@ class FirestoreClient {
       body: JSON.stringify({ name: this.documentName(ref), fields: payload.fields }),
     });
     await this.checkedJson(response);
+    await recordFirebaseUsage(this.env, 'writes', 1);
   }
 
   async deleteDocument(ref: DocumentReference): Promise<void> {
     const response = await this.authorizedFetch(`${this.baseUrl}/${encodePath(ref.path)}`, { method: 'DELETE' });
     if (response.status === 404) return;
     await this.checkedJson(response);
+    await recordFirebaseUsage(this.env, 'writes', 1);
   }
 
   async addDocument(collection: CollectionReference, data: Record<string, unknown>): Promise<DocumentReference> {
@@ -671,6 +675,7 @@ class FirestoreClient {
       body: JSON.stringify({ fields: payload.fields }),
     });
     const document = await this.checkedJson(response);
+    await recordFirebaseUsage(this.env, 'writes', 1);
     const suffix = String(document.name || '').split('/documents/')[1] || '';
     return new DocumentReference(this, suffix || `${collection.collectionPath}/${crypto.randomUUID().replace(/-/g, '')}`);
   }
@@ -684,6 +689,8 @@ class FirestoreClient {
     if (transaction) body.transaction = transaction;
     const response = await this.authorizedFetch(endpoint, { method: 'POST', body: JSON.stringify(body) });
     const rows = (await this.checkedJson(response)) as any[];
+    // Firestore bills one read per returned document (minimum one read).
+    await recordFirebaseUsage(this.env, 'reads', Math.max(1, (rows || []).filter((r) => r?.document).length));
     const docs = (rows || [])
       .filter((row) => row?.document)
       .map((row) => {
@@ -708,6 +715,7 @@ class FirestoreClient {
       }),
     });
     const result = (await this.checkedJson(response)) as any[];
+    await recordFirebaseUsage(this.env, 'reads', 1);
     return Number(result?.[0]?.result?.aggregateFields?.count?.integerValue || 0);
   }
 
@@ -735,7 +743,9 @@ class FirestoreClient {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    return this.checkedJson(response);
+    const result = await this.checkedJson(response);
+    await recordFirebaseUsage(this.env, 'writes', Math.max(1, writes.length));
+    return result;
   }
 
   private async beginTransaction(): Promise<string> {
@@ -758,8 +768,6 @@ export function getFieldValue() {
 }
 
 async function identityToolkitRequest(env: Env, endpoint: string, body: Record<string, unknown>): Promise<any> {
-  // Track Firebase REST consumption in D1 (best effort, never breaks auth).
-  await recordFirebaseUsage(env, 'reads', 1);
   const apiKey = env.FIREBASE_API_KEY;
   if (!apiKey) throw new Error('FIREBASE_API_KEY is required for Firebase Auth REST verification.');
   const url = new URL(`https://identitytoolkit.googleapis.com/v1/${endpoint}`);
@@ -769,6 +777,10 @@ async function identityToolkitRequest(env: Env, endpoint: string, body: Record<s
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  // Count ONLY real Identity Toolkit HTTP calls (not early config failures).
+  // lookup/verify/signIn are reads; account creation/update/deletion are writes.
+  const isWrite = /signUp|accounts:update|accounts:delete/.test(endpoint);
+  await recordFirebaseUsage(env, isWrite ? 'writes' : 'reads', 1);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = (payload as any)?.error?.message || response.statusText || 'Firebase Auth request failed';

@@ -436,6 +436,11 @@ export async function analyticsOverview(env: Env): Promise<any> {
     "SELECT COUNT(*) AS c FROM scheduled_pushes WHERE status = 'pending'",
   ).first().catch(() => ({ c: 0 }));
   const cf = await cloudflareUsage(env);
+  const fbSeries = await firebaseUsage(env, 7);
+  const fbTotals = fbSeries.reduce((acc, r) => ({
+    reads: acc.reads + Number(r.reads || 0),
+    writes: acc.writes + Number(r.writes || 0),
+  }), { reads: 0, writes: 0 });
   return {
     generated_at: nowSec(),
     push: {
@@ -458,6 +463,17 @@ export async function analyticsOverview(env: Env): Promise<any> {
     },
     daily_sends: daily.results || [],
     cloudflare: cf,
-    firebase_usage: await firebaseUsage(env, 7),
+    firebase_usage: fbSeries,   // zero-filled 7-day series: never empty
+    firebase_totals: {
+      ...fbTotals,
+      today_reads: Number(fbSeries[0]?.reads || 0),
+      today_writes: Number(fbSeries[0]?.writes || 0),
+      tracked: [
+        'Identity Toolkit: accounts:lookup / signInWithCustomToken (reads), signUp (writes)',
+        'Firestore: getDocument / runQuery / runAggregationQuery (reads)',
+        'Firestore: PATCH / POST / DELETE / :commit (writes)',
+      ],
+      note: 'Store data lives in D1, so Firestore counters can legitimately be 0. Only real Firebase REST calls made by this Worker are counted.',
+    },
   };
 }

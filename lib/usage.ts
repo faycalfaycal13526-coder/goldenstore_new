@@ -40,10 +40,22 @@ export async function recordFirebaseUsage(env: Env, kind: 'reads' | 'writes', co
 
 export async function firebaseUsage(env: Env, days = 7): Promise<any[]> {
   await ensureUsageSchema(env);
+  const limit = Math.max(1, Math.min(days, 31));
   const rows: any = await env.DB.prepare(
     'SELECT day, reads, writes FROM firebase_usage ORDER BY day DESC LIMIT ?',
-  ).bind(Math.max(1, Math.min(days, 31))).all().catch(() => ({ results: [] }));
-  return rows.results || [];
+  ).bind(limit).all().catch(() => ({ results: [] }));
+  const byDay = new Map<string, any>();
+  for (const r of (rows.results || []) as any[]) byDay.set(String(r.day), r);
+  // ALWAYS return `days` rows so the dashboard explicitly shows 0 instead of
+  // an empty section on a quiet day (and right after deployment).
+  const out: any[] = [];
+  const today = new Date();
+  for (let i = 0; i < limit; i++) {
+    const day = new Date(today.getTime() - i * 86400 * 1000).toISOString().slice(0, 10);
+    const r = byDay.get(day);
+    out.push({ day, reads: Number(r?.reads || 0), writes: Number(r?.writes || 0) });
+  }
+  return out;
 }
 
 /** Cloudflare GraphQL Analytics API. Requires a CF_API_TOKEN secret.

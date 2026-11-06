@@ -26,7 +26,7 @@
     return String(v == null ? '' : v).replace(/[&<>"']/g, (c) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
-  function num(v) { try { return new Intl.NumberFormat('ar').format(Number(v || 0)); } catch { return String(v || 0); } }
+  function num(v) { try { return new Intl.NumberFormat('ar', { numberingSystem: 'latn' }).format(Number(v || 0)); } catch { return String(v || 0); } }
   function fmtDate(sec) {
     if (!sec) return '—';
     try { return new Date(Number(sec) * 1000).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' }); }
@@ -349,18 +349,25 @@
     }
     const fbPanel = panel('استهلاك Firebase (مسجّل في D1)', '◆');
     const fb = data.firebase_usage || [];
-    if (!fb.length) fbPanel.append(el('div', { class: 'hint', text: 'لا توجد قراءات/كتابات مسجّلة بعد.' }));
-    else {
-      const wrap = el('div', { class: 'table-wrap' });
-      const table = el('table', { class: 'table' });
-      table.innerHTML = '<thead><tr><th>اليوم</th><th>قراءات</th><th>كتابات</th></tr></thead>';
-      const tb = el('tbody');
-      fb.forEach((r) => tb.append(el('tr', null,
-        el('td', { 'data-label': 'اليوم', text: String(r.day) }),
-        el('td', { 'data-label': 'قراءات', text: num(r.reads) }),
-        el('td', { 'data-label': 'كتابات', text: num(r.writes) }))));
-      table.append(tb); wrap.append(table); fbPanel.append(wrap);
-    }
+    const totals = data.firebase_totals || {};
+    // ALWAYS render numbers — even zeros — instead of hiding the section.
+    fbPanel.append(el('div', { class: 'adv-kpis' },
+      kpi('قراءات اليوم', totals.today_reads ?? 0),
+      kpi('كتابات اليوم', totals.today_writes ?? 0),
+      kpi('قراءات 7 أيام', totals.reads ?? 0),
+      kpi('كتابات 7 أيام', totals.writes ?? 0),
+    ));
+    const wrap = el('div', { class: 'table-wrap' });
+    const table = el('table', { class: 'table' });
+    table.innerHTML = '<thead><tr><th>اليوم</th><th>قراءات</th><th>كتابات</th></tr></thead>';
+    const tb = el('tbody');
+    (fb.length ? fb : [{ day: 'اليوم', reads: 0, writes: 0 }]).forEach((r) => tb.append(el('tr', null,
+      el('td', { 'data-label': 'اليوم', text: String(r.day) }),
+      el('td', { 'data-label': 'قراءات', text: num(r.reads ?? 0) }),
+      el('td', { 'data-label': 'كتابات', text: num(r.writes ?? 0) }))));
+    table.append(tb); wrap.append(table); fbPanel.append(wrap);
+    fbPanel.append(el('div', { class: 'hint', text: String(totals.note ||
+      'يُحتسب كل طلب Identity Toolkit وكل عملية Firestore ينفّذها هذا الـ Worker.') }));
 
     host.append(
       el('div', { class: 'adv-refresh' },

@@ -892,6 +892,28 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .gate-error.hidden { display: none; }
 
+/* ---------- Login: "from" brand lockup (Facebook splash style) ----------
+   Scoped to the dedicated login page so no other gate/modal is affected.
+   The supplied artwork is black on white, so it sits on its own white plate
+   and stays identical in both dark and light themes. */
+body[data-page="login"] .gate { padding-bottom: 160px; }
+.gs-from {
+  position: fixed; inset-inline: 0; bottom: max(22px, env(safe-area-inset-bottom));
+  z-index: 101; display: flex; flex-direction: column; align-items: center;
+  gap: 5px; text-align: center; pointer-events: none;
+}
+.gs-from-label {
+  font-family: 'Roboto', Arial, system-ui, sans-serif; font-size: 17px;
+  font-weight: 400; line-height: 1.2; color: var(--text-3);
+  letter-spacing: .2px; unicode-bidi: isolate;
+}
+.gs-from-mark {
+  width: 152px; height: auto; padding: 8px 12px; border-radius: 12px;
+  background: #ffffff; border: 1px solid rgba(0,0,0,.08);
+  box-shadow: 0 4px 16px rgba(0,0,0,.22);
+}
+@media (max-width: 380px) { .gs-from-mark { width: 132px; } }
+
 /* ---------- Account ---------- */
 .acct-page { padding: 16px; }
 .acct-head { display: flex; align-items: center; gap: 16px; padding: 12px 0 20px; }

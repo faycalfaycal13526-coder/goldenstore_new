@@ -896,11 +896,16 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
    Faithful to the Facebook splash bottom lockup: a soft grey "from" directly
    above a blue wordmark, no plate, no border, no shadow. One component is
    used by /login and by the two in-app gates store.js builds dynamically.
-   As the last flex child of the full-screen .gate, margin-top:auto pins it
-   to the bottom exactly like "from Meta". */
+
+   IMPORTANT: the lockup is fixed to the bottom and therefore OUT of the
+   gate's flex flow. Using margin-top:auto here used to swallow all free
+   space and push the logo / Google button to the very top of the screen.
+   justify-content:center now works again and centres the sign-in content;
+   the small padding-top biases it slightly downwards. */
+.gate { padding-top: max(24px, 6vh); }
 .gs-from {
-  margin-top: auto; align-self: stretch;
-  padding-top: 34px; padding-bottom: max(22px, env(safe-area-inset-bottom));
+  position: fixed; inset-inline: 0;
+  bottom: max(22px, env(safe-area-inset-bottom)); z-index: 1;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   text-align: center; pointer-events: none;
 }
@@ -916,7 +921,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 @media (max-width: 380px) { .gs-from-mark { width: 170px; } }
 /* Inside the centered auth-required dialog (not full-screen): inline footer. */
 .auth-required-card .gs-from {
-  margin-top: 20px; padding-top: 0; padding-bottom: 2px;
+  position: static; margin-top: 20px; padding-bottom: 2px;
 }
 
 /* ---------- Account ---------- */

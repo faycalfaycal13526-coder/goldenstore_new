@@ -23,6 +23,8 @@ export interface Env {
 
   // Cloudflare GraphQL Analytics (set as Worker SECRETS, never in wrangler.toml)
   CF_API_TOKEN?: string;   // token with Account or Zone "Analytics: Read"
+  CLOUDFLARE_API_TOKEN?: string; // accepted aliases (dashboard naming varies)
+  CF_ANALYTICS_TOKEN?: string;
   CF_ACCOUNT_ID?: string;  // account-level tag (falls back to R2_ACCOUNT_ID)
   CF_ZONE_ID?: string;     // zone-level tag (needed for zone-scoped tokens)
 

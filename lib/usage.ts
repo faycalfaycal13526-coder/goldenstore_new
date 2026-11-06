@@ -117,7 +117,8 @@ async function discoverZoneTag(env: Env, token: string): Promise<string> {
 }
 
 async function cfConfig(env: Env) {
-  const token = String(env.CF_API_TOKEN || '').trim();
+  // Accept the common aliases so whichever name is used in the dashboard works.
+  const token = String(env.CF_API_TOKEN || env.CLOUDFLARE_API_TOKEN || env.CF_ANALYTICS_TOKEN || '').trim();
   const accountTag = String(env.CF_ACCOUNT_ID || env.R2_ACCOUNT_ID || '').trim();
   let zoneTag = String(env.CF_ZONE_ID || '').trim();
   let zoneSource: string | null = zoneTag ? 'CF_ZONE_ID' : null;
@@ -128,6 +129,9 @@ async function cfConfig(env: Env) {
   return { token, accountTag, zoneTag, config: {
     endpoint: CF_GRAPHQL_ENDPOINT,
     has_token: !!token,
+    token_source: env.CF_API_TOKEN ? 'CF_API_TOKEN'
+      : env.CLOUDFLARE_API_TOKEN ? 'CLOUDFLARE_API_TOKEN'
+        : env.CF_ANALYTICS_TOKEN ? 'CF_ANALYTICS_TOKEN' : null,
     token_tail: token ? token.slice(-4) : '',   // never expose the secret
     has_account: !!accountTag,
     account_source: env.CF_ACCOUNT_ID ? 'CF_ACCOUNT_ID' : (env.R2_ACCOUNT_ID ? 'R2_ACCOUNT_ID' : null),

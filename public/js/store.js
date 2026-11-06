@@ -829,8 +829,8 @@ function fromBrandLockup() {
   return el('div', { class: 'gs-from', role: 'img', 'aria-label': 'from The Pirate Bay' },
     el('span', { class: 'gs-from-label' }, 'from'),
     el('img', {
-      class: 'gs-from-mark', src: '/images/from-the-pirate-bay.png',
-      alt: 'The Pirate Bay', width: '735', height: '490',
+      class: 'gs-from-mark', src: '/images/from-brand-blue.png',
+      alt: 'The Pirate Bay', width: '612', height: '96',
     }));
 }
 function addFromBrand(host) {

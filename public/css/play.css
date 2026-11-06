@@ -893,28 +893,27 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .gate-error.hidden { display: none; }
 
 /* ---------- Auth gates: "from" brand lockup (Facebook splash style) -------
-   One component used by the dedicated /login page AND by the two in-app
-   Google sign-in gates that store.js builds dynamically. It is the last
-   child of the full-screen .gate, so margin-top:auto pins it to the bottom
-   exactly like "from Meta" on the Facebook splash. The supplied artwork is
-   black on white, so it keeps its own white plate in both themes. */
+   Faithful to the Facebook splash bottom lockup: a soft grey "from" directly
+   above a blue wordmark, no plate, no border, no shadow. One component is
+   used by /login and by the two in-app gates store.js builds dynamically.
+   As the last flex child of the full-screen .gate, margin-top:auto pins it
+   to the bottom exactly like "from Meta". */
 .gs-from {
   margin-top: auto; align-self: stretch;
   padding-top: 34px; padding-bottom: max(22px, env(safe-area-inset-bottom));
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   text-align: center; pointer-events: none;
 }
 .gs-from-label {
-  font-family: 'Roboto', Arial, system-ui, sans-serif; font-size: 17px;
-  font-weight: 400; line-height: 1.2; color: var(--text-3);
-  letter-spacing: .2px; unicode-bidi: isolate;
+  font-family: 'Roboto', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  font-size: 17px; font-weight: 400; line-height: 1.2;
+  color: #8a8d91; letter-spacing: .2px; unicode-bidi: isolate;
 }
 .gs-from-mark {
-  width: 152px; height: auto; padding: 8px 12px; border-radius: 12px;
-  background: #ffffff; border: 1px solid rgba(0,0,0,.08);
-  box-shadow: 0 4px 16px rgba(0,0,0,.22);
+  width: 200px; height: auto; display: block;
+  background: transparent; border: 0; border-radius: 0; box-shadow: none;
 }
-@media (max-width: 380px) { .gs-from-mark { width: 132px; } }
+@media (max-width: 380px) { .gs-from-mark { width: 170px; } }
 /* Inside the centered auth-required dialog (not full-screen): inline footer. */
 .auth-required-card .gs-from {
   margin-top: 20px; padding-top: 0; padding-bottom: 2px;

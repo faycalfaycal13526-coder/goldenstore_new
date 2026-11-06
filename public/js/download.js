@@ -23,8 +23,12 @@
     var svg = window.GSIcons && window.GSIcons.svg;
     if (svg) {
       document.querySelectorAll('[data-icon]').forEach(function (node) {
-        node.innerHTML = svg(node.getAttribute('data-icon'), 'icon');
-        node.removeAttribute('data-icon');
+        // Replace the placeholder span with a real <svg class="icon"> so there
+        // is no nested double-sizing and the shared icon CSS applies directly.
+        var tmp = document.createElement('div');
+        tmp.innerHTML = svg(node.getAttribute('data-icon'), 'icon');
+        var svgNode = tmp.firstElementChild;
+        if (svgNode && node.parentNode) node.parentNode.replaceChild(svgNode, node);
       });
     }
   } catch (e) {}

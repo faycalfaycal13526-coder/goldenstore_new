@@ -97,10 +97,8 @@
       list.forEach((n) => wrap.append(item(n)));
       body.append(wrap);
     }
-    const checkBtn = el('button', { class: 'gs-notif-recheck', type: 'button' },
-      icon('refresh'), t('التحقق من وجود تحديثات'));
-    checkBtn.addEventListener('click', () => S.checkForUpdates({ button: checkBtn }));
-    body.append(checkBtn);
+    // No update-check control here: it lives in Account, the download page
+    // and the update dialog only (user request).
     refreshBtn.onclick = () => load(body, refreshBtn);
   }
 

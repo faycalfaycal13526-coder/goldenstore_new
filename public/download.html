@@ -30,6 +30,13 @@
   --gold: #c79a06; --gold-2: #f4c01f; --shadow: 0 24px 70px rgba(0,0,0,.12);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Shared icon geometry — without these rules the inline SVGs render as
+   unclear black blobs (no stroke, no fill control). */
+.icon {
+  display: inline-block; width: 24px; height: 24px; flex: 0 0 auto;
+  vertical-align: middle; stroke: currentColor; fill: none;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
+}
 html, body { min-height: 100%; }
 body {
   background: var(--bg); color: var(--text);
@@ -56,7 +63,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--text-2); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line);
 }
 .dl-home:hover { color: var(--gold); border-color: var(--gold); }
-.dl-home .icon { width: 16px; height: 16px; }
+.dl-home .icon { width: 18px; height: 18px; }
 
 /* ---- language switcher ---- */
 .lang-switch { position: relative; display: inline-flex; z-index: 12; }
@@ -66,7 +73,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
   font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
 }
-.lang-btn .icon { width: 17px; height: 17px; }
+.lang-btn .icon { width: 18px; height: 18px; }
 .lang-code { letter-spacing: .35px; }
 .lang-menu {
   display: none; position: absolute; top: calc(100% + 8px); inset-inline-end: 0;
@@ -108,7 +115,7 @@ a { color: inherit; text-decoration: none; }
   display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px;
   font-size: 12.5px; font-weight: 800; border: 1px solid var(--line); background: var(--surface);
 }
-.dl-pill .icon { width: 15px; height: 15px; color: var(--gold); }
+.dl-pill .icon { width: 17px; height: 17px; color: var(--gold); }
 .dl-pill strong { color: var(--gold); }
 .dl-counter {
   display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin-bottom: 20px;
@@ -117,11 +124,11 @@ a { color: inherit; text-decoration: none; }
   max-width: 340px;
 }
 .dl-counter-icon {
-  width: 46px; height: 46px; flex: 0 0 46px; border-radius: 14px;
-  display: grid; place-items: center; color: var(--gold); background: rgba(244,192,31,.14);
-  font-size: 22px; font-weight: 800;
+  width: 48px; height: 48px; flex: 0 0 48px; border-radius: 14px;
+  display: grid; place-items: center; color: var(--gold);
+  background: rgba(244,192,31,.14); border: 1px solid rgba(244,192,31,.28);
 }
-.dl-counter-icon .icon { width: 24px; height: 24px; }
+.dl-counter-icon .icon { width: 26px; height: 26px; }
 .dl-counter-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dl-counter-number { font-size: 24px; line-height: 1.15; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--gold); }
 .dl-counter-label { color: var(--text-2); font-size: 12.5px; }
@@ -134,7 +141,7 @@ a { color: inherit; text-decoration: none; }
   border: none; cursor: pointer; box-shadow: 0 12px 34px rgba(244,192,31,.28);
   transition: transform .08s, filter .15s;
 }
-.dl-btn .icon { width: 20px; height: 20px; }
+.dl-btn .icon { width: 22px; height: 22px; }
 .dl-btn:hover { filter: brightness(1.05); }
 .dl-btn:active { transform: scale(.985); }
 .dl-btn.is-disabled, .dl-btn[aria-disabled="true"] {
@@ -146,7 +153,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--line); background: transparent; color: var(--text);
   font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
 }
-.dl-btn-secondary .icon { width: 17px; height: 17px; color: var(--gold); }
+.dl-btn-secondary .icon { width: 18px; height: 18px; color: var(--gold); }
 .dl-btn-secondary:disabled { opacity: .6; cursor: default; }
 .dl-btn-secondary:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); }
 .dl-help { margin-top: 4px; min-height: 20px; color: var(--text-3); font-size: 12px; line-height: 1.5; }
@@ -181,10 +188,11 @@ a { color: inherit; text-decoration: none; }
 }
 .dl-feature:hover { transform: translateY(-3px); border-color: var(--gold); }
 .dl-feature-ico {
-  width: 48px; height: 48px; margin: 0 auto 12px; border-radius: 15px;
-  display: grid; place-items: center; color: var(--gold); background: rgba(244,192,31,.12);
+  width: 54px; height: 54px; margin: 0 auto 12px; border-radius: 16px;
+  display: grid; place-items: center; color: var(--gold);
+  background: rgba(244,192,31,.12); border: 1px solid rgba(244,192,31,.28);
 }
-.dl-feature-ico .icon { width: 25px; height: 25px; }
+.dl-feature-ico .icon { width: 28px; height: 28px; }
 .dl-feature h3 { font-size: 14.5px; font-weight: 800; margin-bottom: 5px; }
 .dl-feature p { font-size: 12.5px; color: var(--text-2); line-height: 1.65; }
 
@@ -198,7 +206,7 @@ a { color: inherit; text-decoration: none; }
   width: 46px; height: 46px; flex: 0 0 46px; border-radius: 14px;
   display: grid; place-items: center; color: var(--gold); background: rgba(244,192,31,.14);
 }
-.dl-release-ico .icon { width: 24px; height: 24px; }
+.dl-release-ico .icon { width: 26px; height: 26px; }
 .dl-release h3 { font-size: 16px; margin-bottom: 5px; }
 .dl-release p { font-size: 13.5px; color: var(--text-2); line-height: 1.7; }
 
@@ -326,13 +334,13 @@ a { color: inherit; text-decoration: none; }
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261106a"></script>
-<script src="/js/lang.js?v=20261106a"></script>
+<script src="/js/icons.js?v=20261106b"></script>
+<script src="/js/lang.js?v=20261106b"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
-<script src="/js/firebase-auth.js?v=20261106a"></script>
-<script src="/js/notifications.js?v=20261106a"></script>
-<script src="/js/download.js?v=20261106a"></script>
+<script src="/js/firebase-auth.js?v=20261106b"></script>
+<script src="/js/notifications.js?v=20261106b"></script>
+<script src="/js/download.js?v=20261106b"></script>
 </body>
 </html>

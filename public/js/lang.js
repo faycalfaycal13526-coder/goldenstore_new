@@ -95,6 +95,8 @@
     'تحديث الإشعارات': { en: 'Refresh notifications', fr: 'Actualiser les notifications', es: 'Actualizar notificaciones' },
     'جارٍ تحميل الإشعارات…': { en: 'Loading notifications…', fr: 'Chargement des notifications…', es: 'Cargando notificaciones…' },
     'تحميل Golden Store': { en: 'Download Golden Store', fr: 'Télécharger Golden Store', es: 'Descargar Golden Store' },
+    'متجر التطبيقات والألعاب': { en: 'The apps & games store', fr: 'Le store d’apps et de jeux', es: 'La tienda de apps y juegos' },
+    'سيُعاد تحميل الصفحة تلقائياً عند عودة الاتصال.': { en: 'The page will reload automatically when the connection returns.', fr: 'La page se rechargera automatiquement au retour de la connexion.', es: 'La página se recargará automáticamente cuando vuelva la conexión.' },
     'حمّل أحدث إصدار من Golden Store بأمان ومجاناً.': { en: 'Get the latest Golden Store release safely and for free.', fr: 'Téléchargez la dernière version de Golden Store en toute sécurité et gratuitement.', es: 'Descarga la última versión de Golden Store de forma segura y gratuita.' },
     'مجاني بالكامل': { en: 'Completely free', fr: 'Entièrement gratuit', es: 'Totalmente gratis' },
     'تحميل مباشر وآمن': { en: 'Direct, secure download', fr: 'Téléchargement direct et sécurisé', es: 'Descarga directa y segura' },

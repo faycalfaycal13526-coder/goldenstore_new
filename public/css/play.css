@@ -568,7 +568,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   display: flex; align-items: stretch; gap: 16px;
   overflow-x: auto; overflow-y: hidden;
   overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch;
-  scroll-snap-type: x mandatory; scrollbar-width: thin;
+  scroll-snap-type: x mandatory; scrollbar-width: none;
   padding: 6px 16px 16px;   /* identical side edges for every card */
 }
 /* A 1280px landscape card is far wider than the scrollport. Relax mandatory
@@ -579,18 +579,17 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
 }
-.shots::-webkit-scrollbar { height: 8px; }
-.shots::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
+.shots::-webkit-scrollbar { display: none; }
 .shot-card {
   --shot-h: 220px;   /* portrait / square default (desktop + tablet) */
   --shot-w: 124px;   /* scaled with the height: keeps the 9:16 card ratio */
   position: relative; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;  /* centered card */
   width: var(--shot-w); height: var(--shot-h);
-  /* content-box keeps the 1px border outside the declared height, so the
+  /* No border / no scrollbar line: the artwork sits edge to edge. The
      image really is 220px / 270px tall; landscape is 1280 × 720 on desktop. */
   box-sizing: content-box;
-  padding: 0; border: 1px solid var(--line); border-radius: 20px;
+  padding: 0; border: 0; border-radius: 20px;
   background: #08080a; overflow: hidden; cursor: zoom-in;
   scroll-snap-align: start;
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
@@ -3189,12 +3188,6 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
 .gs-notif-meta { font-size: 11px; color: var(--text-3); margin-top: 6px; }
 .gs-notif-empty { padding: 60px 20px; text-align: center; }
 .gs-notif-empty .icon { width: 54px; height: 54px; color: var(--text-3); margin: 0 auto 12px; }
-.gs-notif-recheck {
-  display: inline-flex; align-items: center; gap: 7px; margin-top: 16px;
-  padding: 10px 18px; border-radius: 999px; border: 1px solid rgba(244,192,31,.4);
-  background: transparent; color: #f4c01f; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
-}
-.gs-notif-recheck .icon { width: 16px; height: 16px; }
 
 /* --------------------- Update-check result card ----------------------- */
 .gs-check-overlay {
@@ -3232,3 +3225,133 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
   font-size: 12px; font-weight: 700; color: var(--primary);
 }
 .gs-new-section-head .more .icon { width: 14px; height: 14px; }
+
+
+/* =====================================================================
+   v3 — Offline is now a real full-screen PAGE (not a small dialog card).
+   Fixed overlay for in-app errors, standalone layout for /offline.
+   ===================================================================== */
+.gs-offline-wrap {
+  position: fixed; inset: 0; z-index: 9999;
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column;
+  padding: 0; margin: 0; overflow-y: auto;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(244,192,31,.16), transparent 55%),
+    radial-gradient(ellipse at 50% 110%, rgba(244,192,31,.07), transparent 55%),
+    #000000;
+}
+:root[data-theme="light"] .gs-offline-wrap {
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(199,154,6,.14), transparent 55%),
+    radial-gradient(ellipse at 50% 110%, rgba(199,154,6,.06), transparent 55%),
+    #ffffff;
+}
+.gs-offline-top {
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px 20px 0; flex: 0 0 auto;
+}
+.gs-offline-brand {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 16px; font-weight: 800; color: #ffffff;
+}
+:root[data-theme="light"] .gs-offline-brand { color: #111111; }
+.gs-offline-brand img { width: 34px; height: 34px; border-radius: 10px; }
+.gs-offline-brand b { color: #f4c01f; }
+:root[data-theme="light"] .gs-offline-brand b { color: #a87f00; }
+
+.gs-offline-wrap .gs-offline-card {
+  position: relative; flex: 1 0 auto;
+  width: 100%; max-width: none; margin: 0; padding: 18px 20px 30px;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; color: #ffffff; overflow: visible;
+}
+:root[data-theme="light"] .gs-offline-wrap .gs-offline-card {
+  background: transparent; color: #111111; border: 0; box-shadow: none;
+}
+.gs-offline-card::before { content: none; display: none; }
+
+.gs-offline-art {
+  position: relative; width: 132px; height: 132px; margin: 0 auto 18px;
+  display: grid; place-items: center;
+}
+.gs-offline-art-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid rgba(244,192,31,.55);
+  box-shadow: 0 0 0 10px rgba(244,192,31,.07), 0 0 60px rgba(244,192,31,.18);
+}
+.gs-offline-wrap .gs-offline-logo {
+  width: 96px; height: 96px; margin: 0; border: 0; border-radius: 50%;
+  background: transparent; box-shadow: none;
+}
+.gs-offline-wrap .gs-offline-logo img { padding: 0; }
+:root[data-theme="light"] .gs-offline-wrap .gs-offline-logo {
+  background: transparent; box-shadow: none;
+}
+.gs-offline-art-glyph {
+  position: absolute; bottom: -2px; inset-inline-end: -2px;
+  width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: #f4c01f; color: #1a1400; border: 3px solid #000000;
+}
+:root[data-theme="light"] .gs-offline-art-glyph { border-color: #ffffff; }
+.gs-offline-art-glyph .icon { width: 20px; height: 20px; }
+.gs-offline-art-slash {
+  position: absolute; width: 24px; height: 2px; border-radius: 2px;
+  background: #1a1400; transform: rotate(-45deg);
+}
+
+.gs-offline-wrap .gs-offline-badge {
+  margin: 0 0 10px; padding: 6px 14px; font-size: 12px;
+  background: rgba(244,192,31,.12); color: #f4c01f;
+  border: 1px solid rgba(244,192,31,.4);
+}
+.gs-offline-wrap .gs-offline-title { font-size: 27px; margin: 0 0 8px; }
+.gs-offline-wrap .gs-offline-hint {
+  font-size: 14.5px; max-width: 420px; margin: 0 auto 16px; color: #c9c9c9;
+}
+:root[data-theme="light"] .gs-offline-wrap .gs-offline-hint { color: #555a62; }
+.gs-offline-wrap .gs-offline-status { margin: 0 0 22px; }
+
+.gs-offline-wrap .gs-offline-steps {
+  list-style: none; padding: 0; margin: 0 0 22px; text-align: start;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+  width: 100%; max-width: 620px;
+}
+.gs-offline-wrap .gs-offline-steps li {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px 12px; border-radius: 16px; font-size: 12.5px; line-height: 1.6;
+  background: rgba(244,192,31,.06); border: 1px solid rgba(244,192,31,.18);
+  color: #e8e8ea;
+}
+:root[data-theme="light"] .gs-offline-wrap .gs-offline-steps li {
+  background: rgba(199,154,6,.06); border-color: rgba(199,154,6,.2); color: #1a1c20;
+}
+.gs-offline-wrap .gs-offline-steps .n {
+  width: 26px; height: 26px; font-size: 12px; margin: 0;
+}
+.gs-offline-wrap .gs-offline-actions {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%;
+}
+.gs-offline-wrap .gs-offline-retry { min-width: 220px; padding: 13px 28px; font-size: 15px; }
+.gs-offline-wrap .gs-offline-home { font-size: 13px; }
+.gs-offline-foot {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 18px 0 0; font-size: 11.5px; color: #82858d;
+}
+.gs-offline-foot .icon { width: 13px; height: 13px; }
+.gs-offline-bottom {
+  flex: 0 0 auto; padding: 14px 20px 22px; text-align: center;
+  font-size: 11px; color: #6f727a;
+}
+
+@media (max-width: 620px) {
+  .gs-offline-art { width: 112px; height: 112px; }
+  .gs-offline-wrap .gs-offline-logo { width: 82px; height: 82px; }
+  .gs-offline-wrap .gs-offline-title { font-size: 23px; }
+  .gs-offline-wrap .gs-offline-steps { grid-template-columns: 1fr; gap: 8px; }
+  .gs-offline-wrap .gs-offline-steps li { flex-direction: row; align-items: center; padding: 11px 13px; }
+  .gs-offline-wrap .gs-offline-steps .n { flex: 0 0 24px; width: 24px; height: 24px; }
+  .gs-offline-wrap .gs-offline-card { padding: 12px 18px 24px; }
+}

@@ -495,15 +495,28 @@ function offlineScreen() {
     t('جرّب فتح صفحة أخرى للتأكد من عمل الإنترنت.'),
     t('أوقف VPN أو البروكسي مؤقتاً ثم أعد المحاولة.'),
   ];
+  // A genuine full-screen page: brand header, illustration, three step cards,
+  // primary retry + home link, and an auto-reload hint. No small dialog card.
   return el('div', { class: 'gs-offline-wrap', 'data-noi18n': '' },
-    el('div', { class: 'gs-offline-card', role: 'alert', 'aria-live': 'assertive', 'data-noi18n': '' },
-      el('div', { class: 'gs-offline-logo' },
-        el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
-      el('div', { class: `gs-offline-status${online ? ' is-online' : ''}` },
-        el('span', { class: 'dot' }), t(online ? 'الاتصال غير مستقر' : 'أنت غير متصل')),
+    el('header', { class: 'gs-offline-top' },
+      el('a', { class: 'gs-offline-brand', href: '/' },
+        el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' }),
+        el('span', null, 'Golden', el('b', null, 'Store')),
+      ),
+    ),
+    el('main', { class: 'gs-offline-card', role: 'alert', 'aria-live': 'assertive', 'data-noi18n': '' },
+      el('div', { class: 'gs-offline-art' },
+        el('span', { class: 'gs-offline-art-ring' }),
+        el('div', { class: 'gs-offline-logo' },
+          el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
+        el('span', { class: 'gs-offline-art-glyph' },
+          ico('globe', 'icon'), el('span', { class: 'gs-offline-art-slash' })),
+      ),
       el('span', { class: 'gs-offline-badge' }, t('لا يوجد اتصال بالإنترنت')),
       el('h1', { class: 'gs-offline-title' }, t('تعذّر الاتصال بالخادم')),
       el('p', { class: 'gs-offline-hint' }, t('تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.')),
+      el('div', { class: `gs-offline-status${online ? ' is-online' : ''}` },
+        el('span', { class: 'dot' }), t(online ? 'الاتصال غير مستقر' : 'أنت غير متصل')),
       el('ol', { class: 'gs-offline-steps' },
         ...steps.map((step, i) => el('li', null,
           el('span', { class: 'n' }, String(i + 1)), el('span', null, step)))),
@@ -515,9 +528,13 @@ function offlineScreen() {
         el('a', { class: 'gs-offline-home', href: '/' },
           ico('home', 'icon'), t('العودة إلى الرئيسية')),
       ),
+      el('p', { class: 'gs-offline-foot' },
+        ico('refresh', 'icon'), t('سيُعاد تحميل الصفحة تلقائياً عند عودة الاتصال.')),
     ),
+    el('footer', { class: 'gs-offline-bottom' }, 'Golden Store · ', t('متجر التطبيقات والألعاب')),
   );
 }
+
 function errorState(err) {
   const offline = err && (err.status === 0 || err.message === 'timeout'
     || (typeof navigator !== 'undefined' && navigator.onLine === false));

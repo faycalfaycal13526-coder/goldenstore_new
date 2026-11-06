@@ -641,7 +641,7 @@
 .adv-kpi-value { font-size: 22px; font-weight: 800; color: #f4c01f; font-variant-numeric: tabular-nums; }
 .adv-kpi-label { font-size: 12.5px; color: var(--text-2, #b9bbc2); margin-top: 4px; }
 .adv-chart { padding: 12px; min-height: 240px; }
-.adv-note { padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.7;
+.adv-note { padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.7; white-space: pre-line;
   background: rgba(244,192,31,.07); border: 1px dashed rgba(244,192,31,.35); }
 .adv-ico { color: #f4c01f; margin-inline-end: 8px; }
 .adv-refresh { display: flex; justify-content: flex-end; margin-bottom: 10px; }

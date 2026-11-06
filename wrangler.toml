@@ -29,6 +29,16 @@ R2_PUBLIC_URL = "https://cdn.goldenstore.online"
 FIREBASE_PROJECT_ID = "golden-store-40dd6"
 
 # ============================================================
+# Cloudflare GraphQL Analytics (for the admin dashboard)
+# Set these as WORKER SECRETS, never here:
+#   npx wrangler secret put CF_API_TOKEN    # token with Account/Zone "Analytics:Read"
+#   npx wrangler secret put CF_ACCOUNT_ID   # account tag (or reuse R2_ACCOUNT_ID below)
+#   npx wrangler secret put CF_ZONE_ID      # only for zone-scoped tokens
+# Diagnose from the dashboard: "الإحصائيات" -> "اختبار الاتصال / تشخيص",
+# or GET /api/admin/push/cloudflare (admin session required).
+# ============================================================
+
+# ============================================================
 # D1 Database Binding
 # ============================================================
 [[d1_databases]]

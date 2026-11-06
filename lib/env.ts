@@ -21,6 +21,11 @@ export interface Env {
   R2_BUCKET?: string;
   R2_PUBLIC_URL?: string;
 
+  // Cloudflare GraphQL Analytics (set as Worker SECRETS, never in wrangler.toml)
+  CF_API_TOKEN?: string;   // token with Account or Zone "Analytics: Read"
+  CF_ACCOUNT_ID?: string;  // account-level tag (falls back to R2_ACCOUNT_ID)
+  CF_ZONE_ID?: string;     // zone-level tag (needed for zone-scoped tokens)
+
   // ============================================================
   // D1 Database Binding (للتخزين الجديد بدلاً من Firestore)
   // ============================================================

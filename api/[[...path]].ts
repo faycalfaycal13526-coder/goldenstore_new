@@ -11,6 +11,7 @@ import {
   cancelScheduledPush, processScheduledPushes, recordPushClick, pushHistory,
   followApp, unfollowApp, appFollowerCount, analyticsOverview, resolveAudience,
 } from '../lib/advanced-push.js';
+import { cloudflareUsage as cfUsage } from '../lib/usage.js';
 import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
@@ -1448,6 +1449,16 @@ app.get('/admin/push/history', async (c) =>
   c.json({ history: await pushHistory(c.env, Number(c.req.query('limit')) || 30) }));
 app.get('/admin/push/analytics', async (c) =>
   c.json({ ok: true, analytics: await analyticsOverview(c.env) }));
+
+// Live Cloudflare GraphQL diagnostic: shows config flags, HTTP status and
+// GraphQL errors WITHOUT exposing the token. Use this to debug "0 requests".
+app.get('/admin/push/cloudflare', async (c) => {
+  try {
+    return c.json({ ok: true, cloudflare: await cfUsage(c.env, { debug: true }) });
+  } catch (error: any) {
+    return c.json({ ok: false, error: String(error?.message || error) });
+  }
+});
 
 // Click tracking — public, rate limited, no token/PII required.
 app.post('/notifications/click', async (c) => {

@@ -335,18 +335,45 @@
     chartPanel.append(chartHost);
 
     const cf = data.cloudflare || {};
+    const cfg = cf.config || {};
     const cfPanel = panel('استهلاك Cloudflare (GraphQL Analytics)', '☁');
-    if (!cf.configured) {
-      cfPanel.append(el('div', { class: 'adv-note', text:
-        'غير مفعّل — أضف السر CF_API_TOKEN في إعدادات Worker لتفعيل جلب الطلبات وعرض النطاق عبر GraphQL Analytics API.' }));
-    } else if (cf.error) {
-      cfPanel.append(el('div', { class: 'adv-note', text: 'تعذّر الجلب: ' + cf.error }));
-    } else {
-      cfPanel.append(el('div', { class: 'adv-kpis' },
-        kpi('الطلبات (7 أيام)', cf.requests),
-        kpi('عرض النطاق (بايت)', cf.bytes),
-      ));
+    // Numbers are ALWAYS visible (explicit zeros), even before configuration.
+    cfPanel.append(el('div', { class: 'adv-kpis' },
+      kpi('الطلبات (7 أيام)', cf.requests ?? 0),
+      kpi('عرض النطاق (بايت)', cf.bytes ?? 0),
+      kpi('طلبات مخزّنة', cf.cached_requests ?? 0),
+      kpi('مشاهدات الصفحات', cf.page_views ?? 0),
+    ));
+    const cfStatus = el('div', { class: 'adv-note' });
+    function showCf(x) {
+      const c = x.config || cfg;
+      const bits = [
+        'المصدر: ' + (x.source === 'zones' ? 'Zone' : x.source === 'accounts' ? 'Account' : '—'),
+        'CF_API_TOKEN: ' + (c.has_token ? 'موجود (…' + (c.token_tail || '') + ')' : 'غير موجود'),
+        'Account: ' + (c.has_account ? String(c.account_source || 'موجود') : 'غير موجود'),
+        'CF_ZONE_ID: ' + (c.has_zone ? 'موجود' : 'غير موجود'),
+      ];
+      if (x.from) bits.push('الفترة: ' + x.from + ' → ' + (x.until_exclusive || ''));
+      const attempts = x.attempts || [];
+      if (attempts.length) bits.push('المحاولات: ' + attempts.map((a) =>
+        a.source + ' HTTP ' + a.status + (a.errors && a.errors.length ? ' (' + a.errors[0].slice(0, 60) + ')' : '')).join(' | '));
+      let text = bits.join(' • ');
+      if (x.error) text += '\nالخطأ: ' + x.error;
+      if (x.hint) text += '\n' + x.hint;
+      cfStatus.textContent = text;
     }
+    showCf(cf);
+    cfPanel.append(cfStatus);
+    cfPanel.append(el('div', { class: 'btn-row' },
+      el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: async (ev) => {
+        const b = ev.currentTarget; b.disabled = true;
+        cfStatus.textContent = 'جارٍ اختبار الاتصال بـ GraphQL…';
+        try {
+          const r = await api('/api/admin/push/cloudflare');
+          showCf(r.cloudflare || {});
+        } catch (e) { cfStatus.textContent = 'فشل الاختبار: ' + e.message; }
+        b.disabled = false;
+      } }, 'اختبار الاتصال / تشخيص')));
     const fbPanel = panel('استهلاك Firebase (مسجّل في D1)', '◆');
     const fb = data.firebase_usage || [];
     const totals = data.firebase_totals || {};

@@ -515,10 +515,10 @@ app.post('/notifications/self-test', async (c) => {
 });
 
 // ---- Translation helpers -------------------------------------------------
-// Google's unofficial gtx endpoint answers Cloudflare Worker IPs with an HTML
-// "Sorry..." bot-block page instead of JSON. The old route mistook that failure
-// for a valid translation and cached the unchanged Arabic source forever, so
-// any string missing from the curated dictionary could never be translated.
+// Google's gtx endpoint answers Cloudflare Worker IPs with an HTML "Sorry..."
+// bot-block page. The old route mistook that failure for a valid translation
+// and cached the unchanged Arabic source forever, so any string missing from
+// the curated dictionary could never be translated.
 const translateReady = new WeakSet<object>();
 async function ensureTranslateCache(db: any) {
   if (!db || translateReady.has(db)) return;
@@ -535,46 +535,80 @@ async function ensureTranslateCache(db: any) {
 }
 
 const ARABIC_CHARS = /[\u0600-\u06FF]/;
+let gtxBackoffUntil = 0;
+type TrResult = { tr: string | null; why: string };
 
-// Circuit breaker: once gtx answers with its bot-block HTML, stop calling it for
-// a few minutes instead of paying that latency for every batch on every page.
-let googleBackoffUntil = 0;
+function pickTranslation(data: any, text: string): string | null {
+  let tr = '';
+  if (Array.isArray(data)) {
+    if (typeof data[0] === 'string') tr = data.filter((x: any) => typeof x === 'string').join('');
+    else if (Array.isArray(data[0])) tr = data.map((x: any) => (x && typeof x[0] === 'string' ? x[0] : '')).join('');
+  }
+  return tr && tr !== text ? tr : null;
+}
 
-async function googleTranslate(text: string, target: string): Promise<string | null> {
-  if (Date.now() < googleBackoffUntil) return null;
+// Primary: dict-chrome-ex is a different Google host and is not bot-blocked.
+async function chromeTranslate(text: string, target: string): Promise<TrResult> {
+  try {
+    const res = await fetch(
+      `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=ar&tl=${target}&q=${encodeURIComponent(text)}`,
+      { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; GoldenStore/1.0)' } },
+    );
+    const raw = await res.text();
+    if (!raw || raw.charAt(0) !== '[') return { tr: null, why: `html/${res.status}` };
+    const tr = pickTranslation(JSON.parse(raw), text);
+    return { tr, why: tr ? 'ok' : 'unchanged' };
+  } catch (e: any) { return { tr: null, why: `err/${String(e && e.message || e).slice(0, 60)}` }; }
+}
+
+// Legacy: kept as a second opinion, but backed off for 5 min after a block.
+async function gtxTranslate(text: string, target: string): Promise<TrResult> {
+  if (Date.now() < gtxBackoffUntil) return { tr: null, why: 'backoff' };
   try {
     const res = await fetch(
       `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${target}&dt=t&q=${encodeURIComponent(text)}`,
       { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; GoldenStore/1.0)' } },
     );
     const raw = await res.text();
-    // A blocked response is HTML ("<html>…Sorry…"), not JSON. Never accept it.
     if (!raw || raw.charAt(0) !== '[') {
-      googleBackoffUntil = Date.now() + 5 * 60 * 1000;
-      return null;
+      gtxBackoffUntil = Date.now() + 5 * 60 * 1000;
+      return { tr: null, why: `html/${res.status}` };
     }
-    const data: any = JSON.parse(raw);
-    const tr = Array.isArray(data[0])
-      ? data[0].map((seg: any) => (seg && typeof seg[0] === 'string' ? seg[0] : '')).join('')
-      : '';
-    return tr && tr !== text ? tr : null;
-  } catch { return null; }
+    const tr = pickTranslation(JSON.parse(raw), text);
+    return { tr, why: tr ? 'ok' : 'unchanged' };
+  } catch (e: any) { return { tr: null, why: `err/${String(e && e.message || e).slice(0, 60)}` }; }
 }
 
-async function myMemoryTranslate(text: string, target: string): Promise<string | null> {
-  // Anonymous MyMemory quota is per-IP; only short Arabic UI strings are worth it.
-  if (!ARABIC_CHARS.test(text) || encodeURIComponent(text).length > 450) return null;
+// Last resort: anonymous MyMemory quota is per-IP, so it can be exhausted on
+// shared Cloudflare egress IPs. Arabic-only and short strings only.
+async function memoryTranslate(text: string, target: string): Promise<TrResult> {
+  if (!ARABIC_CHARS.test(text) || encodeURIComponent(text).length > 450) {
+    return { tr: null, why: 'skipped' };
+  }
   try {
     const res = await fetch(
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=ar%7C${target}`,
       { headers: { Accept: 'application/json' } },
     );
     const data: any = await res.json();
-    if (!data || Number(data.responseStatus) !== 200 || data.quotaFinished) return null;
-    const tr = String((data.responseData && data.responseData.translatedText) || '');
-    if (!tr || tr === text || /MYMEMORY WARNING|QUERY LENGTH|INVALID|QUOTA|PLEASE SELECT/i.test(tr)) return null;
-    return tr;
-  } catch { return null; }
+    if (!data || Number(data.responseStatus) !== 200) return { tr: null, why: `status/${data && data.responseStatus}` };
+    if (data.quotaFinished) return { tr: null, why: 'quota' };
+    const raw = String((data.responseData && data.responseData.translatedText) || '');
+    if (!raw || raw === text || /MYMEMORY WARNING|QUERY LENGTH|INVALID|QUOTA|PLEASE SELECT/i.test(raw)) {
+      return { tr: null, why: `bad/${raw.slice(0, 40)}` };
+    }
+    return { tr: raw, why: 'ok' };
+  } catch (e: any) { return { tr: null, why: `err/${String(e && e.message || e).slice(0, 60)}` }; }
+}
+
+async function translateOne(text: string, target: string, steps?: string[]): Promise<string | null> {
+  const providers = [chromeTranslate, gtxTranslate, memoryTranslate];
+  for (const p of providers) {
+    const r = await p(text, target);
+    if (steps) steps.push(`${p.name}=${r.tr ? 'ok' : r.why}`);
+    if (r.tr) return r.tr;
+  }
+  return null;
 }
 
 app.post('/translate', async (c) => {
@@ -582,6 +616,8 @@ app.post('/translate', async (c) => {
   const target = String(body.target || '').toLowerCase();
   const q = Array.isArray(body.q) ? body.q.slice(0, 60).map((x: any) => String(x||'')) : [];
   if (!['en','fr','es'].includes(target) || !q.length) return c.json({ t: q });
+  const debug = body.debug === true;
+  const diag: any[] = [];
 
   const db: any = c.env.DB;
   await ensureTranslateCache(db);
@@ -597,15 +633,18 @@ app.post('/translate', async (c) => {
       // Self-heal rows poisoned by the old code (out === source text).
       if (row && row.out && row.out !== q[i]) cached = String(row.out);
     } catch { /* no cache table: fall through to live translation */ }
-    if (cached != null) out[i] = cached;
-    else toFetch.push({ i, text: q[i], id });
+    if (cached != null) {
+      out[i] = cached;
+      if (debug) diag.push({ src: q[i], steps: ['cache=hit'], translated: true });
+    } else toFetch.push({ i, text: q[i], id });
   }
 
   for (let k=0; k<toFetch.length; k+=6) {
     await Promise.all(toFetch.slice(k, k+6).map(async (item) => {
-      let tr = await googleTranslate(item.text, target);
-      if (!tr) tr = await myMemoryTranslate(item.text, target);
+      const steps: string[] = [];
+      const tr = await translateOne(item.text, target, debug ? steps : undefined);
       out[item.i] = tr || item.text;
+      if (debug) diag.push({ src: item.text, steps, translated: !!tr });
       // Persist only real translations. INSERT OR REPLACE overwrites stale
       // poisoned rows so subsequent requests are served from cache.
       if (tr) {
@@ -617,7 +656,7 @@ app.post('/translate', async (c) => {
     }));
   }
   for (let i=0; i<q.length; i++) if (out[i] == null) out[i] = q[i];
-  return c.json({ t: out });
+  return c.json(debug ? { t: out, debug: diag } : { t: out });
 });
 
 // Apps List & Categories

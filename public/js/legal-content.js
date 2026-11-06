@@ -54,6 +54,7 @@
             "Detail pages with screenshots, ratings, reviews, likes, reports, category, version and publish/update date.",
             "Google sign-in with mandatory Terms and Privacy consent before access.",
             "A download library, Web Push notifications, and a Telegram group join button on the account page.",
+            "A full notification center, a dedicated offline page, a manual update check, and a New & Updated tab next to Categories.",
             "A standalone /support page for one ongoing text-only chat with the admin; links open in a new tab, no images or voice notes are sent, and there are no in-app notifications.",
             "Four languages, dark/light themes, and a golden chat design. There are currently no payments or subscriptions in the store."
           ]
@@ -274,6 +275,7 @@
             "Pages détaillées avec captures, notes, avis, mentions « J’aime », signalements, catégorie, version et date de publication/mise à jour.",
             "Connexion Google avec consentement obligatoire aux Conditions et à la Confidentialité avant l’accès.",
             "Bibliothèque de téléchargements, notifications Web Push et bouton pour rejoindre le groupe Telegram sur la page Compte.",
+            "Un centre de notifications complet, une page hors ligne dédiée, une vérification manuelle des mises à jour et un onglet « Nouveautés et mises à jour » à côté des Catégories.",
             "Page /support pour une conversation texte unique avec l’admin ; les liens s’ouvrent dans un nouvel onglet, aucune image ni note vocale n’est envoyée, et aucune notification interne n’est générée.",
             "Quatre langues, thèmes clair/sombre et design doré pour le chat. Aucun paiement ni abonnement n’est proposé actuellement."
           ]
@@ -494,6 +496,7 @@
             "Páginas de detalle con capturas, valoraciones, reseñas, «me gusta», reportes, categoría, versión y fecha de publicación/actualización.",
             "Acceso con Google y consentimiento obligatorio de Términos y Privacidad antes de entrar.",
             "Biblioteca de descargas, notificaciones Web Push y botón para unirse al grupo de Telegram en la página Cuenta.",
+            "Un centro de notificaciones completo, una página sin conexión dedicada, una comprobación manual de actualizaciones y una pestaña «Novedades y actualizaciones» junto a Categorías.",
             "Página /support con un único chat de texto con el administrador; los enlaces se abren en una pestaña nueva, no se envían imágenes ni notas de voz y no hay notificaciones internas.",
             "Cuatro idiomas, temas claro/oscuro y diseño dorado en el chat. Actualmente no hay pagos ni suscripciones en la tienda."
           ]

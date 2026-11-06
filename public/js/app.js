@@ -290,17 +290,14 @@
 
   /* ===================================================================
      Screenshots — large orientation-aware cards + full-screen lightbox.
+     Gesture-only viewer: hand swipe / mouse drag, X to close, backdrop and
+     keyboard. No counter, no bottom hint line, no thumbnail strip.
      New control labels are translated here (not via lang.js) so en/fr/es
      keep working while lang.js stays untouched.
      =================================================================== */
   const GALLERY_I18N = {
     'معرض لقطات الشاشة': { en: 'Screenshots', fr: 'Captures d’écran', es: 'Capturas de pantalla' },
     'تعذّر تحميل الصورة': { en: 'Could not load image', fr: 'Impossible de charger l’image', es: 'No se pudo cargar la imagen' },
-    'اسحب للتنقل بين الصور': {
-      en: 'Swipe or drag to browse',
-      fr: 'Glissez ou faites glisser pour parcourir',
-      es: 'Desliza o arrastra para navegar',
-    },
   };
   function gt(ar) {
     let lang = 'ar';
@@ -327,9 +324,6 @@
     const img = el('img', { class: 'lb-image', alt: '', draggable: 'false' });
     const errLine = el('div', { class: 'lb-error' });
     const stage = el('div', { class: 'lb-stage' }, img, errLine);
-    const counter = el('div', { class: 'lb-counter', 'aria-live': 'polite' });
-    const thumbs = el('div', { class: 'lb-thumbs' });
-    const hint = el('div', { class: 'lb-hint' }, gt('اسحب للتنقل بين الصور'));
     const closeBtn = el('button', {
       class: 'lb-close', type: 'button',
       'aria-label': t('إغلاق'), title: t('إغلاق'),
@@ -344,20 +338,8 @@
       },
     },
       closeBtn,
-      el('div', { class: 'lb-topbar' }, counter),
       stage,
-      el('div', { class: 'lb-footer' }, hint, thumbs),
     );
-
-    const thumbNodes = list.map((url, i) => {
-      const b = el('button', {
-        class: 'lb-thumb', type: 'button',
-        'aria-label': `${gt('معرض لقطات الشاشة')} ${i + 1} / ${list.length}`,
-        onclick: (e) => { e.stopPropagation(); show(i); },
-      }, el('img', { src: url, alt: '', loading: 'lazy' }));
-      thumbs.append(b);
-      return b;
-    });
 
     function preload(i) {
       [i - 1, i + 1].forEach((j) => {
@@ -382,18 +364,10 @@
       // A cached image (or re-selecting the same thumbnail) may not fire a
       // second load event — reveal it immediately in that case.
       if (img.complete && img.naturalWidth) img.classList.add('is-ready');
-      counter.textContent = `${index + 1} / ${list.length}`;
-      thumbNodes.forEach((n, k) => {
-        n.classList.toggle('is-active', k === index);
-        if (k === index) n.setAttribute('aria-current', 'true');
-        else n.removeAttribute('aria-current');
-      });
-      const single = list.length < 2;
-      thumbs.hidden = single;
-      hint.hidden = single;
-      if (thumbNodes[index] && typeof thumbNodes[index].scrollIntoView === 'function') {
-        try { thumbNodes[index].scrollIntoView({ block: 'nearest', inline: 'center' }); } catch {}
-      }
+      // Position is exposed as data attributes for assistive tech and tests,
+      // but there is no visible counter, bottom line or thumbnail strip.
+      overlay.dataset.index = String(index + 1);
+      overlay.dataset.total = String(list.length);
       preload(index);
     }
 
@@ -404,7 +378,7 @@
       else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
       else if (e.key === 'Tab') {
-        const focusables = [closeBtn, ...thumbNodes].filter((n) => !n.hidden);
+        const focusables = [closeBtn];
         if (!focusables.length) return;
         const first = focusables[0], last = focusables[focusables.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }

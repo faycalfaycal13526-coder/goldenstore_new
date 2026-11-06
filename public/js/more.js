@@ -21,6 +21,7 @@
     // Sorted by rating, so everything after the first unrated app is unrated too → stop there.
     top: { sort: 'rating', ratedOnly: true, title: { _: 'الأعلى تقييماً' } },
     similar: { sort: 'popular', title: { game: 'ألعاب مماثلة', _: 'تطبيقات مماثلة' } },
+    new: { sort: 'recent', title: { app: 'الجديد والمحدّث', game: 'الجديد والمحدّث', _: 'الجديد والمحدّث' } },
   };
   const sectionKey = Object.prototype.hasOwnProperty.call(SECTIONS, getQuery('section')) ? getQuery('section') : 'recommended';
   const section = SECTIONS[sectionKey];

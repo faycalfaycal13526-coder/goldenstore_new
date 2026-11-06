@@ -380,6 +380,9 @@
             renderSettings();
           }),
           langSettingItem(),
+          settingItem('refresh', t('التحقق من وجود تحديثات'),
+            t('الإصدار') + ' ' + (S.getCurrentAppVersion ? S.getCurrentAppVersion() : '—'),
+            () => { if (S.checkForUpdates) S.checkForUpdates({}); }),
         ),
         telegramCard(),
         supportEntry(),

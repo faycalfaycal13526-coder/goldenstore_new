@@ -63,6 +63,14 @@
             "destination": "/terms.html"
         },
         {
+            "source": "/notifications",
+            "destination": "/notifications.html"
+        },
+        {
+            "source": "/offline",
+            "destination": "/offline.html"
+        },
+        {
             "source": "/api/:path*",
             "destination": "https://api.goldenstore.online/api/:path*"
         },

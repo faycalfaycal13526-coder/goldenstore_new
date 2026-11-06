@@ -488,24 +488,40 @@ function skeletonSimilar() {
 function emptyState(title, hint, icon = 'package') {
   return el('div', { class: 'empty' }, ico(icon, 'icon'), el('h3', null, title), hint ? el('p', null, hint) : null);
 }
-function errorState(err) {
-  const offline = err && (err.status === 0 || err.message === 'timeout'
-    || (typeof navigator !== 'undefined' && navigator.onLine === false));
-  if (offline) {
-    return el('div', { class: 'gs-offline-wrap', 'data-noi18n': '' },
-      el('div', { class: 'gs-offline-card', role: 'alert', 'aria-live': 'assertive' },
-        el('div', { class: 'gs-offline-logo' },
-          el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
-        el('span', { class: 'gs-offline-badge' }, t('لا يوجد اتصال بالإنترنت')),
-        el('h3', { class: 'gs-offline-title' }, t('تعذّر الاتصال بالخادم')),
-        el('p', { class: 'gs-offline-hint' }, t('تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.')),
+function offlineScreen() {
+  const online = typeof navigator !== 'undefined' && navigator.onLine !== false;
+  const steps = [
+    t('تأكّد من تشغيل الواي فاي أو بيانات الهاتف.'),
+    t('جرّب فتح صفحة أخرى للتأكد من عمل الإنترنت.'),
+    t('أوقف VPN أو البروكسي مؤقتاً ثم أعد المحاولة.'),
+  ];
+  return el('div', { class: 'gs-offline-wrap', 'data-noi18n': '' },
+    el('div', { class: 'gs-offline-card', role: 'alert', 'aria-live': 'assertive', 'data-noi18n': '' },
+      el('div', { class: 'gs-offline-logo' },
+        el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
+      el('div', { class: `gs-offline-status${online ? ' is-online' : ''}` },
+        el('span', { class: 'dot' }), t(online ? 'الاتصال غير مستقر' : 'أنت غير متصل')),
+      el('span', { class: 'gs-offline-badge' }, t('لا يوجد اتصال بالإنترنت')),
+      el('h1', { class: 'gs-offline-title' }, t('تعذّر الاتصال بالخادم')),
+      el('p', { class: 'gs-offline-hint' }, t('تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.')),
+      el('ol', { class: 'gs-offline-steps' },
+        ...steps.map((step, i) => el('li', null,
+          el('span', { class: 'n' }, String(i + 1)), el('span', null, step)))),
+      el('div', { class: 'gs-offline-actions' },
         el('button', {
           class: 'gs-offline-retry', type: 'button',
           onclick: () => { try { location.reload(); } catch (e) {} },
         }, ico('refresh', 'icon'), t('إعادة المحاولة')),
+        el('a', { class: 'gs-offline-home', href: '/' },
+          ico('home', 'icon'), t('العودة إلى الرئيسية')),
       ),
-    );
-  }
+    ),
+  );
+}
+function errorState(err) {
+  const offline = err && (err.status === 0 || err.message === 'timeout'
+    || (typeof navigator !== 'undefined' && navigator.onLine === false));
+  if (offline) return offlineScreen();
   if (err && err.status >= 500)
     return emptyState(t('الخدمة غير متاحة مؤقتاً'), t('حاول لاحقاً بعد دقائق قليلة.'), 'info');
   return emptyState(t('تعذّر تحميل البيانات'), t('حدّث الصفحة وحاول مجدداً.'), 'info');
@@ -576,63 +592,24 @@ async function refreshBellBadge() {
     badge.classList.add('hidden');
   }
 }
-async function openNotifications() {
-  const overlay = el('div', { class: 'dialog-overlay' });
-  const card = el('div', { class: 'dialog-card' });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-  card.append(
-    el('div', { class: 'dialog-head' },
-      el('div', { class: 'dialog-title' }, ico('bell'), t('الإشعارات')),
-      el('button', { class: 'dialog-close', type: 'button', onclick: () => overlay.remove(), 'aria-label': t('إغلاق') }, ico('close')),
-    ),
-    el('div', { class: 'dialog-body' },
-      el('div', { class: 'notifications-loading' }, el('div', { class: 'spinner' })),
-    ),
-  );
-  overlay.append(card);
-  document.body.append(overlay);
+function openNotifications() {
+  // Notifications are now a standalone full page, not a small dialog.
+  try { location.href = '/notifications'; } catch (e) {}
+}
 
-  let list = [];
-  try {
-    list = await fetchNotifications();
-  } catch {}
+// Shared loader for the standalone notifications page: applies the same
+// per-user baseline as the bell badge, marks everything as seen, refreshes
+// the badge, and returns the curated list.
+async function loadNotificationsForPage() {
+  let list = await fetchNotifications();
   const base = notifBaseline(_user && _user.uid);
   if (base) list = list.filter((n) => Number(n.created_at || 0) > base);
   const seen = maxNotifCreated(list);
   if (seen) setNotifSeenAt(Math.max(notifSeenAt(), seen));
   await refreshBellBadge();
-
-  const body = card.querySelector('.dialog-body');
-  body.innerHTML = '';
-  if (!list.length) {
-    body.append(emptyState(t('لا توجد إشعارات بعد'), '', 'bell'));
-    return;
-  }
-
-  list.forEach((n) => {
-    const type = n.type === 'new_app' || n.type === 'update' || n.type === 'announcement' ? n.type : 'announcement';
-    let row;
-    if (type === 'update' && n.data && n.data.apk_url) {
-      row = el('a', { class: 'notif-row', href: '#', onclick: (e) => { e.preventDefault(); showUpdateDialog(n.data); overlay.remove(); } });
-    } else if (n.app_slug) {
-      row = el('a', { class: 'notif-row', href: `/app?slug=${encodeURIComponent(n.app_slug)}` });
-    } else {
-      row = el('div', { class: 'notif-row' });
-    }
-    row.append(
-      el('div', { class: 'notif-ico' }, ico(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell')),
-      el('div', { class: 'notif-info' },
-        el('div', { class: 'notif-top' },
-          el('strong', null, n.title || ''),
-          el('span', { class: `notif-type notif-type-${type}` }, type === 'new_app' ? t('تطبيق جديد') : type === 'update' ? t('تحديث') : t('إعلان')),
-        ),
-        n.body ? el('div', { class: 'notif-body' }, n.body) : null,
-        el('div', { class: 'notif-meta' }, formatDate(n.created_at)),
-      ),
-    );
-    body.append(row);
-  });
+  return list;
 }
+
 
 function topbarSearch(user) {
   const bellBadge = el('span', { class: 'bell-badge hidden' });
@@ -648,7 +625,7 @@ function topbarSearch(user) {
     type: 'button',
     'aria-label': t('الإشعارات'),
     title: t('الإشعارات'),
-    onclick: openNotifications,
+    onclick: () => { try { location.href = '/notifications'; } catch (e) {} },
   }, ico('bell'), bellBadge);
   Promise.resolve().then(() => refreshBellBadge());
   return el('div', { class: 'topbar' },
@@ -1027,8 +1004,84 @@ function shouldShowUpdate(update) {
   return String(update.version_name) !== getCurrentAppVersion();
 }
 
+function updateApkUrl(update) {
+  return (update && (update.apk_url || update.url)) || '';
+}
+
+function showUpdateCheckCard(kind, update) {
+  const existing = document.getElementById('gs-check-dialog');
+  if (existing) existing.remove();
+  const version = (update && (update.version_name || update.version || '')) || '—';
+  const title = kind === 'up-to-date' ? t('أنت على أحدث إصدار')
+    : kind === 'error' ? t('تعذّر التحقق من التحديثات')
+    : t('أحدث إصدار متاح');
+  const text = kind === 'up-to-date'
+    ? t('نسختك الحالية هي الأحدث. لا يوجد تحديث جديد الآن.')
+    : kind === 'error'
+      ? t('تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.')
+      : t('رابط التحميل الرسمي جاهز في صفحة تحميل Golden Store.');
+
+  const overlay = el('div', { id: 'gs-check-dialog', class: 'gs-check-overlay', role: 'dialog',
+    'aria-modal': 'true', 'data-noi18n': '' });
+  const card = el('div', { class: 'gs-check-card', 'data-noi18n': '' },
+    el('div', { class: 'gs-check-logo' },
+      el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
+    el('h2', { class: 'gs-check-title' }, title),
+    el('p', { class: 'gs-check-text' }, text),
+    kind !== 'error' ? el('span', { class: 'gs-check-version' }, t('الإصدار') + ' ' + version) : null,
+    el('div', { class: 'gs-check-actions' },
+      kind === 'web' ? el('a', { class: 'btn btn-primary btn-lg gs-update-primary', href: '/download' },
+        ico('download'), t('انتقل إلى صفحة التحميل'))
+        : kind === 'error' ? el('button', { class: 'btn btn-primary btn-lg gs-update-primary', type: 'button',
+            onclick: () => { overlay.remove(); checkForUpdates({}); } },
+          ico('refresh'), t('إعادة المحاولة'))
+        : el('button', { class: 'btn btn-primary btn-lg gs-update-primary', type: 'button',
+            onclick: () => overlay.remove() }, ico('check'), t('حسناً')),
+      el('button', { class: 'btn btn-secondary gs-update-later', type: 'button',
+        onclick: () => overlay.remove() }, t('إغلاق')),
+    ),
+  );
+  overlay.append(card);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.append(overlay);
+}
+
+// Manual "check for updates". Works in the browser AND the native app:
+//  - native + newer version  -> the full update dialog
+//  - native + same version   -> "you are up to date"
+//  - browser                 -> latest release info + link to /download
+//  - network failure         -> retryable error card
+async function checkForUpdates(opts = {}) {
+  const btn = opts.button || null;
+  if (btn) { btn.disabled = true; btn.classList.add('is-busy'); }
+  let update = null;
+  try {
+    update = await api('/api/app-update?_=' + Date.now(), { timeoutMs: 8000 });
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
+    showUpdateCheckCard('error', null);
+    return { status: 'error', error: e };
+  }
+  if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); }
+  if (!update || !update.version_name || !updateApkUrl(update)) {
+    showUpdateCheckCard('error', null);
+    return { status: 'error', error: new Error('invalid_update') };
+  }
+  if (isNativeApp()) {
+    if (shouldShowUpdate(update)) {
+      showUpdateDialog(update);
+      return { status: 'available', update };
+    }
+    showUpdateCheckCard('up-to-date', update);
+    return { status: 'up-to-date', update };
+  }
+  showUpdateCheckCard('web', update);
+  return { status: 'latest', update };
+}
+
+
 function showUpdateDialog(update) {
-  if (!update || !update.apk_url) return;
+  if (!update || !updateApkUrl(update)) return;
   const existing = document.getElementById('gs-update-dialog');
   if (existing) existing.remove();
 
@@ -1036,18 +1089,37 @@ function showUpdateDialog(update) {
     id: 'gs-update-dialog', class: 'gs-update-overlay', role: 'dialog',
     'aria-modal': 'true', 'aria-labelledby': 'gs-update-title', 'data-noi18n': '',
   });
+  const apkUrl = updateApkUrl(update);
+  const notes = update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.');
+
   const card = el('div', { class: 'gs-update-card', 'data-noi18n': '' },
-    el('div', { class: 'gs-update-logo' },
-      el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
-    el('div', { class: 'gs-update-head' },
-      el('span', { class: 'gs-update-badge' }, t('تحديث جديد متاح')),
-      el('span', { class: 'gs-update-version' }, t('الإصدار') + ' ' + (update.version_name || '—')),
+    el('div', { class: 'gs-update-hero' },
+      el('div', { class: 'gs-update-logo' },
+        el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
+      el('div', { class: 'gs-update-head' },
+        el('span', { class: 'gs-update-badge' }, t('تحديث جديد متاح')),
+        el('span', { class: 'gs-update-version' }, t('الإصدار') + ' ' + (update.version_name || '—')),
+      ),
+      el('h2', { id: 'gs-update-title', class: 'gs-update-title' }, t('تحديث Golden Store')),
+      el('p', { class: 'gs-update-lead' }, t('نسخة جديدة من Golden Store جاهزة للتثبيت.')),
     ),
-    el('h2', { id: 'gs-update-title', class: 'gs-update-title' }, t('تحديث Golden Store')),
-    el('p', { class: 'gs-update-lead' }, t('نسخة جديدة من Golden Store جاهزة للتثبيت.')),
-    el('div', { class: 'gs-update-notes' },
-      el('span', { class: 'gs-update-notes-label' }, t('ما الجديد')),
-      el('p', null, update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.')),
+    el('div', { class: 'gs-update-body' },
+      el('div', { class: 'gs-update-compare' },
+        el('span', { class: 'gs-update-ver-chip' },
+          el('span', null, t('إصدارك الحالي')), el('strong', null, getCurrentAppVersion())),
+        el('span', { class: 'gs-update-arrow' }, '←'),
+        el('span', { class: 'gs-update-ver-chip is-new' },
+          el('span', null, t('الإصدار الجديد')), el('strong', null, update.version_name || '—')),
+      ),
+      el('div', { class: 'gs-update-notes' },
+        el('span', { class: 'gs-update-notes-label' }, t('ما الجديد')),
+        el('p', null, notes),
+      ),
+      el('div', { class: 'gs-update-chips' },
+        el('span', { class: 'gs-update-chip' }, ico('shield', 'icon'), t('تحميل آمن')),
+        el('span', { class: 'gs-update-chip' }, ico('spark', 'icon'), t('ميزات جديدة')),
+        el('span', { class: 'gs-update-chip' }, ico('clock', 'icon'), t('تثبيت سريع')),
+      ),
     ),
   );
 
@@ -1056,14 +1128,15 @@ function showUpdateDialog(update) {
     if (android && typeof android.downloadApk === 'function') {
       const filename = 'goldenstore-' + (update.version_name || 'update') + '.apk';
       try {
-        android.downloadApk(update.apk_url, filename, 'app-update', 'com.goldenstore.app');
+        android.downloadApk(apkUrl, filename, 'app-update', 'com.goldenstore.app');
         card.innerHTML = '<div class="gs-update-state"><div class="gs-update-state-icon">⬇</div>'
           + '<h2 class="gs-update-state-title">' + t('جارٍ التحميل…') + '</h2>'
-          + '<p class="gs-update-state-text">' + t('سيتم التثبيت تلقائياً عند اكتمال التحميل.') + '</p></div>';
+          + '<p class="gs-update-state-text">' + t('سيتم التثبيت تلقائياً عند اكتمال التحميل.') + '</p>'
+          + '<div class="gs-update-progress"><i></i></div></div>';
         return;
       } catch (e) {}
     }
-    window.open(update.apk_url, '_blank');
+    window.open(apkUrl, '_blank');
     setTimeout(() => overlay.remove(), 200);
   }
 
@@ -1081,6 +1154,11 @@ function showUpdateDialog(update) {
         overlay.remove();
       },
     }, t('لاحقاً')),
+    el('button', {
+      class: 'gs-update-recheck', type: 'button',
+      onclick: () => checkForUpdates({}),
+    }, ico('refresh', 'icon'), t('إعادة التحقق من التحديثات')),
+    el('div', { class: 'gs-update-foot' }, ico('shield', 'icon'), t('التحديث الرسمي من Golden Store')),
   );
   card.append(actions);
 
@@ -1600,7 +1678,7 @@ window.Store = {
   posterCard, listRow, gridCard, featureCarousel, categoryName,
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
-  fetchNotifications, notifUnreadCount, openNotifications,
+  fetchNotifications, notifUnreadCount, openNotifications, loadNotificationsForPage,
   ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
@@ -1609,7 +1687,7 @@ window.Store = {
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
-  checkAppUpdate, showUpdateDialog,
+  checkAppUpdate, checkForUpdates, showUpdateDialog, offlineScreen, getCurrentAppVersion,
 };
 
 document.addEventListener('DOMContentLoaded', boot);

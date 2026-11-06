@@ -1,4 +1,5 @@
 import type { Env } from './env.js';
+import type { AppVideo } from './types.js';
 import { nowSec, randomId } from './utils.js';
 
 export function rowToApp(row: any): any {
@@ -581,4 +582,71 @@ export async function deleteSupportThread(env: Env, threadId: string): Promise<b
     env.DB.prepare('DELETE FROM support_threads WHERE id = ?').bind(threadId),
   ]);
   return true;
+}
+
+
+/* =========================================================================
+   App videos (YouTube + Shorts) — 2026-11-06
+   ========================================================================= */
+const VIDEO_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS app_videos (
+     id TEXT PRIMARY KEY,
+     app_id TEXT NOT NULL,
+     video_id TEXT NOT NULL,
+     kind TEXT NOT NULL DEFAULT 'video',
+     url TEXT NOT NULL,
+     title TEXT,
+     position INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_app_videos_app ON app_videos(app_id, position ASC)`,
+];
+const videoSchemaReady = new WeakSet<object>();
+
+export async function ensureVideosSchema(env: Env): Promise<void> {
+  const db: any = env.DB;
+  if (videoSchemaReady.has(db)) return;
+  for (const sql of VIDEO_SCHEMA) await db.prepare(sql).run();
+  videoSchemaReady.add(db);
+}
+
+function videoFromRow(r: any): AppVideo {
+  return {
+    id: String(r.id), app_id: String(r.app_id), video_id: String(r.video_id),
+    kind: r.kind === 'short' ? 'short' : 'video', url: String(r.url),
+    title: String(r.title || ''), position: Number(r.position) || 0,
+    created_at: Number(r.created_at) || 0,
+  };
+}
+
+export async function listAppVideos(env: Env, app_id: string): Promise<AppVideo[]> {
+  await ensureVideosSchema(env);
+  const r = await env.DB.prepare('SELECT * FROM app_videos WHERE app_id = ? ORDER BY position ASC, created_at ASC').bind(app_id).all();
+  return (r.results || []).map(videoFromRow);
+}
+
+export async function addAppVideo(env: Env, app_id: string, v: {
+  video_id: string; kind: 'video' | 'short'; url: string; title?: string; position?: number;
+}): Promise<AppVideo> {
+  await ensureVideosSchema(env);
+  const row: AppVideo = {
+    id: randomId(), app_id, video_id: v.video_id, kind: v.kind, url: v.url,
+    title: v.title || '', position: Number(v.position) || 0, created_at: nowSec(),
+  };
+  await env.DB.prepare('INSERT INTO app_videos (id, app_id, video_id, kind, url, title, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(row.id, row.app_id, row.video_id, row.kind, row.url, row.title, row.position, row.created_at).run();
+  return row;
+}
+
+export async function deleteAppVideo(env: Env, app_id: string, id: string): Promise<boolean> {
+  await ensureVideosSchema(env);
+  const row = await env.DB.prepare('SELECT id FROM app_videos WHERE id = ? AND app_id = ?').bind(id, app_id).first();
+  if (!row) return false;
+  await env.DB.prepare('DELETE FROM app_videos WHERE id = ? AND app_id = ?').bind(id, app_id).run();
+  return true;
+}
+
+export async function deleteAppVideos(env: Env, app_id: string): Promise<void> {
+  await ensureVideosSchema(env);
+  await env.DB.prepare('DELETE FROM app_videos WHERE app_id = ?').bind(app_id).run();
 }

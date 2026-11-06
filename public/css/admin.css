@@ -562,3 +562,44 @@
   .wa-admin.chat-open .wa-admin-list { display: none; }
   .wa-admin.chat-open .wa-admin-back { display: inline-flex; }
 }
+
+
+/* ---------- YouTube video / Short manager (2026-11-06) ---------- */
+.gs-admin-video-form {
+  display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 14px; align-items: end;
+}
+.gs-admin-video-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.gs-admin-video-empty {
+  padding: 18px; border: 1px dashed var(--line); border-radius: 14px;
+  text-align: center; font-size: 13px; color: var(--text-3);
+}
+.gs-admin-video-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface-2);
+}
+.gs-admin-video-thumb {
+  width: 96px; height: 60px; flex: 0 0 96px;
+  object-fit: cover; border-radius: 9px; background: #000;
+}
+.gs-admin-video-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.gs-admin-video-badge {
+  align-self: flex-start; padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 800;
+  background: rgba(244,192,31,.16); color: var(--gold);
+}
+.gs-admin-video-badge.is-short { background: rgba(229,57,53,.16); color: #e53935; }
+.gs-admin-video-title {
+  font-size: 14px; font-weight: 700; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-admin-video-link {
+  font-size: 11.5px; color: var(--text-3); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-admin-video-link:hover { color: var(--primary); text-decoration: underline; }
+@media (max-width: 760px) {
+  .gs-admin-video-form { grid-template-columns: 1fr; }
+  .gs-admin-video-thumb { width: 80px; height: 52px; flex-basis: 80px; }
+}

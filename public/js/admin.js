@@ -1366,6 +1366,7 @@
     const iconDz = dropzone({ accept: 'image/*', label: 'اختر أيقونة (PNG/JPG)' });
     const featDz = dropzone({ accept: 'image/*', label: 'اختر صورة عرضية (يفضّل 1024×500)' });
     const ssDz = dropzone({ accept: 'image/*', multiple: true, label: 'اختر لقطات الشاشة (متعددة)' });
+    const ve = videoEditor({ videos: [], onAdd: (v) => v, onDelete: () => true });
 
     const form = el('form', { class: 'form', onsubmit: async (e) => {
       e.preventDefault();
@@ -1411,6 +1412,7 @@
           icon_key,
           feature_key,
           screenshot_keys,
+          videos: ve.getVideos(),
         };
         const res = await api('/api/admin/apps', { method: 'POST', body: payload });
         toast('تم رفع التطبيق بنجاح', 'success');
@@ -1458,6 +1460,7 @@
         el('div', { class: 'panel-head' }, ico('image'), 'لقطات الشاشة'),
         ssDz,
       ),
+      ve.panel,
       el('div', { class: 'flex gap-md' },
         el('button', { type: 'submit', class: 'btn btn-primary btn-lg' }, ico('upload'), 'رفع التطبيق'),
         el('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { activeTab = 'apps'; renderApp(); } }, 'إلغاء'),
@@ -1470,7 +1473,7 @@
   async function renderEditApp(body, id) {
     body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
     try {
-      const { app, screenshots } = await api(`/api/admin/apps/${id}`);
+      const { app, screenshots, videos = [] } = await api(`/api/admin/apps/${id}`);
       body.innerHTML = '';
 
       // Header
@@ -1635,10 +1638,26 @@
       ssPanel.append(el('div', { class: 'mt-md' }, ssForm));
       body.append(ssPanel);
 
+      // YouTube videos / Shorts
+      const ve = videoEditor({
+        videos,
+        onAdd: async (v) => {
+          const r = await api(`/api/admin/apps/${id}/videos`, {
+            method: 'POST', body: { url: v.url, title: v.title, kind: v.kind },
+          });
+          return r.video;
+        },
+        onDelete: async (v) => {
+          await api(`/api/admin/apps/${id}/videos/${v.id}`, { method: 'DELETE' });
+          return true;
+        },
+      });
+      body.append(ve.panel);
+
       // Danger zone
       body.append(el('div', { class: 'panel' },
         el('div', { class: 'panel-head', style: 'border-color: var(--danger);' }, ico('trash'), 'منطقة الخطر'),
-        el('p', { class: 'muted', style: 'font-size:13px;' }, 'حذف التطبيق يحذف ملف APK والأيقونة وجميع اللقطات نهائياً.'),
+        el('p', { class: 'muted', style: 'font-size:13px;' }, 'حذف التطبيق يحذف ملف APK والأيقونة وجميع اللقطات والفيديوهات نهائياً.'),
         el('button', { class: 'btn btn-danger mt-md', onclick: async () => {
           if (!confirm(`حذف «${app.name}» نهائياً؟`)) return;
           try {
@@ -1679,6 +1698,136 @@
   }
   function formRow(...children) {
     return el('div', { class: 'form-row' }, ...children);
+  }
+
+  /* ---------- YouTube video links (2026-11-06) --------------------------
+     Same URL rules as the Worker: only youtube.com / youtu.be /
+     youtube-nocookie.com, an 11-char id, /shorts/ auto-detected but
+     overridable with the explicit type selector. */
+  function parseYouTubeUrl(raw, kindHint) {
+    const str = String(raw == null ? '' : raw).trim();
+    if (!str || str.length > 500) return null;
+    let id = '', short = false;
+    try {
+      if (/^[A-Za-z0-9_-]{11}$/.test(str)) id = str;
+      else {
+        const u = new URL(str);
+        if (!/^https?:$/.test(u.protocol)) return null;
+        const host = u.hostname.toLowerCase().replace(/^(www\.|m\.)/, '');
+        const path = u.pathname || '';
+        if (host === 'youtu.be') id = path.split('/').filter(Boolean)[0] || '';
+        else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+          if (path.indexOf('/shorts/') === 0) { id = path.split('/')[2] || ''; short = true; }
+          else if (/^\/(embed|v|e|live)\//.test(path)) id = path.split('/')[2] || '';
+          else if (path === '/watch' || path === '/watch/') id = u.searchParams.get('v') || '';
+          else if (path.indexOf('/watch/') === 0) id = path.split('/')[2] || '';
+        }
+      }
+    } catch { return null; }
+    id = String(id).split(/[?&#/]/)[0] || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+    const hint = String(kindHint || 'auto');
+    const kind = hint === 'short' ? 'short' : hint === 'video' ? 'video' : (short ? 'short' : 'video');
+    const url = kind === 'short'
+      ? `https://www.youtube.com/shorts/${id}`
+      : `https://www.youtube.com/watch?v=${id}`;
+    return { video_id: id, kind, url };
+  }
+  function videoThumb(id) { return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`; }
+
+  function videoEditor(opts) {
+    opts = opts || {};
+    let items = (opts.videos || []).slice();
+    const list = el('div', { class: 'gs-admin-video-list' });
+    const urlInput = el('input', {
+      class: 'input', type: 'url', placeholder: 'https://youtube.com/watch?v=…  ·  youtu.be/…  ·  /shorts/…',
+      'aria-label': t('رابط فيديو يوتيوب'),
+    });
+    const titleInput = el('input', {
+      class: 'input', type: 'text', placeholder: t('عنوان الفيديو (اختياري)'),
+      'aria-label': t('عنوان الفيديو (اختياري)'),
+    });
+    const kindSelect = el('select', { class: 'input', 'aria-label': t('نوع الفيديو') },
+      el('option', { value: 'auto' }, t('اكتشاف تلقائي')),
+      el('option', { value: 'video' }, t('فيديو عادي')),
+      el('option', { value: 'short' }, t('شورت')));
+    const addBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: add },
+      ico('plus'), t('إضافة فيديو'));
+
+    function renderList() {
+      list.innerHTML = '';
+      if (!items.length) {
+        list.append(el('div', { class: 'gs-admin-video-empty' }, t('لا توجد فيديوهات بعد')));
+        return;
+      }
+      items.forEach((v) => {
+        const isShort = v.kind === 'short';
+        list.append(el('div', { class: 'gs-admin-video-row' },
+          el('img', {
+            class: 'gs-admin-video-thumb', src: videoThumb(v.video_id),
+            alt: t('صورة مصغّرة للفيديو'), loading: 'lazy',
+          }),
+          el('div', { class: 'gs-admin-video-meta' },
+            el('span', { class: `gs-admin-video-badge${isShort ? ' is-short' : ''}` },
+              isShort ? t('شورت') : t('فيديو')),
+            el('div', { class: 'gs-admin-video-title' }, v.title || v.url),
+            el('a', { class: 'gs-admin-video-link', href: v.url, target: '_blank',
+              rel: 'noopener noreferrer nofollow' }, v.url),
+          ),
+          el('button', {
+            class: 'btn btn-sm btn-danger', type: 'button',
+            'aria-label': t('حذف الفيديو'), title: t('حذف الفيديو'),
+            onclick: async () => {
+              if (!confirm(t('حذف هذا الفيديو؟'))) return;
+              try {
+                const done = await opts.onDelete(v);
+                if (done === false) throw new Error('not_found');
+                items = items.filter((x) => x !== v);
+                renderList();
+                toast(t('تم حذف الفيديو'), 'success');
+              } catch { toast(t('فشل حذف الفيديو'), 'error'); }
+            },
+          }, ico('trash')),
+        ));
+      });
+    }
+
+    async function add() {
+      const parsed = parseYouTubeUrl(urlInput.value, kindSelect.value);
+      if (!parsed || items.some((x) => x.video_id === parsed.video_id)) {
+        toast(t('رابط يوتيوب غير صالح'), 'error'); return;
+      }
+      const v = { ...parsed, title: titleInput.value.trim() };
+      try {
+        const saved = await opts.onAdd(v);
+        items.push(saved || v);
+        urlInput.value = ''; titleInput.value = ''; kindSelect.value = 'auto';
+        renderList();
+        toast(t('تمت إضافة الفيديو'), 'success');
+      } catch { toast(t('فشل إضافة الفيديو'), 'error'); }
+    }
+
+    const panel = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('youtube'), t('فيديوهات يوتيوب')),
+      el('p', { class: 'muted', style: 'font-size:13px;' },
+        t('أضف روابط فيديوهات يوتيوب') + ' — ' + t('اكتشاف تلقائي')),
+      el('div', { class: 'gs-admin-video-form' },
+        el('div', { class: 'field' },
+          el('label', null, t('رابط فيديو يوتيوب')), urlInput,
+          el('div', { class: 'hint' }, 'youtube.com/watch?v=…  ·  youtu.be/…  ·  youtube.com/shorts/…')),
+        el('div', { class: 'field' },
+          el('label', null, t('عنوان الفيديو (اختياري)')), titleInput),
+        el('div', { class: 'field' },
+          el('label', null, t('نوع الفيديو')), kindSelect),
+      ),
+      el('div', { class: 'mt-md' }, addBtn),
+      list,
+    );
+    renderList();
+    return {
+      panel,
+      getVideos: () => items.map((v) => ({ url: v.url, title: v.title || '', kind: v.kind })),
+    };
   }
   function categoryField(name, value, typeSelectName) {
     const sel = el('select', { name });

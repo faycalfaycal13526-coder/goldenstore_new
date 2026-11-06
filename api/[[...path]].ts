@@ -9,6 +9,7 @@ import {
   createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
   addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
   ensureSupportSchema,
+  ensureVideosSchema, listAppVideos, addAppVideo, deleteAppVideo, deleteAppVideos,
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
@@ -16,7 +17,7 @@ import {
   r2AbortMultipartUpload, r2ConfigureCors,
 } from '../lib/r2.js';
 import { COOKIE_NAME, constantTimeEqual, signJwt, verifyJwt } from '../lib/auth.js';
-import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt, sha1Hex, sha256Hex } from '../lib/utils.js';
+import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt, sha1Hex, sha256Hex, parseYouTubeUrl } from '../lib/utils.js';
 import { DEFAULT_CATEGORIES, APP_CATEGORIES, GAME_CATEGORIES, type App, type Category, type Screenshot } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
 
@@ -124,6 +125,20 @@ function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
   };
   if (includeInternalKeys) { result.apk_key = d.apk_key; result.icon_key = d.icon_key; result.feature_key = d.feature_key; }
   return result;
+}
+
+/** Never let a missing D1 table break a public app page. */
+async function videosFor(env: Env, appId: string): Promise<any[]> {
+  try {
+    const rows = await listAppVideos(env, appId);
+    return rows.map(v => ({
+      id: v.id, video_id: v.video_id, kind: v.kind, url: v.url,
+      title: v.title || '', position: v.position,
+    }));
+  } catch (e: any) {
+    console.error('[videos] list failed:', e?.message || e);
+    return [];
+  }
 }
 
 // Accepted report reasons are stable codes. The human-readable label is what
@@ -516,8 +531,9 @@ app.get('/apps/:slug', async (c) => {
   const screenshotsData = await listScreenshots(c.env, appData.id);
   // استخدام shot_url بدقة 720 لجلب صور الشاشات
   const screenshots = screenshotsData.map(s => ({ id: s.id, position: s.position, url: shot_url(s.r2_key, c.env) }));
+  const videos = await videosFor(c.env, appData.id);
   
-  return c.json({ app: { ...appPublic(appData), icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env) }, screenshots });
+  return c.json({ app: { ...appPublic(appData), icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env) }, screenshots, videos });
 });
 
 app.get('/apps/:slug/download', async (c) => {
@@ -931,7 +947,8 @@ app.get('/admin/apps/:id', async (c) => {
   const doc: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   if (!doc) return c.json({ error: 'not_found' }, 404);
   const ss = await c.env.DB.prepare('SELECT * FROM screenshots WHERE app_id = ? ORDER BY position ASC').bind(doc.id).all();
-  return c.json({ app: { ...appPublic(doc, true), icon_url: icon_url(doc.icon_key, c.env), feature_url: feature_url(doc.feature_key, c.env) }, screenshots: (ss.results || []).map((s: any) => ({ ...s, url: icon_url(s.r2_key, c.env) })) });
+  const videos = await videosFor(c.env, doc.id);
+  return c.json({ app: { ...appPublic(doc, true), icon_url: icon_url(doc.icon_key, c.env), feature_url: feature_url(doc.feature_key, c.env) }, screenshots: (ss.results || []).map((s: any) => ({ ...s, url: icon_url(s.r2_key, c.env) })), videos });
 });
 
 // Uploads (R2)
@@ -990,6 +1007,16 @@ app.post('/admin/apps', async (c) => {
     }
   }
   
+  if (Array.isArray(body.videos)) {
+    await ensureVideosSchema(c.env);
+    for (let j = 0; j < Math.min(body.videos.length, 12); j++) {
+      const raw = body.videos[j];
+      const parsed = parseYouTubeUrl(raw && raw.url, raw && raw.kind);
+      if (!parsed) continue;
+      await addAppVideo(c.env, id, { ...parsed, title: sanitizeText(raw && raw.title, 120), position: j });
+    }
+  }
+
   if ((await getStoreSettings(c.env)).notify_new_publications) await addNotification(c.env, { type: 'new_app', title: body.name, body: '', app_slug: slug, created_at: now });
   
   // إبطال الكاش بعد الإضافة
@@ -1072,6 +1099,30 @@ app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {
   return c.json({ ok: true });
 });
 
+app.post('/admin/apps/:id/videos', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = parseYouTubeUrl(body.url, body.kind);
+  if (!parsed) return c.json({ error: 'invalid_youtube_url' }, 400);
+  const exists: any = await c.env.DB.prepare('SELECT id FROM apps WHERE id = ?').bind(id).first();
+  if (!exists) return c.json({ error: 'not_found' }, 404);
+  await ensureVideosSchema(c.env);
+  const max: any = await c.env.DB.prepare('SELECT MAX(position) AS max_pos FROM app_videos WHERE app_id = ?').bind(id).first();
+  const pos = (Number(max?.max_pos) || -1) + 1;
+  const video = await addAppVideo(c.env, id, { ...parsed, title: sanitizeText(body.title, 120), position: pos });
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ ok: true, video });
+});
+
+app.delete('/admin/apps/:id/videos/:vid', async (c) => {
+  const id = c.req.param('id'), vid = c.req.param('vid');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(vid)) return c.json({ error: 'invalid_id' }, 400);
+  const ok = await deleteAppVideo(c.env, id, vid);
+  if (!ok) return c.json({ error: 'not_found' }, 404);
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ ok: true });
+});
+
 app.delete('/admin/apps/:id', async (c) => {
   const id = c.req.param('id'), app: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(id).first();
   if (!app) return c.json({ error: 'not_found' }, 404);
@@ -1079,6 +1130,7 @@ app.delete('/admin/apps/:id', async (c) => {
   const ss = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE app_id = ?').bind(id).all();
   for (const s of (ss.results||[])) if (s.r2_key) await r2Delete(c.env, s.r2_key as string).catch(()=>{});
   await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(id).run();
+  await deleteAppVideos(c.env, id).catch(() => {});
   
   if (app.apk_key) await r2Delete(c.env, app.apk_key).catch(()=>{});
   if (app.icon_key) await r2Delete(c.env, app.icon_key).catch(()=>{});

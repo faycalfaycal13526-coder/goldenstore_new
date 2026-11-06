@@ -103,3 +103,45 @@ export function sanitizeQuery(obj: unknown): Record<string, unknown> {
   }
   return safe;
 }
+
+/** Parse a YouTube watch / shorts / youtu.be / embed URL (or a bare 11-char
+ *  id) into a safe canonical record. Rejects every other host and protocol. */
+export function parseYouTubeUrl(input: unknown, kindHint?: unknown): { video_id: string; kind: 'video' | 'short'; url: string } | null {
+  const raw = String(input == null ? '' : input).trim();
+  if (!raw || raw.length > 500) return null;
+  let id = '';
+  let detectedShort = false;
+  try {
+    if (/^[A-Za-z0-9_-]{11}$/.test(raw)) {
+      id = raw;
+    } else {
+      const u = new URL(raw);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      const host = u.hostname.toLowerCase().replace(/^(www\.|m\.)/, '');
+      const path = u.pathname || '';
+      if (host === 'youtu.be') {
+        id = path.split('/').filter(Boolean)[0] || '';
+      } else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+        if (path.indexOf('/shorts/') === 0) {
+          id = path.split('/')[2] || ''; detectedShort = true;
+        } else if (/^\/(embed|v|e|live)\//.test(path)) {
+          id = path.split('/')[2] || '';
+        } else if (path === '/watch' || path === '/watch/') {
+          id = u.searchParams.get('v') || '';
+        } else if (path.indexOf('/watch/') === 0) {
+          id = path.split('/')[2] || '';
+        }
+      }
+    }
+  } catch { return null; }
+  id = String(id).split(/[?&#/]/)[0] || '';
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+  const hint = String(kindHint || 'auto');
+  const kind: 'video' | 'short' = hint === 'short' ? 'short'
+    : hint === 'video' ? 'video'
+    : detectedShort ? 'short' : 'video';
+  const url = kind === 'short'
+    ? `https://www.youtube.com/shorts/${id}`
+    : `https://www.youtube.com/watch?v=${id}`;
+  return { video_id: id, kind, url };
+}

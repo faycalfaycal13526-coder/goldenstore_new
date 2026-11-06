@@ -35,6 +35,17 @@ export interface Screenshot {
   created_at: number;
 }
 
+export interface AppVideo {
+  id: string;
+  app_id: string;
+  video_id: string;
+  kind: 'video' | 'short';
+  url: string;
+  title: string;
+  position: number;
+  created_at: number;
+}
+
 export interface Category {
   slug: string;
   name: string;

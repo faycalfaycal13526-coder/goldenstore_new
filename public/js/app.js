@@ -309,10 +309,12 @@
 
   let closeActiveGallery = null;
 
-  function openGallery(urls, startIndex, trigger) {
+  function openGallery(urls, startIndex, trigger, labelOverride) {
     const list = (Array.isArray(urls) ? urls : []).filter((u) => typeof u === 'string' && u.trim());
     if (!list.length) return;
     if (closeActiveGallery) closeActiveGallery();
+    const label = typeof labelOverride === 'string' && labelOverride.trim()
+      ? labelOverride : gt('معرض لقطات الشاشة');
     let index = Math.max(0, Math.min(Number(startIndex) || 0, list.length - 1));
     const prevFocus = document.activeElement;
     const prevOverflow = document.body.style.overflow;
@@ -331,7 +333,7 @@
     }, ico('close', 'icon'));
     const overlay = el('div', {
       class: 'gs-lightbox', role: 'dialog', 'aria-modal': 'true',
-      'aria-label': gt('معرض لقطات الشاشة'), tabindex: '-1',
+      'aria-label': label, tabindex: '-1',
       onclick: (e) => {
         if (Date.now() - lastDragAt < 300) return;
         if (e.target === overlay || e.target === stage) close();
@@ -353,7 +355,7 @@
       index = (i + list.length) % list.length;
       img.classList.remove('is-ready');
       errLine.textContent = '';
-      img.alt = `${gt('معرض لقطات الشاشة')} — ${index + 1} / ${list.length}`;
+      img.alt = `${label} — ${index + 1} / ${list.length}`;
       img.onload = () => img.classList.add('is-ready');
       img.onerror = () => {
         img.classList.remove('is-ready');
@@ -449,9 +451,112 @@
   // Backwards-compatible single-image entry point.
   function openModal(src) { openGallery([src], 0); }
 
-  function renderScreenshots(screenshots) {
+  /* -------------------------------------------------------------------
+     YouTube videos / Shorts — Play Store-style thumbnails inside the very
+     same swipeable strip as the screenshots, plus an inline player with an
+     explicit "open on YouTube" link. Only a validated 11-char id is used.
+     ------------------------------------------------------------------- */
+  function safeVideoId(v) {
+    const id = String((v && v.video_id) || '');
+    return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : '';
+  }
+  function videoThumb(id) { return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`; }
+
+  function openVideo(v, trigger) {
+    const id = safeVideoId(v);
+    if (!id) return;
+    if (closeActiveGallery) closeActiveGallery();
+    const isShort = !!(v && v.kind === 'short');
+    const label = isShort ? t('شورت يوتيوب') : t('فيديو يوتيوب');
+    const prevOverflow = document.body.style.overflow;
+    const prevFocus = document.activeElement;
+    let closed = false;
+    const frame = el('iframe', {
+      class: 'gs-video-frame',
+      src: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1`,
+      title: label,
+      allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+      allowfullscreen: 'true',
+      referrerpolicy: 'strict-origin-when-cross-origin',
+      loading: 'eager',
+    });
+    const stage = el('div', { class: `gs-video-stage${isShort ? ' is-short' : ''}` }, frame);
+    const openLink = el('a', {
+      class: 'gs-video-open',
+      href: (v && v.url) || (isShort ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}`),
+      target: '_blank', rel: 'noopener noreferrer nofollow',
+    }, ico('external', 'icon icon-sm'), t('فتح في يوتيوب'));
+    const closeBtn = el('button', {
+      class: 'gs-video-close', type: 'button',
+      'aria-label': t('إغلاق'), title: t('إغلاق'), onclick: () => close(),
+    }, ico('close', 'icon'));
+    const overlay = el('div', {
+      class: 'gs-video-modal', role: 'dialog', 'aria-modal': 'true',
+      'aria-label': label, tabindex: '-1',
+      onclick: (e) => { if (e.target === overlay) close(); },
+    },
+      closeBtn,
+      stage,
+      el('div', { class: 'gs-video-bar' },
+        el('span', { class: 'gs-video-label' }, ico('youtube', 'icon icon-sm'), label),
+        openLink),
+    );
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Tab') {
+        const first = closeBtn, last = openLink;
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    }
+    function close() {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      document.body.style.overflow = prevOverflow;
+      if (closeActiveGallery === close) closeActiveGallery = null;
+      const target = (trigger && trigger.focus) ? trigger : prevFocus;
+      if (target && typeof target.focus === 'function') { try { target.focus(); } catch {} }
+    }
+    document.addEventListener('keydown', onKey, true);
+    document.body.style.overflow = 'hidden';
+    document.body.append(overlay);
+    closeActiveGallery = close;
+    try { overlay.focus(); } catch {}
+  }
+
+  function renderScreenshots(screenshots, videos = []) {
     const urls = (screenshots || []).map((x) => (x && x.url) || '').filter(Boolean);
-    const shots = el('div', { class: 'shots', role: 'list', 'aria-label': t('لقطات الشاشة') });
+    const safeVideos = (videos || []).filter((v) => safeVideoId(v));
+    const shots = el('div', {
+      class: 'shots', role: 'list',
+      'aria-label': safeVideos.length ? t('الفيديوهات واللقطات') : t('لقطات الشاشة'),
+    });
+
+    // Play Store puts the video before the stills; Shorts get a portrait card.
+    safeVideos.forEach((v, vi) => {
+      const id = safeVideoId(v);
+      const isShort = v.kind === 'short';
+      const kindLabel = isShort ? t('شورت يوتيوب') : t('فيديو يوتيوب');
+      const card = el('button', {
+        class: `gs-video-card is-${isShort ? 'short' : 'video'}`,
+        type: 'button', role: 'listitem',
+        'aria-label': v.title ? `${kindLabel} — ${v.title}` : kindLabel,
+        onclick: () => openVideo(v, card),
+      },
+        el('img', {
+          class: 'gs-video-thumb', src: videoThumb(id), alt: '',
+          draggable: 'false', decoding: 'async', loading: vi < 2 ? 'eager' : 'lazy',
+        }),
+        el('span', { class: 'gs-video-play', 'aria-hidden': 'true' }, ico('play', 'icon')),
+        el('span', { class: 'gs-video-yt', 'aria-hidden': 'true' }, ico('youtube', 'icon icon-sm')),
+        isShort ? el('span', { class: 'gs-video-short' }, t('شورت')) : null,
+        v.title ? el('span', { class: 'gs-video-title' }, v.title) : null,
+      );
+      shots.append(card);
+    });
+
     urls.forEach((url, i) => {
       const img = el('img', {
         class: 'shot-img', src: url, alt: '', draggable: 'false', decoding: 'async',
@@ -520,10 +625,10 @@
 
     if (!slug) { content.innerHTML = ''; content.append(S.emptyState(t('لا يوجد تطبيق محدد'), t('الرابط غير صحيح.'), 'info')); return; }
 
-    let app, screenshots;
+    let app, screenshots, videos;
     try {
       const data = await api(`/api/apps/${encodeURIComponent(slug)}`);
-      app = data.app; screenshots = data.screenshots || [];
+      app = data.app; screenshots = data.screenshots || []; videos = data.videos || [];
     } catch (e) {
       content.innerHTML = '';
       const errTitle = (e && (e.status === 0 || e.message === 'timeout')) ? t('تعذّر الاتصال بالخادم') : t('التطبيق غير موجود');
@@ -536,8 +641,17 @@
     nav.querySelector('.title') && (nav.querySelector('.title').textContent = '');
     content.innerHTML = '';
 
+    const iconInner = app.icon_url ? el('img', { src: app.icon_url, alt: app.name }) : ico('package', 'icon icon-lg');
+    const iconBtn = app.icon_url ? el('button', {
+      class: 'd-icon is-zoomable', type: 'button',
+      'aria-label': t('اضغط لتكبير صورة التطبيق'), title: t('اضغط لتكبير صورة التطبيق'),
+      onclick: () => {
+        const media = [app.icon_url, app.feature_url].filter(Boolean);
+        openGallery(media, 0, iconBtn, t('صورة التطبيق'));
+      },
+    }, iconInner) : el('div', { class: 'd-icon' }, iconInner);
     content.append(el('div', { class: 'd-head' },
-      el('div', { class: 'd-icon' }, app.icon_url ? el('img', { src: app.icon_url, alt: app.name }) : ico('package', 'icon icon-lg')),
+      iconBtn,
       el('div', { class: 'd-titles' },
         el('div', { class: 'd-name' }, app.name),
         el('div', { class: 'd-dev' }, app.developer || S.STORE.name),
@@ -556,7 +670,7 @@
     content.append(installControl(app));
     content.append(el('div', { class: 'd-note' }, t('سيتم تنزيل ملف APK') + ` (${formatBytes(app.size_bytes || 0)}). ` + t('فعّل «تثبيت من مصادر غير معروفة» لإكمال التثبيت.')));
 
-    if (screenshots.length) content.append(renderScreenshots(screenshots));
+    if (screenshots.length || videos.length) content.append(renderScreenshots(screenshots, videos));
 
     if (app.short_description || app.description) {
       content.append(el('div', { class: 'd-section' },

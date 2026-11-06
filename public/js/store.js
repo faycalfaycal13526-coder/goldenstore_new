@@ -821,6 +821,23 @@ async function authedApi(path, opts = {}) {
   return api(path, { ...opts, headers });
 }
 
+/* Facebook-splash style "from" brand lockup. The /login page ships it as
+   static markup; every in-app Google sign-in gate built below gets the same
+   component so the attribution is visible wherever the Google button is.
+   Decorative only: no link, no action, no pointer events. */
+function fromBrandLockup() {
+  return el('div', { class: 'gs-from', role: 'img', 'aria-label': 'from The Pirate Bay' },
+    el('span', { class: 'gs-from-label' }, 'from'),
+    el('img', {
+      class: 'gs-from-mark', src: '/images/from-the-pirate-bay.png',
+      alt: 'The Pirate Bay', width: '735', height: '490',
+    }));
+}
+function addFromBrand(host) {
+  if (!host || host.querySelector('.gs-from')) return;
+  host.append(fromBrandLockup());
+}
+
 function requireAuth() {
   if (_user) return Promise.resolve(_user);
   return new Promise((resolve, reject) => {
@@ -867,6 +884,7 @@ function requireAuth() {
       authConsent.remove();
       authGoogleBtn.after(authConsent);
     }
+    addFromBrand(card);
     overlay.append(card);
     document.body.append(overlay);
   });
@@ -894,6 +912,7 @@ function showAuthGate() {
     el('div', { class: 'gate-error hidden' }),
   );
   gate.append(inner);
+  addFromBrand(gate);
   document.body.append(gate);
   // Keep the consent row directly BELOW the Google button (matches login.html).
   const gateGoogleBtn = gate.querySelector('.auth-google-btn');

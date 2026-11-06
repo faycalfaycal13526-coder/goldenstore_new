@@ -892,15 +892,17 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .gate-error.hidden { display: none; }
 
-/* ---------- Login: "from" brand lockup (Facebook splash style) ----------
-   Scoped to the dedicated login page so no other gate/modal is affected.
-   The supplied artwork is black on white, so it sits on its own white plate
-   and stays identical in both dark and light themes. */
-body[data-page="login"] .gate { padding-bottom: 160px; }
+/* ---------- Auth gates: "from" brand lockup (Facebook splash style) -------
+   One component used by the dedicated /login page AND by the two in-app
+   Google sign-in gates that store.js builds dynamically. It is the last
+   child of the full-screen .gate, so margin-top:auto pins it to the bottom
+   exactly like "from Meta" on the Facebook splash. The supplied artwork is
+   black on white, so it keeps its own white plate in both themes. */
 .gs-from {
-  position: fixed; inset-inline: 0; bottom: max(22px, env(safe-area-inset-bottom));
-  z-index: 101; display: flex; flex-direction: column; align-items: center;
-  gap: 5px; text-align: center; pointer-events: none;
+  margin-top: auto; align-self: stretch;
+  padding-top: 34px; padding-bottom: max(22px, env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  text-align: center; pointer-events: none;
 }
 .gs-from-label {
   font-family: 'Roboto', Arial, system-ui, sans-serif; font-size: 17px;
@@ -913,6 +915,10 @@ body[data-page="login"] .gate { padding-bottom: 160px; }
   box-shadow: 0 4px 16px rgba(0,0,0,.22);
 }
 @media (max-width: 380px) { .gs-from-mark { width: 132px; } }
+/* Inside the centered auth-required dialog (not full-screen): inline footer. */
+.auth-required-card .gs-from {
+  margin-top: 20px; padding-top: 0; padding-bottom: 2px;
+}
 
 /* ---------- Account ---------- */
 .acct-page { padding: 16px; }

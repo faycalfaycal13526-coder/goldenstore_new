@@ -4,7 +4,7 @@ import { verifyFirebaseToken, getAuthAdmin } from '../lib/firebase.js';
 import {
   broadcastPush, sendDirectPush, buildPushPayload, registerPushToken, setPushPreference,
   unregisterPushToken, ensurePushSchema, processPushJob, syncTopicSubscriptions,
-  pushTokenStats, listPushLogs,
+  pushTokenStats, pushDiagnostics, listPushLogs, listPushRegistrations,
 } from '../lib/push.js';
 import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
@@ -439,8 +439,8 @@ app.post('/notifications/register-token', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const token = String(body.token || '').trim();
   if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
-  // Android 13+ POST_NOTIFICATIONS: the client reports the OS permission and
-  // the opt-in flag. Denied tokens are removed and never targeted again.
+  // Android 13+ POST_NOTIFICATIONS: the token is ALWAYS stored; consent is
+  // a separate field used only when building the broadcast audience.
   const res = await registerPushToken(c.env, {
     token, uid: user.uid, platform: String(body.platform || 'android'),
     permission: String(body.permission || 'granted'),
@@ -482,8 +482,11 @@ app.post('/notifications/preference', async (c) => {
   const user = await requireFirebaseUser(c);
   if (!user) return c.json({ error: 'unauthorized' }, 401);
   const body = await c.req.json().catch(() => ({}));
+  // `platform` keeps a browser tab from disabling the same user's Android
+  // device (and vice versa).
   const res = await setPushPreference(c.env, user.uid,
-    String(body.permission || 'granted'), body.notifications_enabled !== false);
+    String(body.permission || 'granted'), body.notifications_enabled !== false,
+    String(body.platform || 'android'));
   return c.json(res);
 });
 
@@ -1059,7 +1062,8 @@ app.get('/admin/push/status', async (c) => {
       token_tail: String(r.token).slice(-6), permission: r.permission,
       notifications_enabled: r.notifications_enabled, topic_subscribed: r.topic_subscribed };
   }).sort((a, b) => (b.updated_at as number) - (a.updated_at as number));
-  return c.json({ registered_tokens: stats.native_total + stats.web_total, stats, platforms: plats, tokens });
+  return c.json({ registered_tokens: stats.native_total + stats.web_total, stats,
+    diagnostics: await pushDiagnostics(c.env), platforms: plats, tokens });
 });
 
 app.post('/admin/push/test', async (c) => {
@@ -1072,16 +1076,32 @@ app.post('/admin/push/test', async (c) => {
   }
 });
 
-// One-off backfill: subscribe tokens registered before this fix to topic `all`.
-// Repeat until `remaining` is 0; each call stays inside the subrequest budget.
+// Backfill EVERY eligible token into topic `all`. Uses a persistent keyset
+// cursor, so repeated calls cover the whole table (never just the first N).
+// `all:true` drains several chunks per invocation within the subrequest budget.
+// The response includes the exact rows fetched from D1 and subscribed in FCM.
 app.post('/admin/push/sync-topics', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   try {
-    return c.json({ ok: true, ...(await syncTopicSubscriptions(c.env, Number(body.limit) || 100)) });
+    const result = await syncTopicSubscriptions(c.env, {
+      limit: Number(body.limit) || 100, all: body.all !== false,
+    });
+    return c.json({ ok: true, ...result, diagnostics: await pushDiagnostics(c.env) });
   } catch (error: any) {
     console.error('[fcm] sync-topics failed:', error?.message || error);
     return c.json({ ok: false, error: 'sync_failed', message: String(error?.message || error) });
   }
+});
+
+// Exact numbers to compare with the "1000 registered users" figure.
+app.get('/admin/push/diagnostics', async (c) => {
+  return c.json({ ok: true, diagnostics: await pushDiagnostics(c.env) });
+});
+
+// Recent device registrations — proof that the mobile app really POSTs its
+// FCM token. Also visible as `event:push_register` in `wrangler tail`.
+app.get('/admin/push/registrations', async (c) => {
+  return c.json({ registrations: await listPushRegistrations(c.env, Number(c.req.query('limit')) || 30) });
 });
 
 // Drain queued direct sends when a broadcast had more than one invocation's

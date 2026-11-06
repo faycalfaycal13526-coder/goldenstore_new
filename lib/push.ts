@@ -63,6 +63,20 @@ const PUSH_SCHEMA = [
      created_at INTEGER NOT NULL,
      updated_at INTEGER NOT NULL
    )`,
+  `CREATE TABLE IF NOT EXISTS push_sync_state (
+     id TEXT PRIMARY KEY,
+     cursor TEXT NOT NULL DEFAULT '',
+     updated_at INTEGER NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS push_reg_log (
+     id TEXT PRIMARY KEY,
+     uid_masked TEXT,
+     platform TEXT,
+     permission TEXT,
+     enabled INTEGER,
+     token_tail TEXT,
+     created_at INTEGER NOT NULL
+   )`,
   `CREATE TABLE IF NOT EXISTS push_send_log (
      id TEXT PRIMARY KEY,
      notification_id TEXT,
@@ -99,6 +113,8 @@ const PUSH_INDEXES = [
      ON web_tokens(notifications_enabled, permission, uid)`,
   `CREATE INDEX IF NOT EXISTS idx_push_send_log_created
      ON push_send_log(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_reg_log_created
+     ON push_reg_log(created_at DESC)`,
 ];
 const pushSchemaReady = new WeakSet<object>();
 
@@ -143,68 +159,96 @@ export async function registerPushToken(env: Env, input: TokenRegistration): Pro
   const db: any = env.DB;
   const token = String(input.token || '').trim();
   const permission = normalizePermission(input.permission);
+  // The token is ALWAYS stored. Consent is a SEPARATE field used only when
+  // building the audience — deleting a device because the user once tapped
+  // "no" makes that user permanently unreachable from the server side.
   const enabled = input.enabled !== false && permission !== 'denied';
+  const platform = input.web ? 'web' : String(input.platform || 'android').slice(0, 40);
 
-  // Explicit opt-out: remove the token everywhere and leave the FCM topic.
-  if (!enabled) {
-    await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
-    await db.prepare('DELETE FROM web_tokens WHERE token = ?').bind(token).run().catch(() => {});
-    if (!input.web) await unsubscribeTokenFromTopic(env, token, FCM_TOPIC).catch(() => {});
-    return { ok: true, registered: false, topic_subscribed: false, reason: 'opted_out' };
-  }
+  const id = await sha256Hex(token);
+  let topicSubscribed = false;
 
   if (input.web) {
     await db.prepare(`INSERT OR REPLACE INTO web_tokens
         (uid, token, platform, userAgent, updatedAt, permission, notifications_enabled)
-        VALUES (?, ?, 'web', ?, ?, ?, 1)`)
+        VALUES (?, ?, 'web', ?, ?, ?, ?)`)
       .bind(input.uid, token, String(input.userAgent || '').slice(0, 300),
-        nowSec(), permission).run();
-    return { ok: true, registered: true, topic_subscribed: false };
-  }
+        nowSec(), permission, enabled ? 1 : 0).run();
+  } else {
+    // Preserve an existing successful subscription: a transient failure on
+    // re-registration must not turn a topic device into a direct-only device
+    // (that would deliver the same message twice).
+    const existing: any = await db.prepare('SELECT topic_subscribed FROM fcm_tokens WHERE id = ?')
+      .bind(id).first().catch(() => null);
+    topicSubscribed = Number(existing?.topic_subscribed || 0) === 1;
 
-  // Native token: subscribe it to the broadcast topic ONCE, using the modern
-  // FCM v1 topicSubscriptions endpoint. A permanent failure means the token
-  // is dead → delete it instead of storing it.
-  let subscribed = false;
-  try {
-    const sub = await subscribeTokenToTopic(env, token, FCM_TOPIC);
-    subscribed = sub.ok;
-    if (sub.permanent) {
-      await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
-      console.warn('[fcm] dropped dead token at registration', { status: sub.status, code: sub.code });
-      return { ok: true, registered: false, topic_subscribed: false, reason: 'invalid_token' };
+    if (enabled && !topicSubscribed) {
+      try {
+        const sub = await subscribeTokenToTopic(env, token, FCM_TOPIC);
+        topicSubscribed = sub.ok;
+        if (sub.permanent) {
+          // Genuinely dead token: nothing can ever be delivered to it.
+          await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
+          console.warn('[fcm] dropped dead token at registration', { status: sub.status, code: sub.code });
+          return { ok: true, registered: false, permission, notifications_enabled: false,
+            topic_subscribed: false, reason: 'invalid_token' };
+        }
+      } catch (error: any) {
+        console.warn('[fcm] topic subscribe failed (will send directly):', error?.message || error);
+      }
+    } else if (!enabled && topicSubscribed) {
+      await unsubscribeTokenFromTopic(env, token, FCM_TOPIC).catch(() => {});
+      topicSubscribed = false;
     }
-  } catch (error: any) {
-    console.warn('[fcm] topic subscribe failed (will send directly):', error?.message || error);
+
+    await db.prepare(`INSERT OR REPLACE INTO fcm_tokens
+        (id, token, uid, platform, permission, notifications_enabled, topic_subscribed, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, token, input.uid, platform, permission, enabled ? 1 : 0,
+        topicSubscribed ? 1 : 0, nowSec()).run();
   }
 
-  const id = await sha256Hex(token);
-  await db.prepare(`INSERT OR REPLACE INTO fcm_tokens
-      (id, token, uid, platform, permission, notifications_enabled, topic_subscribed, updated_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?)`)
-    .bind(id, token, input.uid, String(input.platform || 'android').slice(0, 40),
-      permission, subscribed ? 1 : 0, nowSec()).run();
-  return { ok: true, registered: true, topic_subscribed: subscribed };
+  // Structured, privacy-safe registration log: visible in `wrangler tail` and
+  // via /api/admin/push/registrations. Never logs the full FCM token.
+  await db.prepare(`INSERT INTO push_reg_log
+      (id, uid_masked, platform, permission, enabled, token_tail, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(randomId(), String(input.uid).slice(0, 8), platform, permission,
+      enabled ? 1 : 0, token.slice(-6), nowSec())
+    .run().catch(() => {});
+  console.log(JSON.stringify({
+    level: 'info', event: 'push_register', platform, permission,
+    notifications_enabled: enabled, topic_subscribed: topicSubscribed,
+    token_tail: token.slice(-6), uid_masked: String(input.uid).slice(0, 8),
+  }));
+  return { ok: true, registered: true, permission,
+    notifications_enabled: enabled, topic_subscribed: topicSubscribed };
 }
 
 /** Persist the OS notification permission (Android 13+ POST_NOTIFICATIONS /
     browser Notification.permission) so broadcasts target opted-in users only. */
 export async function setPushPreference(
-  env: Env, uid: string, rawPermission: string, rawEnabled: boolean,
+  env: Env, uid: string, rawPermission: string, rawEnabled: boolean, platform = 'android',
 ): Promise<any> {
   await ensurePushSchema(env);
   const db: any = env.DB;
   const permission = normalizePermission(rawPermission);
   const enabled = rawEnabled !== false && permission !== 'denied' ? 1 : 0;
+  const isWeb = String(platform) === 'web';
+
+  // CRITICAL: a browser tab reporting permission "default" must NOT disable
+  // the same user's Android device. Each platform owns its own consent state.
+  if (isWeb) {
+    await db.prepare('UPDATE web_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
+      .bind(permission, enabled, uid).run().catch(() => {});
+    return { ok: true, platform: 'web', permission, notifications_enabled: !!enabled };
+  }
+
   await db.prepare('UPDATE fcm_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
     .bind(permission, enabled, uid).run().catch(() => {});
-  await db.prepare('UPDATE web_tokens SET permission = ?, notifications_enabled = ? WHERE uid = ?')
-    .bind(permission, enabled, uid).run().catch(() => {});
 
-  // Keep topic membership in sync with consent: opting out must also
-  // unsubscribe, otherwise topic messages would bypass the D1 filter.
-  // Only rows whose membership actually differs are touched, so calling this
-  // on every page load does not issue redundant FCM requests.
+  // Keep topic membership in sync; only rows whose state actually differs
+  // are touched, so calling this on every app launch issues no extra requests.
   const rows: any = await db.prepare(
     'SELECT token FROM fcm_tokens WHERE uid = ? AND topic_subscribed = ?',
   ).bind(uid, enabled ? 0 : 1).all().catch(() => ({ results: [] }));
@@ -219,7 +263,7 @@ export async function setPushPreference(
       await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 0 WHERE token = ?').bind(token).run().catch(() => {});
     }
   });
-  return { ok: true, permission, notifications_enabled: !!enabled };
+  return { ok: true, platform: 'android', permission, notifications_enabled: !!enabled };
 }
 
 export async function unregisterPushToken(env: Env, token: string): Promise<void> {
@@ -332,7 +376,11 @@ export async function deleteDeadTokens(env: Env, tokens: string[]): Promise<numb
    Queue: guarantees EVERY eligible token is covered even when the audience
    is larger than one Worker invocation's subrequest budget.
    ------------------------------------------------------------------------- */
-const UNSUBSCRIBED_WHERE = `notifications_enabled = 1 AND permission != 'denied' AND topic_subscribed = 0`;
+// COALESCE keeps rows created before the consent columns (or with NULL
+// values) eligible — a plain `permission != 'denied'` silently drops NULLs.
+const ELIGIBLE_WHERE = `COALESCE(notifications_enabled, 1) = 1
+  AND COALESCE(permission, 'granted') != 'denied'`;
+const UNSUBSCRIBED_WHERE = `${ELIGIBLE_WHERE} AND COALESCE(topic_subscribed, 0) = 0`;
 
 export async function processPushJob(env: Env, jobId: string, limit = FCM_MAX_DIRECT_PER_SEND): Promise<any> {
   await ensurePushSchema(env);
@@ -360,31 +408,83 @@ export async function processPushJob(env: Env, jobId: string, limit = FCM_MAX_DI
   };
 }
 
-/** One-off backfill for tokens registered before this fix. */
-export async function syncTopicSubscriptions(env: Env, limit = 100): Promise<any> {
+/** One-off backfill for tokens registered before this fix.
+ *
+ *  Uses a PERSISTENT keyset cursor (push_sync_state) so repeated calls walk
+ *  the WHOLE fcm_tokens table instead of re-reading the first N rows forever.
+ *  With `all: true` it drains several chunks in one invocation, capped by the
+ *  Worker subrequest budget. Every run emits a structured log with the exact
+ *  number of rows fetched from D1 and the number subscribed in FCM.
+ */
+export const FCM_MAX_SYNC_PER_SEND = 300;
+
+async function readSyncCursor(env: Env): Promise<string> {
+  const row: any = await env.DB.prepare(
+    "SELECT cursor FROM push_sync_state WHERE id = 'topics'",
+  ).first().catch(() => null);
+  return String(row?.cursor || '');
+}
+async function writeSyncCursor(env: Env, cursor: string): Promise<void> {
+  await env.DB.prepare(`INSERT OR REPLACE INTO push_sync_state (id, cursor, updated_at)
+    VALUES ('topics', ?, ?)`).bind(cursor, nowSec()).run().catch(() => {});
+}
+
+export async function syncTopicSubscriptions(
+  env: Env, options: { limit?: number; all?: boolean } = {},
+): Promise<any> {
   await ensurePushSchema(env);
   const db: any = env.DB;
-  const cap = Math.max(1, Math.min(Number(limit) || 100, 200));
-  const rows: any = await db.prepare(
-    `SELECT id, token FROM fcm_tokens WHERE ${UNSUBSCRIBED_WHERE} ORDER BY id LIMIT ?`,
-  ).bind(cap).all();
-  const list: any[] = rows.results || [];
-  let subscribed = 0, invalid = 0, failed = 0;
-  await mapWithConcurrency(list, 10, async (row) => {
-    const token = String(row.token || '');
-    const sub = await subscribeTokenToTopic(env, token, FCM_TOPIC).catch(() => null);
-    if (sub?.ok) {
-      await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 1 WHERE id = ?').bind(row.id).run().catch(() => {});
-      subscribed++;
-    } else if (sub?.permanent) {
-      await db.prepare('DELETE FROM fcm_tokens WHERE id = ?').bind(row.id).run().catch(() => {});
-      invalid++;
-    } else failed++;
-  });
-  const rest: any = await db.prepare(
+  const limit = Math.max(1, Math.min(Number(options.limit) || 100, 200));
+  const maxRounds = options.all
+    ? Math.max(1, Math.min(20, Math.floor(FCM_MAX_SYNC_PER_SEND / limit)))
+    : 1;
+  let cursor = await readSyncCursor(env);
+  let fetched = 0, subscribed = 0, invalid = 0, failed = 0, rounds = 0;
+
+  for (let round = 0; round < maxRounds; round++) {
+    const rows: any = await db.prepare(
+      `SELECT id, token FROM fcm_tokens
+        WHERE ${UNSUBSCRIBED_WHERE} AND id > ? ORDER BY id LIMIT ?`,
+    ).bind(cursor, limit).all();
+    const list: any[] = rows.results || [];
+    if (!list.length) { cursor = ''; await writeSyncCursor(env, ''); break; }
+    rounds++;
+    fetched += list.length;
+    cursor = String(list[list.length - 1].id);
+    await writeSyncCursor(env, cursor);
+
+    await mapWithConcurrency(list, 10, async (row) => {
+      const token = String(row.token || '');
+      const sub = await subscribeTokenToTopic(env, token, FCM_TOPIC).catch(() => null);
+      if (sub?.ok) {
+        await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 1 WHERE id = ?').bind(row.id).run().catch(() => {});
+        subscribed++;
+      } else if (sub?.permanent) {
+        await db.prepare('DELETE FROM fcm_tokens WHERE id = ?').bind(row.id).run().catch(() => {});
+        invalid++;
+      } else failed++;
+    });
+
+    const rest: any = await db.prepare(
+      `SELECT COUNT(*) AS c FROM fcm_tokens WHERE ${UNSUBSCRIBED_WHERE} AND id > ?`,
+    ).bind(cursor).first().catch(() => ({ c: 0 }));
+    if (Number(rest?.c || 0) === 0) { cursor = ''; await writeSyncCursor(env, ''); break; }
+  }
+
+  const total: any = await db.prepare(
     `SELECT COUNT(*) AS c FROM fcm_tokens WHERE ${UNSUBSCRIBED_WHERE}`,
   ).first().catch(() => ({ c: 0 }));
-  return { attempted: list.length, subscribed, invalid, failed, remaining: Number(rest?.c || 0) };
+  const remaining = Number(total?.c || 0);
+  const result = { fetched, attempted: fetched, subscribed, invalid, failed,
+    remaining, rounds, done: remaining === 0 };
+  console.log(JSON.stringify({ level: 'info', event: 'push_sync_topics',
+    rows_fetched_from_d1: fetched, subscribed_in_fcm: subscribed,
+    invalid_deleted: invalid, transient_failures: failed,
+    remaining_unsubscribed: remaining, rounds, limit }));
+  if (failed > 0) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'push_sync_retry_needed', failed }));
+  }
+  return result;
 }
 
 /* -------------------------------------------------------------------------
@@ -395,23 +495,62 @@ export async function pushTokenStats(env: Env): Promise<any> {
   const db: any = env.DB;
   const native: any = await db.prepare(`SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN notifications_enabled = 1 AND permission != 'denied' THEN 1 ELSE 0 END) AS eligible,
-      SUM(CASE WHEN notifications_enabled = 1 AND permission != 'denied' AND topic_subscribed = 1 THEN 1 ELSE 0 END) AS subscribed
+      COUNT(DISTINCT token) AS unique_tokens,
+      SUM(CASE WHEN ${ELIGIBLE_WHERE} THEN 1 ELSE 0 END) AS eligible,
+      SUM(CASE WHEN NOT (${ELIGIBLE_WHERE}) THEN 1 ELSE 0 END) AS opted_out,
+      SUM(CASE WHEN ${ELIGIBLE_WHERE} AND COALESCE(topic_subscribed,0) = 1 THEN 1 ELSE 0 END) AS subscribed
     FROM fcm_tokens`).first().catch(() => ({}));
   const web: any = await db.prepare(`SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN notifications_enabled = 1 AND permission != 'denied' THEN 1 ELSE 0 END) AS eligible
+      COUNT(DISTINCT token) AS unique_tokens,
+      SUM(CASE WHEN ${ELIGIBLE_WHERE} THEN 1 ELSE 0 END) AS eligible
     FROM web_tokens`).first().catch(() => ({}));
   const jobs: any = await db.prepare('SELECT COUNT(*) AS c FROM push_jobs WHERE done = 0').first().catch(() => ({}));
+  const recent: any = await db.prepare(
+    'SELECT COUNT(*) AS c FROM push_reg_log WHERE created_at >= ?',
+  ).bind(nowSec() - 86400).first().catch(() => ({}));
+  const eligible = Number(native?.eligible || 0);
+  const subscribed = Number(native?.subscribed || 0);
   return {
     native_total: Number(native?.total || 0),
-    native_eligible: Number(native?.eligible || 0),
-    native_subscribed: Number(native?.subscribed || 0),
-    native_unsubscribed: Number(native?.eligible || 0) - Number(native?.subscribed || 0),
+    native_unique: Number(native?.unique_tokens || 0),
+    native_eligible: eligible,
+    native_opted_out: Number(native?.opted_out || 0),
+    native_subscribed: subscribed,
+    native_unsubscribed: eligible - subscribed,
     web_total: Number(web?.total || 0),
+    web_unique: Number(web?.unique_tokens || 0),
     web_eligible: Number(web?.eligible || 0),
+    registrations_24h: Number(recent?.c || 0),
     pending_jobs: Number(jobs?.c || 0),
   };
+}
+
+/** Numbers to compare against the "1000 registered users" figure. */
+export async function pushDiagnostics(env: Env): Promise<any> {
+  const stats = await pushTokenStats(env);
+  const byPlatform: any = await env.DB.prepare(
+    'SELECT platform, COUNT(*) AS n FROM fcm_tokens GROUP BY platform ORDER BY n DESC',
+  ).all().catch(() => ({ results: [] }));
+  const byPermission: any = await env.DB.prepare(
+    'SELECT permission, notifications_enabled, COUNT(*) AS n FROM fcm_tokens GROUP BY permission, notifications_enabled ORDER BY n DESC',
+  ).all().catch(() => ({ results: [] }));
+  return {
+    ...stats,
+    total_tokens: stats.native_total + stats.web_total,
+    total_eligible: stats.native_eligible + stats.web_eligible,
+    by_platform: byPlatform.results || [],
+    by_permission: byPermission.results || [],
+    note: 'Firebase Auth users without a row here have NO FCM token on any device and cannot receive push. Tokens can only be created on the device.',
+  };
+}
+
+export async function listPushRegistrations(env: Env, limit = 30): Promise<any[]> {
+  await ensurePushSchema(env);
+  const rows: any = await env.DB.prepare(
+    'SELECT * FROM push_reg_log ORDER BY created_at DESC LIMIT ?',
+  ).bind(Math.max(1, Math.min(Number(limit) || 30, 100))).all().catch(() => ({ results: [] }));
+  return rows.results || [];
 }
 
 export async function recordPushLog(env: Env, notificationId: string, r: any): Promise<void> {

@@ -87,7 +87,11 @@
       await fetch('/api/notifications/preference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken },
-        body: JSON.stringify({ permission: permission, notifications_enabled: enabled }),
+        body: JSON.stringify({
+          permission: permission,
+          notifications_enabled: enabled,
+          platform: 'web',   // never let a browser tab disable the Android device
+        }),
         credentials: 'same-origin',
       });
     } catch (e) {
@@ -107,7 +111,7 @@
         if (!status || typeof status.addEventListener !== 'function') return;
         status.addEventListener('change', function () {
           var p = currentPermission();
-          syncPermissionState(p, p === 'granted');
+          syncPermissionState(p, p === 'granted', 'web');
           if (p === 'denied') _attemptedUid = null;
         });
       }).catch(function () {});
@@ -116,9 +120,16 @@
 
   // ---------- foreground delivery ----------
 
-  function hookForegroundMessages(messaging) {
+  function hookForegroundMessages(messaging, user) {
     if (_foregroundHooked) return;
     _foregroundHooked = true;
+    // FCM can rotate the registration token at any moment (app reinstall,
+    // token expiry, clearing data). Re-register the new one immediately.
+    try {
+      if (typeof messaging.onTokenRefresh === 'function') {
+        messaging.onTokenRefresh(function () { registerWebPush(user); });
+      }
+    } catch (e) {}
     messaging.onMessage(function (payload) {
       try {
         var data = (payload && payload.data) || {};
@@ -167,12 +178,12 @@
     if (permission !== 'granted') {
       // Explicit refusal (or unsupported): mark the user as opted-out in D1
       // so the backend never counts this device as eligible.
-      if (permission === 'denied') await syncPermissionState('denied', false);
+      if (permission === 'denied') await syncPermissionState('denied', false, 'web');
       return;
     }
 
     // Mirror the granted permission before attempting to get a token.
-    await syncPermissionState('granted', true);
+    await syncPermissionState('granted', true, 'web');
 
     var registration = await navigator.serviceWorker.register(SW_URL);
 
@@ -183,7 +194,7 @@
     });
     if (!token) return;
 
-    hookForegroundMessages(messaging);
+    hookForegroundMessages(messaging, user);
 
     // Persist the token in D1 web_tokens (the same table sendWebPush reads).
     var idToken = await window.GAuth.getIdToken();
@@ -217,6 +228,13 @@
     if (!window.GAuth || typeof window.GAuth.onAuthChange !== 'function') return;
 
     watchPermissionChanges();
+    // Re-sync every time the app/tab comes back to the foreground, so a
+    // permission change made in Android settings is reflected in D1 quickly.
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) return;
+      var p = currentPermission();
+      syncPermissionState(p, p === 'granted', 'web');
+    });
 
     window.GAuth.onAuthChange(function (user) {
       if (!user || !user.uid) return;          // signed out → do nothing
@@ -224,7 +242,7 @@
       // Always mirror the current OS permission, even when the token is
       // already registered or when the prompt was previously dismissed.
       var p = currentPermission();
-      syncPermissionState(p, p === 'granted');
+      syncPermissionState(p, p === 'granted', 'web');
 
       if (_attemptedUid === user.uid) return;  // already handled this user
       _attemptedUid = user.uid;

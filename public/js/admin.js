@@ -1074,9 +1074,21 @@
 
       syncBtn.onclick = async () => {
         syncBtn.disabled = true;
+        let fetched = 0, subscribed = 0, invalid = 0, remaining = 0, rounds = 0;
         try {
-          const r = await api('/api/admin/push/sync-topics', { method: 'POST', body: { limit: 100 } });
-          toast(`تم الاشتراك في الموضوع: ${r.subscribed || 0} • رموز ميتة: ${r.invalid || 0} • متبقٍ: ${r.remaining || 0}`, 'success');
+          // Keep calling until the WHOLE table is covered, not just one page.
+          do {
+            rounds++;
+            const r = await api('/api/admin/push/sync-topics', {
+              method: 'POST', body: { limit: 100, all: true },
+            });
+            fetched += r.fetched || 0;
+            subscribed += r.subscribed || 0;
+            invalid += r.invalid || 0;
+            remaining = r.remaining || 0;
+            if (r.done || (r.fetched || 0) === 0) break;
+          } while (remaining > 0 && rounds < 30);
+          toast(`جلب من D1: ${fetched} • اشترك في FCM: ${subscribed} • رموز ميتة: ${invalid} • متبقٍ: ${remaining}`, 'success');
           await refreshStatus();
         } catch (e) {
           toast(e.message || 'تعذّرت المزامنة', 'error');
@@ -1106,6 +1118,14 @@
             if ((s.registered_tokens || 0) > 1) txt += ` (${toks.length} أجهزة)`;
           } else {
             txt += ' — لا يوجد أي جهاز مسجّل. افتح تطبيق الأندرويد، اسمح بالإشعارات، وسجّل الدخول.';
+          }
+          const d = s.diagnostics || {};
+          if (d.total_tokens !== undefined) {
+            txt += ` — المؤهّلون: ${d.total_eligible || 0}/${d.total_tokens || 0}`
+              + ` • غير موافق: ${d.native_opted_out || 0}`
+              + ` • مشتركون في الموضوع: ${d.native_subscribed || 0}`
+              + ` • ويب: ${d.web_eligible || 0}`
+              + ` • تسجيلات آخر 24 ساعة: ${d.registrations_24h || 0}`;
           }
           pushInfo.textContent = txt;
         } catch (e) {}

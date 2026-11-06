@@ -1083,7 +1083,9 @@ export async function sendWebPush(
   try {
     const rows: any = await db.prepare(
       `SELECT uid, token FROM web_tokens
-        WHERE notifications_enabled = 1 AND permission != 'denied' AND token != ''
+        WHERE COALESCE(notifications_enabled, 1) = 1
+          AND COALESCE(permission, 'granted') != 'denied'
+          AND token != ''
         ORDER BY uid`,
     ).all();
     entries = (rows.results || [])

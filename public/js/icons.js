@@ -28,6 +28,7 @@ const ICONS = {
   logout:      '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   spark:       '<path d="m12 3 1.9 5.7L20 10l-5.1 2.1L13 18l-1.9-5.9L5 10l5.1-1.3z"/>',
   eye:        '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
+  help:       '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   copy:       '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   // Telegram-style send button: filled paper plane with a fold line.
   send:        '<path d="M2.4 11.5 21.2 3 14.1 21l-2.7-7.7L2.4 11.5Z" fill="currentColor" stroke="none"/><path d="m11.4 13.3 9.8-10.3" fill="none" stroke="var(--wa-send-fold, rgba(255,255,255,.72))" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',

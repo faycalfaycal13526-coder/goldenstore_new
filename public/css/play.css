@@ -3625,3 +3625,50 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
 }
 .gs-video-open:hover { background: #ffd45a; text-decoration: none; }
 .gs-video-open .icon { width: 16px; height: 16px; }
+
+/* =====================================================================
+   Legendary update dialog / banner — responsive hardening (2026-11-07)
+   Short laptop screens, small phones and notched devices must never clip
+   the actions or push the whole card off-screen. Appended last on purpose.
+   ===================================================================== */
+.gs-update-overlay { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.gs-update-card {
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (min-width: 1200px) { .gs-update-card { max-width: 480px; } }
+@media (max-width: 540px) {
+  .gs-update-overlay { padding: 10px; align-items: center; }
+  .gs-update-card { max-width: 100%; border-radius: 20px; }
+  .gs-update-hero { padding: 22px 14px 14px; }
+  .gs-update-hero .gs-update-title { font-size: 20px; }
+  .gs-update-hero .gs-update-lead { font-size: 12.5px; }
+  .gs-update-logo, .gs-offline-logo { width: 62px; height: 62px; margin-bottom: 10px; }
+  .gs-update-body { padding: 14px 14px 0; }
+  .gs-update-meta { gap: 7px; }
+  .gs-update-meta-item { padding: 8px 5px; }
+  .gs-update-meta-item i { font-size: 11.5px; }
+  .gs-update-actions { padding: 0 14px; margin-top: 14px; gap: 8px; }
+  .gs-update-primary { min-height: 48px; }
+  .gs-update-chips { gap: 6px; }
+  .gs-update-chip { font-size: 10px; padding: 4px 8px; }
+  .gs-update-progress.is-live { margin-inline: 14px; }
+  .gs-update-banner { gap: 7px; padding-inline: 9px; }
+  .gs-update-banner-sub { font-size: 9.5px; }
+  body.has-update-banner { padding-top: calc(56px + env(safe-area-inset-top, 0px)); }
+}
+@media (max-width: 360px) {
+  .gs-update-banner-icon { display: none; }
+  .gs-update-banner-copy strong { font-size: 11px; }
+  .gs-update-banner-cta { padding: 6px 9px; font-size: 10px; }
+  .gs-update-meta { grid-template-columns: 1fr 1fr; }
+}
+@media (max-height: 620px) {
+  .gs-update-hero { padding-top: 16px; padding-bottom: 10px; }
+  .gs-update-logo, .gs-offline-logo { width: 52px; height: 52px; margin-bottom: 7px; }
+  .gs-update-chips { display: none; }
+  .gs-update-body { padding-top: 10px; }
+  .gs-update-actions { margin-top: 10px; }
+}

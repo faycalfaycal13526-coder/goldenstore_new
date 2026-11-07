@@ -1442,6 +1442,9 @@ const PUBLIC_SETTINGS = [
   'theme_default', 'accent', 'density', 'default_language', 'allow_reviews',
   'show_download_counter', 'require_login', 'collect_demographics',
   'maintenance_mode', 'maintenance_message', 'notify_new_publications',
+  // Non-secret operational values the shared client applier also needs.
+  'default_type', 'default_category', 'max_upload_mb', 'auto_notify_update',
+  'push_enabled', 'quiet_start', 'quiet_end', 'session_days',
 ];
 async function readAllSettings(env: Env): Promise<Record<string, string>> {
   await ensureInsightsTables(env.DB);

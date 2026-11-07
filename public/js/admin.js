@@ -41,6 +41,11 @@
     ] },
     { id: 'system', label: 'النظام', icon: 'settings', items: [
       { key: 'app-update', icon: 'download', label: t('مركز التحديث') },
+      { key: 'publishing', icon: 'clock', label: t('النشر والترتيب') },
+      { key: 'categories', icon: 'grid', label: t('الفئات') },
+      { key: 'activity', icon: 'clock', label: t('سجل النشاطات') },
+      { key: 'team', icon: 'shield', label: t('المشرفون والصلاحيات') },
+      { key: 'backup', icon: 'storage', label: t('النسخ الاحتياطي') },
       { key: 'settings', icon: 'settings', label: 'إعدادات المتجر' },
     ] },
   ];
@@ -62,6 +67,8 @@
       arr.unshift({ label, kind, ts: Math.floor(Date.now() / 1000) });
       localStorage.setItem(ADMIN_ACTIVITY_KEY, JSON.stringify(arr.slice(0, 60)));
     } catch (e) {}
+    // Mirror to the durable server-side log; never block the UI on it.
+    try { api('/api/admin/activity', { method: 'POST', body: { action: label, kind } }).catch(() => {}); } catch (e) {}
   }
   function readAdminActivity() {
     try {
@@ -544,6 +551,11 @@
       else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإحصائيات — أعد تحميل الصفحة.</div>';
     }
     else if (activeTab === 'app-update') await renderAppUpdate(body);
+    else if (activeTab === 'publishing') await renderPublishing(body);
+    else if (activeTab === 'categories') await renderCategories(body);
+    else if (activeTab === 'activity') await renderActivity(body);
+    else if (activeTab === 'team') await renderTeam(body);
+    else if (activeTab === 'backup') await renderBackup(body);
     else if (activeTab === 'settings') await renderStoreSettings(body);
     else if (activeTab.startsWith('edit:')) await renderEditApp(body, activeTab.slice(5));
   }
@@ -1593,6 +1605,275 @@
       body.innerHTML = '';
       body.append(emptyMsg('تعذر التحميل', e.message));
     }
+  }
+
+  // ---------- Phase 2: publishing / ordering / categories / roles / backup ----------
+  async function consoleState() {
+    try { return await api('/api/admin/console/state'); } catch (e) { return {}; }
+  }
+  function phaseHead(title, sub, action) {
+    return el('div', { class: 'admin-page-head' },
+      el('div', null, el('h1', { class: 'admin-page-title' }, title),
+        el('p', { class: 'admin-page-sub' }, sub)),
+      action ? el('div', { class: 'admin-head-actions' }, action) : null);
+  }
+  function saveBlob(name, text) {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function renderPublishing(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    const [state, appRes] = await Promise.all([consoleState(), api('/api/admin/apps').catch(() => ({ apps: [] }))]);
+    const apps = appRes.apps || [];
+    const pub = Object.create(null);
+    (state.publication || []).forEach((r) => { pub[r.slug] = r; });
+    const order = (state.order || []).map((r) => r.slug);
+    const ordered = order.length ? order.slice() : apps.map((a) => a.slug);
+    const bySlug = Object.create(null);
+    apps.forEach((a) => { bySlug[a.slug] = a; if (ordered.indexOf(a.slug) < 0) ordered.push(a.slug); });
+    body.innerHTML = '';
+
+    const rows = el('div', { class: 'admin-order-list' });
+    function row(slug) {
+      const a = bySlug[slug] || { name: slug, slug };
+      const current = pub[slug] || { status: 'published', publish_at: 0 };
+      const sel = el('select', { class: 'input admin-phase2-select', 'aria-label': t('النشر والترتيب') },
+        el('option', { value: 'published' }, t('منشور')),
+        el('option', { value: 'draft' }, t('مسودة')),
+        el('option', { value: 'scheduled' }, t('مجدول')));
+      sel.value = current.status || 'published';
+      const when = el('input', { class: 'input admin-phase2-date', type: 'datetime-local',
+        'aria-label': t('تاريخ النشر') });
+      if (current.publish_at) {
+        try { when.value = new Date(Number(current.publish_at) * 1000).toISOString().slice(0, 16); } catch (e) {}
+      }
+      const save = el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => {
+        const publish_at = sel.value === 'scheduled' && when.value
+          ? Math.floor(new Date(when.value).getTime() / 1000) : 0;
+        if (sel.value === 'scheduled' && !publish_at) { toast('اختر تاريخ النشر', 'error'); return; }
+        try {
+          await api('/api/admin/publication', { method: 'POST',
+            body: { slug, status: sel.value, publish_at } });
+          logAdminAction(`حالة «${a.name}»: ${sel.value}`);
+          toast('تم الحفظ', 'success');
+        } catch (e) { toast('فشل الحفظ', 'error'); }
+      } }, t('حفظ الحالة'));
+      const node = el('div', {
+        class: 'admin-order-row', draggable: 'true', 'data-slug': slug,
+      },
+        el('span', { class: 'admin-drag-handle', title: t('اسحب لإعادة الترتيب') }, ico('grid', 'icon')),
+        a.icon_url ? el('img', { src: a.icon_url, class: 'ico-sm' }) : el('div', { class: 'ico-sm' }),
+        el('strong', null, a.name || slug),
+        el('span', { class: 'admin-order-meta' }, a.type === 'game' ? 'لعبة' : 'تطبيق'),
+        sel, when, save);
+      node.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', slug); node.classList.add('is-dragging'); });
+      node.addEventListener('dragend', () => node.classList.remove('is-dragging'));
+      return node;
+    }
+    ordered.forEach((slug) => rows.append(row(slug)));
+    rows.addEventListener('dragover', (e) => { e.preventDefault(); });
+    rows.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const slug = e.dataTransfer.getData('text/plain');
+      const dragged = rows.querySelector(`[data-slug="${slug}"]`);
+      const target = e.target.closest && e.target.closest('.admin-order-row');
+      if (!dragged || !target || dragged === target) return;
+      const rect = target.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      rows.insertBefore(dragged, after ? target.nextSibling : target);
+      rows.querySelectorAll('.admin-order-row').forEach((n) => n.classList.remove('is-dragging'));
+    });
+    const saveOrder = el('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: async () => {
+      const slugs = [...rows.querySelectorAll('.admin-order-row')].map((n) => n.getAttribute('data-slug'));
+      try {
+        await api('/api/admin/order', { method: 'POST', body: { slugs } });
+        logAdminAction('حفظ ترتيب الكتالوج');
+        toast('تم حفظ الترتيب', 'success');
+      } catch (e) { toast('فشل حفظ الترتيب', 'error'); }
+    } }, ico('check'), t('حفظ الترتيب'));
+    body.append(
+      phaseHead(t('النشر والترتيب'), 'اجعل أي عنصر مسودة أو مجدولاً، ثم اسحب البطاقات للتحكم في ترتيب الظهور في المتجر.', saveOrder),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('clock', 'icon'), t('اسحب لإعادة الترتيب')),
+        rows),
+      el('div', { class: 'hint' }, 'المسودات والمجدول لا تظهر في /api/apps أو البحث أو صفحة التفاصيل حتى يحين موعدها (Cron كل 5 دقائق).'),
+    );
+  }
+
+  async function renderCategories(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    const state = await consoleState();
+    const custom = state.categories || [];
+    body.innerHTML = '';
+    const slugIn = el('input', { class: 'input', placeholder: 'مثلاً: productivity', 'aria-label': t('معرف الفئة') });
+    const nameIn = el('input', { class: 'input', placeholder: 'اسم الفئة بالعربية', 'aria-label': t('اسم الفئة') });
+    const typeIn = el('select', { class: 'input', 'aria-label': t('النوع') },
+      el('option', { value: 'app' }, 'تطبيق'), el('option', { value: 'game' }, 'لعبة'));
+    const posIn = el('input', { class: 'input', type: 'number', value: '99', min: '0', 'aria-label': t('فرز حسب') });
+    const list = el('div', { class: 'admin-phase2-list' });
+    function draw() {
+      list.innerHTML = '';
+      if (!custom.length) { list.append(el('div', { class: 'hint' }, t('لا توجد نتائج'))); return; }
+      custom.forEach((c) => list.append(el('div', { class: 'admin-phase2-row' },
+        el('strong', null, c.name),
+        el('code', null, c.slug),
+        el('span', { class: 'admin-order-meta' }, c.type === 'game' ? 'لعبة' : 'تطبيق'),
+        el('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => {
+          if (!confirm(`حذف الفئة «${c.name}»؟`)) return;
+          try {
+            await api(`/api/admin/categories/${encodeURIComponent(c.slug)}`, { method: 'DELETE' });
+            logAdminAction(`حذف الفئة «${c.name}»`);
+            renderCategories(body);
+          } catch (e) { toast('فشل الحذف', 'error'); }
+        } }, t('حذف الفئة')))));
+    }
+    draw();
+    body.append(
+      phaseHead(t('الفئات'), 'أضف فئات مخصصة أو أعد تسمية فئة موجودة؛ تُدمج تلقائياً مع فئات المتجر الأساسية.'),
+      el('div', { class: 'admin-dash-grid' },
+        el('div', { class: 'panel' },
+          el('div', { class: 'panel-head' }, ico('plus', 'icon'), t('إضافة فئة')),
+          el('div', { class: 'form' },
+            el('div', { class: 'field' }, el('label', null, t('معرف الفئة')), slugIn),
+            el('div', { class: 'field' }, el('label', null, t('اسم الفئة')), nameIn),
+            el('div', { class: 'field' }, el('label', null, t('النوع')), typeIn),
+            el('div', { class: 'field' }, el('label', null, t('فرز حسب')), posIn),
+            el('button', { class: 'btn btn-primary', type: 'button', onclick: async () => {
+              if (!slugIn.value.trim() || !nameIn.value.trim()) { toast('أكمل الحقول', 'error'); return; }
+              try {
+                await api('/api/admin/categories', { method: 'POST',
+                  body: { slug: slugIn.value.trim().toLowerCase(), name: nameIn.value.trim(),
+                    type: typeIn.value, position: Number(posIn.value) || 99 } });
+                logAdminAction(`إضافة الفئة «${nameIn.value.trim()}»`);
+                toast('تم الحفظ', 'success'); renderCategories(body);
+              } catch (e) { toast('فشل الحفظ', 'error'); }
+            } }, t('إضافة فئة')))),
+        el('div', { class: 'admin-dash-side' },
+          el('div', { class: 'panel' },
+            el('div', { class: 'panel-head' }, ico('grid', 'icon'), t('الفئات')), list))),
+    );
+  }
+
+  async function renderTeam(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    let res = { roles: [], me: '' };
+    try { res = await api('/api/admin/roles'); } catch (e) {}
+    body.innerHTML = '';
+    const userIn = el('input', { class: 'input', placeholder: 'اسم المستخدم / البريد', 'aria-label': t('المشرف') });
+    const roleIn = el('select', { class: 'input', 'aria-label': t('الدور') },
+      el('option', { value: 'viewer' }, t('مشاهد')),
+      el('option', { value: 'editor' }, t('محرر')),
+      el('option', { value: 'owner' }, t('مالك')));
+    const list = el('div', { class: 'admin-phase2-list' });
+    (res.roles || []).forEach((r) => list.append(el('div', { class: 'admin-phase2-row' },
+      el('strong', null, r.username),
+      el('span', { class: 'admin-role-badge' }, r.role),
+      el('span', { class: 'admin-order-meta' }, r.username === res.me ? 'أنت' : ''),
+      el('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => {
+        if (!confirm(`إزالة صلاحية ${r.username}؟`)) return;
+        try {
+          await api(`/api/admin/roles/${encodeURIComponent(r.username)}`, { method: 'DELETE' });
+          logAdminAction(`إزالة دور ${r.username}`);
+          renderTeam(body);
+        } catch (e) { toast('تعذّر الإزالة (آخر مالك؟)', 'error'); }
+      } }, t('حذف')))));
+    if (!(res.roles || []).length) list.append(el('div', { class: 'hint' }, 'لا يوجد مالكون بعد — أول من يضيف دور «مالك» يصبح مالك النظام.'));
+    body.append(
+      phaseHead(t('المشرفون والصلاحيات'), 'سجل أدوار للمشرفين: مالك يتحكم بالصلاحيات والنسخ الاحتياطي، محرر، ومشاهد. الحساب الحالي يعمل دائماً.',
+        el('span', { class: 'admin-role-me' }, res.me)),
+      el('div', { class: 'admin-dash-grid' },
+        el('div', { class: 'panel' },
+          el('div', { class: 'panel-head' }, ico('shield', 'icon'), t('إضافة مشرف')),
+          el('div', { class: 'form' },
+            el('div', { class: 'field' }, el('label', null, t('المشرف')), userIn),
+            el('div', { class: 'field' }, el('label', null, t('الدور')), roleIn),
+            el('button', { class: 'btn btn-primary', type: 'button', onclick: async () => {
+              if (!userIn.value.trim()) { toast('أدخل اسم المستخدم', 'error'); return; }
+              try {
+                await api('/api/admin/roles', { method: 'POST',
+                  body: { username: userIn.value.trim(), role: roleIn.value } });
+                logAdminAction(`تعيين دور ${roleIn.value} لـ ${userIn.value.trim()}`);
+                toast('تم الحفظ', 'success'); renderTeam(body);
+              } catch (e) { toast('فشل الحفظ (صلاحية مالك مطلوبة)', 'error'); }
+            } }, t('إضافة مشرف')))),
+        el('div', { class: 'admin-dash-side' },
+          el('div', { class: 'panel' },
+            el('div', { class: 'panel-head' }, ico('user', 'icon'), t('المشرفون')), list))),
+      el('div', { class: 'hint' }, 'ملاحظة: هذا سجل أدوار للأقسام الإدارية الجديدة؛ تسجيل الدخول نفسه يبقى عبر حساب الأدمن الحالي.'),
+    );
+  }
+
+  async function renderActivity(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    let rows = [];
+    try { rows = (await api('/api/admin/activity')).activity || []; } catch (e) {}
+    body.innerHTML = '';
+    const table = el('table', { class: 'table' },
+      el('thead', null, el('tr', null,
+        el('th', null, t('الإجراء')), el('th', null, t('المشرف')),
+        el('th', null, t('تاريخ النشر')))),
+      el('tbody', null, ...rows.map((r) => el('tr', null,
+        el('td', null, r.action),
+        el('td', null, r.actor || '—'),
+        el('td', null, r.ts ? formatDate(r.ts) : '—')))));
+    body.append(
+      phaseHead(t('سجل النشاطات'), 'سجل دائم على الخادم لكل عمليات النشر والحذف والترتيب والاستيراد.'),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('clock', 'icon'), t('سجل النشاطات')),
+        rows.length ? el('div', { class: 'table-wrap' }, table)
+          : el('div', { class: 'hint' }, t('لا نشاطات بعد'))),
+    );
+  }
+
+  async function renderBackup(body) {
+    body.innerHTML = '';
+    const file = el('input', { type: 'file', accept: 'application/json,.json', class: 'input',
+      'aria-label': t('اختر ملف JSON') });
+    const result = el('div', { class: 'hint' });
+
+    const exportBtn = el('button', { class: 'btn btn-primary', type: 'button', onclick: async () => {
+      try {
+        const data = await api('/api/admin/backup');
+        saveBlob(`goldenstore-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2));
+        logAdminAction('تصدير نسخة احتياطية');
+        toast('تم التصدير', 'success');
+      } catch (e) { toast('فشل التصدير', 'error'); }
+    } }, ico('download'), t('تصدير النسخة الاحتياطية'));
+
+    const importBtn = el('button', { class: 'btn btn-secondary', type: 'button', onclick: async () => {
+      const f = file.files && file.files[0];
+      if (!f) { toast(t('اختر ملف JSON'), 'error'); return; }
+      if (!confirm('استيراد آمن بدمج فقط: لن يُحذف أو يُستبدل أي صف موجود. متابعة؟')) return;
+      try {
+        const data = JSON.parse(await f.text());
+        const r = await api('/api/admin/import', { method: 'POST', body: { ...data, confirm: true } });
+        logAdminAction(`استيراد نسخة احتياطية (${r.imported} صفاً)`);
+        result.textContent = `تم استيراد ${r.imported} صفاً — تم تخطي ${r.apps_skipped || 0} صف تطبيقات (الملفات في R2).`;
+        toast('تم الاستيراد', 'success');
+      } catch (e) { toast('فشل الاستيراد', 'error'); }
+    } }, t('استيراد نسخة احتياطية'));
+
+    const exportPanel = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('download', 'icon'), t('تصدير النسخة الاحتياطية')),
+      el('div', { class: 'admin-phase2-pad' },
+        el('p', { class: 'hint' }, 'التطبيقات + الإصدارات + الفئات + الترتيب + النشر + الأدوار + السجل.'),
+        exportBtn));
+
+    const importPanel = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('upload', 'icon'), t('استيراد نسخة احتياطية')),
+      el('div', { class: 'admin-phase2-pad' }, file, importBtn, result));
+
+    body.append(
+      phaseHead(t('النسخ الاحتياطي'), 'صدّر كل بيانات لوحة التحكم، أو استورد نسخة بدمج آمن لا يستبدل أي صف موجود.'),
+      el('div', { class: 'admin-dash-grid' },
+        exportPanel,
+        el('div', { class: 'admin-dash-side' }, importPanel)),
+      el('div', { class: 'hint' }, 'الاستيراد يدمج البيانات الوصفية فقط (INSERT OR IGNORE). ملفات APK والصور تبقى في R2 وتُعاد عبر نموذج النشر المعتاد.'),
+    );
   }
 
   function notificationCard(n, refreshList) {

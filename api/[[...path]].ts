@@ -126,6 +126,76 @@ async function requireAdmin(c: any, next: any) {
   await next();
 }
 
+/* =========================================================================
+   Admin Console — Phase 2 (2026-11-07)
+   All tables are created lazily with CREATE TABLE IF NOT EXISTS so no manual
+   migration is required and an older D1 database keeps working unchanged.
+   Publication/order/category layers are ADDITIVE: with empty tables the store
+   behaves exactly as before.
+   ========================================================================= */
+const CONSOLE_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS app_publication (
+     slug TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'published',
+     publish_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE TABLE IF NOT EXISTS app_order (
+     slug TEXT PRIMARY KEY, position INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE TABLE IF NOT EXISTS store_categories (
+     slug TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT 'grid',
+     type TEXT NOT NULL DEFAULT 'app', position INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE TABLE IF NOT EXISTS admin_activity (
+     id TEXT PRIMARY KEY, actor TEXT, action TEXT, kind TEXT DEFAULT 'info', ts INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS admin_roles (
+     username TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'viewer', created_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_activity_ts ON admin_activity(ts DESC)`,
+];
+const consoleReady = new WeakSet<object>();
+async function ensureConsoleTables(db: any) {
+  if (!db || consoleReady.has(db)) return;
+  consoleReady.add(db);
+  for (const sql of CONSOLE_SCHEMA) { try { await db.prepare(sql).run(); } catch { /* best effort */ } }
+}
+async function hiddenSlugs(env: Env): Promise<Set<string>> {
+  await ensureConsoleTables(env.DB);
+  const rows: any = await env.DB.prepare(
+    "SELECT slug FROM app_publication WHERE status = 'draft' OR (status = 'scheduled' AND publish_at > ?)"
+  ).bind(nowSec()).all().catch(() => ({ results: [] }));
+  return new Set((rows.results || []).map((r: any) => String(r.slug)));
+}
+async function consoleOrder(env: Env): Promise<Map<string, number>> {
+  const rows: any = await env.DB.prepare('SELECT slug, position FROM app_order').all().catch(() => ({ results: [] }));
+  return new Map((rows.results || []).map((r: any) => [String(r.slug), Number(r.position) || 0]));
+}
+function applyConsoleOrder<T extends { slug: string }>(apps: T[], order: Map<string, number>): T[] {
+  if (!order.size) return apps;
+  return apps.slice().sort((a, b) => (order.get(a.slug) ?? 1e9) - (order.get(b.slug) ?? 1e9));
+}
+async function recordActivity(env: Env, actor: string, action: string, kind = 'info') {
+  await ensureConsoleTables(env.DB);
+  try {
+    await env.DB.prepare('INSERT INTO admin_activity (id, actor, action, kind, ts) VALUES (?, ?, ?, ?, ?)')
+      .bind(String(crypto.randomUUID()), actor, sanitizeText(action, 300), kind, nowSec()).run();
+  } catch { /* logging must never break an action */ }
+}
+function consoleActor(c: any): string { return String((c.get('user') || {}).sub || 'admin'); }
+async function publishDueApps(env: Env) {
+  await ensureConsoleTables(env.DB);
+  const res: any = await env.DB.prepare(
+    "UPDATE app_publication SET status = 'published', updated_at = ? WHERE status = 'scheduled' AND publish_at <= ?"
+  ).bind(nowSec(), nowSec()).run().catch(() => null);
+  const n = Number(res?.meta?.changes ?? res?.changes ?? 0);
+  if (n > 0) await recordActivity(env, 'cron', `نشر ${n} عنصراً مجدولاً تلقائياً`, 'publish');
+}
+async function requireOwner(c: any, next: any) {
+  await ensureConsoleTables(c.env.DB);
+  const owners: any = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM admin_roles WHERE role = 'owner'").first().catch(() => null);
+  if (!Number(owners?.n || 0)) { await next(); return; }   // bootstrap: no owner configured yet
+  const me = consoleActor(c);
+  const row: any = await c.env.DB.prepare('SELECT role FROM admin_roles WHERE username = ?').bind(me).first().catch(() => null);
+  if (!row || row.role !== 'owner') return c.json({ error: 'forbidden' }, 403);
+  await next();
+}
+
 function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
   const result: any = {
     id: d.id, slug: d.slug, name: d.name, name_lower: d.name_lower, search_terms: d.search_terms || [],
@@ -689,7 +759,20 @@ app.get('/categories', async (c) => {
     categoriesCache.data = counts; categoriesCache.ts = now;
   }
   const source = type === 'app' ? APP_CATEGORIES : type === 'game' ? GAME_CATEGORIES : DEFAULT_CATEGORIES;
-  return c.json({ categories: source.map(cat => ({ ...cat, count: counts[cat.slug] || 0 })) });
+  // Admin-managed categories are additive and override a static category with
+  // the same slug (rename / icon / position), without touching lib/types.ts.
+  await ensureConsoleTables(c.env.DB);
+  const custom: any = await c.env.DB.prepare('SELECT slug, name, icon, type, position FROM store_categories').all().catch(() => ({ results: [] }));
+  const merged = source.map((cat) => ({ ...cat, count: counts[cat.slug] || 0 }));
+  (custom.results || []).forEach((r: any) => {
+    if (type === 'app' && r.type === 'game') return;
+    if (type === 'game' && r.type === 'app') return;
+    const hit = merged.find((x) => x.slug === r.slug);
+    if (hit) { hit.name = r.name; hit.icon = r.icon || hit.icon; hit.position = Number(r.position) || hit.position; }
+    else merged.push({ slug: r.slug, name: r.name, icon: r.icon || 'grid', position: Number(r.position) || 99, count: counts[r.slug] || 0 });
+  });
+  merged.sort((a, b) => (a.position || 0) - (b.position || 0));
+  return c.json({ categories: merged });
 });
 
 /* =========================================================================
@@ -739,7 +822,9 @@ app.get('/search', async (c) => {
 
   try {
     const result = await searchApps(c.env, { q, category, type, sort, minRating, limit, offset });
-    const apps = result.apps.map((a) => ({
+    const hidden = await hiddenSlugs(c.env);
+    const visible = result.apps.filter((a) => !hidden.has(String(a.slug)));
+    const apps = visible.map((a) => ({
       ...appPublic(a),
       icon_url: icon_url(a.icon_key, c.env),
       feature_url: feature_url(a.feature_key, c.env),
@@ -747,7 +832,7 @@ app.get('/search', async (c) => {
     c.header('Cache-Control', q ? 'public, max-age=60' : 'public, max-age=120');
     return c.json({
       apps,
-      total: result.total,
+      total: Math.max(0, Number(result.total) - (result.apps.length - visible.length)),
       limit,
       offset,
       hasMore: offset + apps.length < result.total,
@@ -766,14 +851,19 @@ app.get('/apps', async (c) => {
 
   try {
     const result = await listApps(c.env, { q, category, type, sort, starredOnly, limit, offset });
-    const apps = result.apps.map(a => ({ ...appPublic(a), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) }));
+    const hidden = await hiddenSlugs(c.env);
+    const visible = result.apps.filter(a => !hidden.has(String(a.slug)));
+    const ordered = sort === 'recent' ? applyConsoleOrder(visible, await consoleOrder(c.env)) : visible;
+    const apps = ordered.map(a => ({ ...appPublic(a), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) }));
     c.header('Cache-Control', 'public, max-age=300');
-    return c.json({ apps, total: result.total });
+    return c.json({ apps, total: Math.max(0, Number(result.total) - (result.apps.length - visible.length)) });
   } catch (e: any) { return c.json({ error: 'd1_error', message: e.message }, 500); }
 });
 
 app.get('/apps/:slug', async (c) => {
-  const appData = await getAppBySlug(c.env, c.req.param('slug'));
+  const slug = c.req.param('slug');
+  if ((await hiddenSlugs(c.env)).has(slug)) return c.json({ error: 'not_found' }, 404);
+  const appData = await getAppBySlug(c.env, slug);
   if (!appData) return c.json({ error: 'not_found' }, 404);
   
   const screenshotsData = await listScreenshots(c.env, appData.id);
@@ -1030,6 +1120,182 @@ app.post('/support/threads/:id/read', async (c) => {
 });
 
 app.use('/admin/*', requireAdmin);
+
+
+/* ---------------- Admin Console — Phase 2 routes ---------------------- */
+app.get('/admin/console/state', async (c) => {
+  await ensureConsoleTables(c.env.DB);
+  const all = async (sql: string) => (await c.env.DB.prepare(sql).all().catch(() => ({ results: [] }))).results || [];
+  const [publication, order, categories, activity, roles, releases] = await Promise.all([
+    all('SELECT slug, status, publish_at, updated_at FROM app_publication'),
+    all('SELECT slug, position FROM app_order ORDER BY position ASC'),
+    all('SELECT slug, name, icon, type, position FROM store_categories ORDER BY position ASC'),
+    all('SELECT id, actor, action, kind, ts FROM admin_activity ORDER BY ts DESC LIMIT 50'),
+    all('SELECT username, role, created_at FROM admin_roles ORDER BY created_at DESC'),
+    all('SELECT version_name, force, size_bytes, created_at FROM app_update_releases ORDER BY created_at DESC LIMIT 20'),
+  ]);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ publication, order, categories, activity, roles, releases });
+});
+
+app.post('/admin/publication', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const slug = String(body.slug || '').trim();
+  const status = String(body.status || 'published');
+  if (!isValidSlug(slug) || !['published', 'draft', 'scheduled'].includes(status)) {
+    return c.json({ error: 'invalid_input' }, 400);
+  }
+  const publishAt = status === 'scheduled' ? safeInt(body.publish_at, 0, 99999999999) : 0;
+  await ensureConsoleTables(c.env.DB);
+  await c.env.DB.prepare(`INSERT INTO app_publication (slug, status, publish_at, updated_at)
+    VALUES (?, ?, ?, ?) ON CONFLICT(slug) DO UPDATE SET
+      status = excluded.status, publish_at = excluded.publish_at, updated_at = excluded.updated_at`)
+    .bind(slug, status, publishAt, nowSec()).run();
+  await recordActivity(c.env, consoleActor(c), `حالة «${slug}» → ${status}`, 'publish');
+  return c.json({ ok: true });
+});
+
+app.post('/admin/order', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const slugs = Array.isArray(body.slugs) ? body.slugs.slice(0, 500).map((x: any) => String(x)).filter((x: string) => isValidSlug(x)) : [];
+  await ensureConsoleTables(c.env.DB);
+  await c.env.DB.prepare('DELETE FROM app_order').run().catch(() => {});
+  for (let i = 0; i < slugs.length; i++) {
+    await c.env.DB.prepare('INSERT OR REPLACE INTO app_order (slug, position, updated_at) VALUES (?, ?, ?)')
+      .bind(slugs[i], i, nowSec()).run();
+  }
+  await recordActivity(c.env, consoleActor(c), `ترتيب الكتالوج (${slugs.length} عنصراً)`, 'order');
+  return c.json({ ok: true, count: slugs.length });
+});
+
+app.get('/admin/categories', async (c) => {
+  await ensureConsoleTables(c.env.DB);
+  const rows: any = await c.env.DB.prepare('SELECT * FROM store_categories ORDER BY position ASC').all().catch(() => ({ results: [] }));
+  return c.json({ categories: rows.results || [] });
+});
+app.post('/admin/categories', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const slug = String(body.slug || '').trim().toLowerCase();
+  const name = sanitizeText(body.name, 60);
+  if (!/^[a-z0-9_-]{1,40}$/.test(slug) || !name) return c.json({ error: 'invalid_input' }, 400);
+  const type = body.type === 'game' ? 'game' : 'app';
+  await ensureConsoleTables(c.env.DB);
+  await c.env.DB.prepare(`INSERT INTO store_categories (slug, name, icon, type, position, created_at)
+    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(slug) DO UPDATE SET
+      name = excluded.name, icon = excluded.icon, type = excluded.type, position = excluded.position`)
+    .bind(slug, name, String(body.icon || 'grid').slice(0, 30), type, safeInt(body.position, 0, 999), nowSec()).run();
+  await recordActivity(c.env, consoleActor(c), `حفظ الفئة «${name}»`, 'category');
+  return c.json({ ok: true });
+});
+app.delete('/admin/categories/:slug', async (c) => {
+  await ensureConsoleTables(c.env.DB);
+  await c.env.DB.prepare('DELETE FROM store_categories WHERE slug = ?').bind(c.req.param('slug')).run().catch(() => {});
+  await recordActivity(c.env, consoleActor(c), `حذف الفئة «${c.req.param('slug')}»`, 'category');
+  return c.json({ ok: true });
+});
+
+app.get('/admin/activity', async (c) => {
+  await ensureConsoleTables(c.env.DB);
+  const rows: any = await c.env.DB.prepare('SELECT id, actor, action, kind, ts FROM admin_activity ORDER BY ts DESC LIMIT 100').all().catch(() => ({ results: [] }));
+  return c.json({ activity: rows.results || [] });
+});
+app.post('/admin/activity', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const action = sanitizeText(body.action, 300);
+  if (!action) return c.json({ error: 'invalid_input' }, 400);
+  await recordActivity(c.env, consoleActor(c), action, String(body.kind || 'info').slice(0, 20));
+  return c.json({ ok: true });
+});
+
+app.get('/admin/roles', requireOwner, async (c) => {
+  const rows: any = await c.env.DB.prepare('SELECT username, role, created_at FROM admin_roles ORDER BY created_at DESC').all().catch(() => ({ results: [] }));
+  return c.json({ roles: rows.results || [], me: consoleActor(c) });
+});
+app.post('/admin/roles', requireOwner, async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const username = sanitizeText(body.username, 120);
+  const role = String(body.role || 'viewer');
+  if (!username || !['owner', 'editor', 'viewer'].includes(role)) return c.json({ error: 'invalid_input' }, 400);
+  await ensureConsoleTables(c.env.DB);
+  await c.env.DB.prepare(`INSERT INTO admin_roles (username, role, created_at) VALUES (?, ?, ?)
+    ON CONFLICT(username) DO UPDATE SET role = excluded.role`)
+    .bind(username, role, nowSec()).run();
+  await recordActivity(c.env, consoleActor(c), `تعيين دور ${role} لـ ${username}`, 'role');
+  return c.json({ ok: true });
+});
+app.delete('/admin/roles/:username', requireOwner, async (c) => {
+  const username = decodeURIComponent(c.req.param('username'));
+  await ensureConsoleTables(c.env.DB);
+  const owners: any = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM admin_roles WHERE role = 'owner'").first().catch(() => null);
+  const target: any = await c.env.DB.prepare('SELECT role FROM admin_roles WHERE username = ?').bind(username).first().catch(() => null);
+  if (Number(owners?.n || 0) <= 1 && target?.role === 'owner') {
+    return c.json({ error: 'last_owner' }, 400);
+  }
+  await c.env.DB.prepare('DELETE FROM admin_roles WHERE username = ?').bind(username).run().catch(() => {});
+  await recordActivity(c.env, consoleActor(c), `إزالة صلاحية ${username}`, 'role');
+  return c.json({ ok: true });
+});
+
+app.get('/admin/backup', async (c) => {
+  await ensureConsoleTables(c.env.DB);
+  const all = async (sql: string) => (await c.env.DB.prepare(sql).all().catch(() => ({ results: [] }))).results || [];
+  const [apps, publication, order, categories, activity, roles, releases] = await Promise.all([
+    all('SELECT * FROM apps'),
+    all('SELECT * FROM app_publication'),
+    all('SELECT * FROM app_order'),
+    all('SELECT * FROM store_categories'),
+    all('SELECT * FROM admin_activity ORDER BY ts DESC LIMIT 500'),
+    all('SELECT * FROM admin_roles'),
+    all('SELECT * FROM app_update_releases ORDER BY created_at DESC LIMIT 100'),
+  ]);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ version: 1, exported_at: nowSec(), apps, publication, order, categories, activity, roles, releases });
+});
+
+app.post('/admin/import', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (body.confirm !== true) return c.json({ error: 'confirmation_required' }, 400);
+  await ensureConsoleTables(c.env.DB);
+  let imported = 0;
+  const db: any = c.env.DB;
+  const merge = async (sql: string, rows: any[], bind: (r: any) => any[]) => {
+    for (const r of rows.slice(0, 500)) {
+      try { await db.prepare(sql).bind(...bind(r)).run(); imported++; } catch { /* skip malformed row */ }
+    }
+  };
+  await merge(`INSERT OR IGNORE INTO app_publication (slug, status, publish_at, updated_at) VALUES (?, ?, ?, ?)`,
+    Array.isArray(body.publication) ? body.publication : [],
+    (r) => [String(r.slug), String(r.status || 'published'), Number(r.publish_at) || 0, Number(r.updated_at) || 0]);
+  await merge(`INSERT OR IGNORE INTO app_order (slug, position, updated_at) VALUES (?, ?, ?)`,
+    Array.isArray(body.order) ? body.order : [],
+    (r) => [String(r.slug), Number(r.position) || 0, Number(r.updated_at) || 0]);
+  await merge(`INSERT OR IGNORE INTO store_categories (slug, name, icon, type, position, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    Array.isArray(body.categories) ? body.categories : [],
+    (r) => [String(r.slug), String(r.name || ''), String(r.icon || 'grid'), String(r.type || 'app'), Number(r.position) || 0, Number(r.created_at) || 0]);
+  await merge(`INSERT OR IGNORE INTO admin_roles (username, role, created_at) VALUES (?, ?, ?)`,
+    Array.isArray(body.roles) ? body.roles : [],
+    (r) => [String(r.username), ['owner', 'editor', 'viewer'].includes(r.role) ? r.role : 'viewer', Number(r.created_at) || nowSec()]);
+  await merge(`INSERT OR IGNORE INTO app_update_releases (id, version_name, version_code, notes, force, size_bytes, apk_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    Array.isArray(body.releases) ? body.releases : [],
+    (r) => [String(r.id || crypto.randomUUID()), String(r.version_name || ''), Number(r.version_code) || 0,
+      String(r.notes || ''), r.force ? 1 : 0, Number(r.size_bytes) || 0, String(r.apk_url || ''), Number(r.created_at) || nowSec()]);
+  // App binaries live in R2; only metadata rows are merged, never overwritten.
+  let appsSkipped = 0;
+  for (const r of (Array.isArray(body.apps) ? body.apps : []).slice(0, 500)) {
+    try {
+      await db.prepare(`INSERT OR IGNORE INTO apps
+        (id, slug, name, package_name, category, type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(String(r.id), String(r.slug), String(r.name || ''), String(r.package_name || ''),
+          String(r.category || 'tools'), r.type === 'game' ? 'game' : 'app',
+          Number(r.created_at) || nowSec(), Number(r.updated_at) || nowSec()).run();
+      imported++;
+    } catch { appsSkipped++; }
+  }
+  await recordActivity(c.env, consoleActor(c), `استيراد نسخة احتياطية (${imported} صفاً)`, 'backup');
+  return c.json({ ok: true, imported, apps_skipped: appsSkipped,
+    note: 'Merge-only: existing rows are never overwritten. APK/image binaries stay in R2.' });
+});
 
 /* --------------------- Review reports (admin only) --------------------- */
 
@@ -1661,8 +1927,13 @@ app.onError((err, c) => { console.error('[api error]', err); return c.json({ err
 // Cloudflare Workers module entry: HTTP + Cron Triggers.
 export async function scheduled(_controller: any, env: Env, ctx: any) {
   try {
-    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(processScheduledPushes(env));
-    else await processScheduledPushes(env);
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(processScheduledPushes(env));
+      ctx.waitUntil(publishDueApps(env));
+    } else {
+      await processScheduledPushes(env);
+      await publishDueApps(env);
+    }
   } catch (error: any) {
     console.error('[push] cron failed:', error?.message || error);
   }

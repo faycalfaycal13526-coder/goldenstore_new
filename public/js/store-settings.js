@@ -69,6 +69,12 @@
     return !(end > 0 && end <= serverNow());
   }
   function isBypass() { return !!(meta && meta.maintenance_bypass === true); }
+  function isAdminConsole() {
+    try {
+      if (document.body && document.body.getAttribute('data-page') === 'admin') return true;
+      return /gs-admin-[a-z0-9]+\.html/i.test(window.location.pathname || '');
+    } catch (e) { return false; }
+  }
   function pad(n) { return String(n).padStart(2, '0'); }
   function fmtRemaining(sec) {
     sec = Math.max(0, Math.floor(sec || 0));
@@ -283,16 +289,22 @@
       existing.setAttribute('role', 'status');
       existing.setAttribute('data-noi18n', '');
       existing.appendChild(node('span', 'gs-maintenance-admin-dot'));
-      existing.appendChild(node('strong', null, tr('وضع الصيانة مفعّل — معاينة المدير')));
+      existing.appendChild(node('strong', 'gs-maintenance-admin-label',
+        tr(isBypass() ? 'وضع الصيانة مفعّل — معاينة المدير' : 'وضع الصيانة مفعّل — الزوار محجوبون')));
       var cd = node('b', 'gs-maintenance-admin-countdown', '--:--:--');
       cd.setAttribute('dir', 'ltr');
       existing.appendChild(cd);
-      var a = node('a', null, tr('لوحة التحكم'));
-      a.setAttribute('href', '/gs-admin-c0d982f8.html');
-      existing.appendChild(a);
+      if (!isAdminConsole()) {
+        var a = node('a', null, tr('لوحة التحكم'));
+        a.setAttribute('href', '/gs-admin-c0d982f8.html');
+        existing.appendChild(a);
+      }
       document.body.appendChild(existing);
     }
     adminPill = existing;
+    var label = adminPill.querySelector('.gs-maintenance-admin-label');
+    if (label) label.textContent = tr(isBypass()
+      ? 'وضع الصيانة مفعّل — معاينة المدير' : 'وضع الصيانة مفعّل — الزوار محجوبون');
     var rem = endAt() > 0 ? endAt() - serverNow() : 0;
     var b = adminPill.querySelector('.gs-maintenance-admin-countdown');
     if (b) b.textContent = endAt() > 0 ? fmtRemaining(rem) : '—';
@@ -309,7 +321,11 @@
     document.body.classList.remove('has-maintenance-bar');
     if (!isActive()) { hideBlocking(); hideAdminPill(); return; }
     var msg = get('maintenance_message') || tr('المتجر تحت الصيانة، نعود قريباً.');
-    if (isBypass()) { hideBlocking(); showAdminPill(); return; }
+    // The console is the ONLY page that is never locked: the admin must be able
+    // to sign in (or turn maintenance off) even before a session cookie exists.
+    // Visitors still cannot read anything: every /api/admin/* route is 401 and
+    // every public API route is 503 without a verified admin session.
+    if (isBypass() || isAdminConsole()) { hideBlocking(); showAdminPill(); return; }
     hideAdminPill();
     showBlocking(msg);
   }

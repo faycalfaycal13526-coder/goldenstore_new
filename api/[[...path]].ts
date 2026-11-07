@@ -102,7 +102,7 @@ app.use('*', async (c, next) => {
    directly: every public endpoint returns 503 while maintenance is active.
    Only the admin session (verified JWT) and a tiny allowlist pass through.
    ========================================================================= */
-const MAINTENANCE_ALLOWLIST = ['/api/settings', '/api/login', '/api/logout'];
+const MAINTENANCE_ALLOWLIST = ['/api/settings', '/api/login', '/api/logout', '/api/me'];
 const maintenanceCache: { data: Record<string, string> | null; ts: number } = { data: null, ts: 0 };
 const MAINTENANCE_CACHE_TTL = 3000;
 function invalidateMaintenanceCache() { maintenanceCache.data = null; maintenanceCache.ts = 0; }

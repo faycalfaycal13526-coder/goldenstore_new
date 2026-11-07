@@ -993,6 +993,7 @@
     'لا يمكن متابعة التصفح حتى انتهاء الصيانة': { en: 'Browsing is unavailable until maintenance ends', fr: 'La navigation est indisponible jusqu’à la fin de la maintenance', es: 'No se puede navegar hasta que finalice el mantenimiento' },
     'انتهت الصيانة، نعود الآن…': { en: 'Maintenance is over, reloading…', fr: 'Maintenance terminée, rechargement…', es: 'Mantenimiento finalizado, recargando…' },
     'وضع الصيانة مفعّل — معاينة المدير': { en: 'Maintenance on — admin preview', fr: 'Maintenance activée — aperçu admin', es: 'Mantenimiento activo — vista de administrador' },
+    'وضع الصيانة مفعّل — الزوار محجوبون': { en: 'Maintenance on — visitors are locked out', fr: 'Maintenance activée — visiteurs bloqués', es: 'Mantenimiento activo — visitantes bloqueados' },
     'لوحة التحكم': { en: 'Admin console', fr: 'Console d’administration', es: 'Panel de administración' },
     'المتجر تحت الصيانة، نعود قريباً.': { en: 'The store is under maintenance, we will be back soon.', fr: 'La boutique est en maintenance, nous revenons bientôt.', es: 'La tienda está en mantenimiento, volvemos pronto.' },
   };

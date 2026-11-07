@@ -978,6 +978,8 @@
       try {
         const r = await api('/api/admin/settings', { method: 'PATCH', body: { values: payload } });
         Object.assign(values, r.settings || {});
+        // Apply immediately to this console and to every storefront page.
+        try { if (window.GSSettings && window.GSSettings.refresh) window.GSSettings.refresh(); } catch (e) {}
         logAdminAction(`حفظ ${dirty.size} إعداداً`);
         dirty.clear();
         dirtyBadge.textContent = t('تم الحفظ');
@@ -1020,6 +1022,7 @@
       try {
         const r = await api('/api/admin/settings/reset', { method: 'POST' });
         Object.assign(values, r.settings || {});
+        try { if (window.GSSettings && window.GSSettings.refresh) window.GSSettings.refresh(); } catch (e) {}
         dirty.clear(); updatePreview(); renderStoreSettings(body);
         toast(t('تم الحفظ'), 'success');
       } catch (e) { toast('فشل الإعادة', 'error'); }
@@ -1792,6 +1795,13 @@
       });
       const notifyInput = el('input', { type: 'checkbox' });
       notifyInput.checked = true;
+      // Setting "auto notify on store update" forces the checkbox ON.
+      try {
+        if (window.GSSettings && window.GSSettings.get('auto_notify_update', '0') === '1') {
+          notifyInput.checked = true;
+          notifyInput.disabled = true;
+        }
+      } catch (e) {}
       const forceInput = el('input', { type: 'checkbox' });
       forceInput.checked = !!(current && current.force);
 
@@ -2778,6 +2788,10 @@
       e.preventDefault();
       const apkFiles = apkDz.getFiles();
       if (!apkFiles.length) { toast('يجب رفع ملف APK', 'error'); return; }
+      const maxMb = Number((window.GSSettings && window.GSSettings.get('max_upload_mb', '200')) || 200);
+      if (apkFiles[0] && apkFiles[0].size > maxMb * 1024 * 1024) {
+        toast(`أقصى حجم مسموح: ${maxMb} م.ب`, 'error'); return;
+      }
       const data = Object.fromEntries(new FormData(form).entries());
       const submitBtn = form.querySelector('button[type=submit]');
       submitBtn.disabled = true;
@@ -2883,6 +2897,16 @@
           if (f && f.value !== undefined && dup[k] != null) f.value = String(dup[k]);
         });
         toast('تم نسخ البيانات — غيّر الاسم وارفع APK جديداً', 'info');
+      }
+    } catch (e) {}
+    // Settings: prefill the default type/category for a brand-new item.
+    try {
+      const cfg = window.GSSettings;
+      if (cfg) {
+        const tField = form.elements.type;
+        const cField = form.elements.category;
+        if (tField && cfg.get('default_type')) tField.value = cfg.get('default_type');
+        if (cField && cfg.get('default_category')) cField.value = cfg.get('default_category');
       }
     } catch (e) {}
     body.append(form);

@@ -3703,3 +3703,24 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
   .gs-demo-card { padding: 14px; }
   .gs-demo-fields { grid-template-columns: 1fr; }
 }
+
+/* =====================================================================
+   Live settings effects (2026-11-07) — driven by /js/store-settings.js
+   ===================================================================== */
+.gs-maintenance-bar {
+  position: sticky; top: 0; z-index: 120;
+  padding: 10px 16px; text-align: center; font-size: 12.5px; font-weight: 800;
+  color: #1a1400; background: linear-gradient(90deg, #f4c01f, #ffe9a8, #f4c01f);
+  box-shadow: 0 6px 20px rgba(0,0,0,.3);
+}
+body.gs-hide-downloads .gs-download-stat,
+body.gs-hide-downloads .d-stat-downloads,
+body.gs-hide-downloads .dl-count { display: none !important; }
+body.gs-reviews-off .review-form,
+body.gs-reviews-off .gs-review-actions { display: none !important; }
+body.gs-compact .app-card,
+body.gs-compact .shot-card { border-radius: 12px; }
+body.gs-compact .content,
+body.gs-compact .section { padding-block: 10px; }
+body.gs-compact .topbar { padding-block: 6px; }
+:root[data-theme="light"] .gs-maintenance-bar { color: #1a1400; }

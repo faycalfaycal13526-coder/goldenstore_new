@@ -678,7 +678,7 @@
     const rt = ratingOf(app);
     content.append(el('div', { class: 'd-stats' },
       stat(rt ? el('span', null, rt, ico('star', 'icon fill')) : el('span', null, '—'), t('تقييمات')),
-      stat(formatCount(app.downloads), t('تنزيلات')),
+      stat(formatCount(app.downloads), t('تنزيلات'), 'gs-download-stat d-stat-downloads'),
       stat(formatBytes(app.size_bytes || 0), t('الحجم')),
       stat(sdkName(app.min_sdk), t('أندرويد')),
     ));
@@ -712,10 +712,11 @@
 
     loadSimilar(app, content);
 
-    function stat(value, label) {
+    function stat(value, label, extraClass) {
       const v = el('div', { class: 'v' });
       if (value && value.nodeType) v.append(value); else v.textContent = value;
-      return el('div', { class: 'd-stat' }, v, el('div', { class: 'l' }, label));
+      return el('div', { class: `d-stat${extraClass ? ' ' + extraClass : ''}` },
+        v, el('div', { class: 'l' }, label));
     }
   });
 
@@ -1570,6 +1571,9 @@
     const submitBtn = el('button', { class: 'btn btn-primary' }, t('نشر المراجعة'));
     submitBtn.addEventListener('click', () => submit());
     const form = el('div', { class: 'review-form' }, identity, commentInput, el('div', { class: 'actions' }, submitBtn));
+    if (window.GSSettings && window.GSSettings.get('allow_reviews', '1') !== '1') {
+      form.style.display = 'none';
+    }
 
     const INITIAL_REVIEWS = 2;
     const reviewsList = el('div', { class: 'reviews' });
@@ -1683,6 +1687,9 @@
     loadReviews();
 
     async function submit() {
+      if (window.GSSettings && window.GSSettings.get('allow_reviews', '1') !== '1') {
+        toast(t('التقييمات معطّلة حالياً'), 'info'); return;
+      }
       if (voted) { toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info'); return; }
       if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
       if (!isNativeApp() && !S.isLoggedIn()) {

@@ -1334,3 +1334,8 @@ body.admin-compact .admin-tabs .tab { padding-top: 7px; padding-bottom: 7px; }
   .ins-bar-label { flex-basis: 90px; }
   .ins-heatmap { grid-template-columns: repeat(8, 1fr); }
 }
+
+/* Live settings effects inside the admin console */
+body.admin-compact .admin-settings-group-head { padding: 8px 12px; }
+body.admin-compact .admin-settings-field { padding: 7px 9px; }
+body.admin-compact .admin-kpi { padding: 10px; }

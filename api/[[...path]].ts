@@ -287,6 +287,14 @@ function shot_url(shot_key: string | undefined, env: Env, width: number = 720): 
    admin broadcast, the "new version" notification and the self-test all use
    the same targeting, batching, pruning and logging rules. */
 
+function inQuietHours(settings: Record<string, string>): boolean {
+  const start = Number(settings.quiet_start || 23);
+  const end = Number(settings.quiet_end || 7);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return false;
+  const h = new Date().getUTCHours();
+  return start > end ? (h >= start || h < end) : (h >= start && h < end);
+}
+
 async function addNotification(env: Env, data: any) {
   const id = randomId();
   const title = sanitizeText(data.title, 200), body = sanitizeText(data.body, 1000);
@@ -309,14 +317,21 @@ async function addNotification(env: Env, data: any) {
     click_url: data.click_url || (app_slug ? `/app?slug=${encodeURIComponent(app_slug)}` : ''),
     data: data.data,
   };
+  const settings = await readAllSettings(env).catch(() => ({ ...SETTING_DEFAULTS }));
   let push: any;
-  try {
-    push = data.segment && data.segment.mode && data.segment.mode !== 'all'
-      ? await sendAdvancedPush(env, rich, data.segment)
-      : await broadcastPush(env, rich);
-  } catch (error: any) {
-    console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
-    push = { error: 'push_failed', message: String(error?.message || error), targeted: 0, success: 0, failure: 0 };
+  if (settings.push_enabled !== '1') {
+    push = { skipped: 'push_disabled', targeted: 0, success: 0, failure: 0 };
+  } else if (inQuietHours(settings)) {
+    push = { skipped: 'quiet_hours', targeted: 0, success: 0, failure: 0 };
+  } else {
+    try {
+      push = data.segment && data.segment.mode && data.segment.mode !== 'all'
+        ? await sendAdvancedPush(env, rich, data.segment)
+        : await broadcastPush(env, rich);
+    } catch (error: any) {
+      console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
+      push = { error: 'push_failed', message: String(error?.message || error), targeted: 0, success: 0, failure: 0 };
+    }
   }
   return { id, push };
 }
@@ -895,6 +910,8 @@ function serverFingerprint(c: any): string {
 }
 
 app.post('/apps/:slug/star', async (c) => {
+  const cfg = await readAllSettings(c.env).catch(() => ({ ...SETTING_DEFAULTS }));
+  if (cfg.allow_reviews !== '1') return c.json({ error: 'reviews_disabled' }, 403);
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'star', 10, 60)) return c.json({ error: 'rate_limit_exceeded' }, 429);
   const body = await c.req.json().catch(() => ({}));
@@ -1048,7 +1065,9 @@ app.post('/login', async (c) => {
   }
   
   const token = await signJwt({ sub: adminUser, role: 'admin' }, secret);
-  setCookie(c, COOKIE_NAME, token, { httpOnly: true, secure: isSecureRequest(c), sameSite: 'Lax', path: '/', maxAge: 7 * 24 * 60 * 60 });
+  const cfg = await readAllSettings(c.env).catch(() => ({ ...SETTING_DEFAULTS }));
+  const sessionDays = Math.min(30, Math.max(1, Number(cfg.session_days) || 7));
+  setCookie(c, COOKIE_NAME, token, { httpOnly: true, secure: isSecureRequest(c), sameSite: 'Lax', path: '/', maxAge: sessionDays * 24 * 60 * 60 });
   return c.json({ ok: true, user: { username: adminUser } });
 });
 
@@ -1412,7 +1431,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   theme_default: 'dark', accent: 'gold', density: 'comfortable', default_language: 'ar',
   default_type: 'app', default_category: 'tools', max_upload_mb: '200',
   allow_reviews: '1', show_download_counter: '1', require_login: '1',
-  notify_new_publications: '1', push_enabled: '1', auto_notify_update: '1',
+  notify_new_publications: '1', push_enabled: '1', auto_notify_update: '0',
   quiet_start: '23', quiet_end: '7',
   collect_demographics: '0', maintenance_mode: '0', maintenance_message: 'المتجر تحت الصيانة، نعود قريباً.',
   session_days: '7',
@@ -1450,7 +1469,8 @@ async function recordDownloadEvent(env: Env, slug: string, platform = 'web') {
   } catch { /* analytics must never block a download */ }
 }
 app.get('/settings', async (c) => {
-  c.header('Cache-Control', 'public, max-age=60');
+  // no-store: an admin change must take effect on the very next page load.
+  c.header('Cache-Control', 'no-store');
   return c.json({ settings: await publicSettings(c.env) });
 });
 
@@ -1712,7 +1732,9 @@ app.post('/admin/app-update', async (c) => {
   } catch { /* history must never block publishing */ }
 
   let push = null;
-  if (body.send_notification) {
+  const updateCfg = await readAllSettings(c.env).catch(() => ({ ...SETTING_DEFAULTS }));
+  const shouldNotify = !!body.send_notification || updateCfg.auto_notify_update === '1';
+  if (shouldNotify) {
     const res = await addNotification(c.env, { type: 'update', title: body.version_name ? `تحديث ${body.version_name}` : 'تحديث جديد', body: body.notes || 'تحديث', data: { apk_url }, created_at: nowSec() });
     push = res.push;
   }

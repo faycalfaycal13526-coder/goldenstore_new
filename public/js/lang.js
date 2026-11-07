@@ -980,6 +980,9 @@
     // ---- Privacy: optional demographics ----
     'بيانات ديموغرافية اختيارية': { en: 'Optional demographics', fr: 'Données démographiques facultatives', es: 'Datos demográficos opcionales' },
     'قد نتيح لك مشاركة فئة عمرية وجنس ودولة بشكل اختياري ومجهول، بموافقة صريحة، ولأغراض إحصائية مجمّعة فقط. لا نربط هذه البيانات بحسابك، ولا نجمع الاسم أو البريد أو تاريخ الميلاد، ويمكنك سحب الموافقة أو حذفها في أي وقت من صفحة الحساب. إن لم تُفعّل هذا الخيار من لوحة التحكم فلن يُجمع أي شيء.': { en: 'You may optionally and anonymously share an age range, gender and country, with explicit consent, for aggregate statistics only. We never link it to your account, never collect your name, email or date of birth, and you can withdraw consent or delete it at any time from the Account page. If this option is not enabled in the admin console, nothing is collected.', fr: 'Vous pouvez partager facultativement et anonymement une tranche d’âge, un genre et un pays, avec consentement explicite, uniquement pour des statistiques agrégées. Nous ne lions jamais ces données à votre compte, ne collectons ni nom, ni e-mail, ni date de naissance, et vous pouvez retirer votre consentement à tout moment depuis la page Compte. Si cette option n’est pas activée dans la console d’administration, rien n’est collecté.', es: 'Puedes compartir de forma opcional y anónima un rango de edad, género y país, con consentimiento explícito, solo para estadísticas agregadas. Nunca lo vinculamos a tu cuenta, no recopilamos nombre, correo ni fecha de nacimiento, y puedes retirar el consentimiento o eliminarlo cuando quieras desde la página Cuenta. Si esta opción no está activada en el panel de administración, no se recopila nada.' },
+
+    // ---- Live settings effects ----
+    'التقييمات معطّلة حالياً': { en: 'Reviews are currently disabled', fr: 'Les avis sont actuellement désactivés', es: 'Las reseñas están desactivadas' },
   };
 
   // Number/size unit labels per language.

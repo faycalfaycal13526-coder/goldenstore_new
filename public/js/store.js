@@ -713,26 +713,37 @@ function renderSiteFooter() {
   const shell = document.querySelector('.shell') || document.body;
   const nav = el('nav', { class: 'legal-links', 'aria-label': t('روابط قانونية'), 'data-noi18n': '' },
     ...LEGAL_LINKS.map((l) => el('a', { class: 'legal-link', href: l.href }, t(l.label))));
+  const cfg = window.GSSettings;
+  const storeName = (cfg && cfg.get('store_name', 'Golden Store')) || 'Golden Store';
+  const official = (cfg && /^https?:\/\//i.test(cfg.get('official_url', '')) && cfg.get('official_url'))
+    || 'https://goldenstore.online';
+  const supportEmail = (cfg && cfg.get('support_email', '')) || '';
+  const telegram = (cfg && cfg.get('telegram_url', '')) || '';
   const f = el('footer', { class: 'site-footer', 'data-noi18n': '' },
     el('div', { class: 'site-footer-inner' },
-      el('div', { class: 'site-footer-brand' }, '© Golden Store — ' + t('جميع الحقوق محفوظة')),
+      el('div', { class: 'site-footer-brand' }, '© ' + storeName + ' — ' + t('جميع الحقوق محفوظة')),
       nav,
       el('div', { class: 'site-footer-site' },
         t('الموقع الرسمي') + ': ',
-        el('a', { class: 'legal-link', href: 'https://goldenstore.online', target: '_blank',
-                  rel: 'noopener noreferrer', dir: 'ltr' }, 'goldenstore.online'),
+        el('a', { class: 'legal-link', href: official, target: '_blank',
+                  rel: 'noopener noreferrer', dir: 'ltr', 'data-setting': 'official_url' },
+          official.replace(/^https?:\/\//, '').replace(/\/$/, '')),
       ),
+      supportEmail ? el('a', { class: 'legal-link', href: 'mailto:' + supportEmail,
+        'data-setting': 'support_email' }, supportEmail) : null,
+      telegram ? el('a', { class: 'legal-link', href: telegram, target: '_blank',
+        rel: 'noopener noreferrer', 'data-setting': 'telegram_url' }, 'Telegram') : null,
     ),
   );
   shell.append(f);
 }
 
 function bottomNav(active) {
-  const brand = el('a', { href: '/', class: 'sidebar-brand', 'aria-label': 'Golden Store' },
-    el('img', { src: '/images/logo.png', alt: 'Golden Store' }),
+  const brandName = (window.GSSettings && window.GSSettings.get('store_name', 'Golden Store')) || 'Golden Store';
+  const brand = el('a', { href: '/', class: 'sidebar-brand', 'aria-label': brandName },
+    el('img', { src: '/images/logo.png', alt: brandName }),
     el('span', { class: 'sidebar-brand-text' },
-      el('span', null, 'Golden'),
-      el('b', null, 'Store'),
+      el('span', null, brandName),
     ),
   );
   const nav = el('nav', { class: 'bottomnav' },
@@ -971,10 +982,14 @@ function hideAuthGate() {
   document.body.style.overflow = '';
 }
 
-function initAuth() {
+async function initAuth() {
   if (isLocalhost() && getQuery('devskip') === '1') { onAuthed(devUser()); return; }
+  // Settings are loaded once for every page; wait so require_login is honoured.
+  try { if (window.GSSettings && typeof window.GSSettings.ready === 'function') await window.GSSettings.ready(); } catch (e) {}
+  const allowGuest = !!(window.GSSettings && window.GSSettings.get('require_login', '1') === '0');
 
   if (!window.GAuth || typeof window.GAuth.onAuthChange !== 'function') {
+    if (allowGuest) { onAuthed(null); return; }
     console.error('GAuth not available — Firebase SDK may have failed to load');
     showAuthGate();
     return;
@@ -990,10 +1005,12 @@ function initAuth() {
       cacheUser(null);
       _user = null;
       hideGate();
-      showAuthGate();
+      if (allowGuest) onAuthed(null);       // settings: browse without signing in
+      else showAuthGate();
     }
   });
 }
+
 async function signOut() {
   cacheUser(null);
   try { await window.GAuth.signOut(); } catch {}

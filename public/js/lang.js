@@ -885,6 +885,13 @@
     'معاينة الجهاز اللوحي': { en: 'Tablet preview', fr: 'Aperçu tablette', es: 'Vista previa tableta' },
     'معاينة الحاسوب': { en: 'Desktop preview', fr: 'Aperçu bureau', es: 'Vista previa escritorio' },
     'فتح المتجر بحجم الجهاز': { en: 'Open the store at this device size', fr: 'Ouvrir la boutique à cette taille', es: 'Abrir la tienda a este tamaño' },
+
+    // ---- Desktop sizing control (2026-11-07) ----
+    'عرض المحتوى': { en: 'Content width', fr: 'Largeur du contenu', es: 'Ancho del contenido' },
+    'مريح': { en: 'Comfortable', fr: 'Confortable', es: 'Cómodo' },
+    'عريض': { en: 'Wide', fr: 'Large', es: 'Ancho' },
+    'عرض كامل': { en: 'Full width', fr: 'Pleine largeur', es: 'Ancho completo' },
+    'اسمح بالنوافذ المنبثقة': { en: 'Allow pop-ups for this site', fr: 'Autorisez les fenêtres contextuelles', es: 'Permite ventanas emergentes' },
   };
 
   // Number/size unit labels per language.

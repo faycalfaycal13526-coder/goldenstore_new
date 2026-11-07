@@ -1164,3 +1164,71 @@ body.admin-compact .admin-tabs .tab { padding-top: 7px; padding-bottom: 7px; }
   .admin-actions { gap: 5px; }
   .admin-brand { font-size: 13px; }
 }
+
+/* =====================================================================
+   DESKTOP SIZING FIX (2026-11-07) — "الحاسوب ليس بالحجم الصحيح"
+   A legacy @media (min-width:960px) block (support-chat era) still forced
+   `margin-inline-start: var(--admin-sidebar-w)` on .admin-shell and a
+   fixed full-height .admin-tabs. Later grid rules never reset those two
+   declarations, so the console was shifted 248px off-centre and its width
+   was effectively unpredictable. This block explicitly neutralises them.
+   ===================================================================== */
+:root { --admin-content-max: 1440px; }
+
+@media (min-width: 901px) {
+  .admin-shell {
+    margin-inline: auto;              /* overrides the legacy 248px offset */
+    max-width: var(--admin-content-max);
+    padding: 0 20px 60px;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .admin-topbar-inner { max-width: var(--admin-content-max); margin-inline: auto; }
+  .admin-topbar { padding: 10px 20px; }
+  .admin-tabs {
+    inset-inline-start: auto;         /* legacy fixed-sidebar leftovers */
+    bottom: auto;
+    width: auto;
+    height: auto;
+    align-items: stretch;
+    padding: 14px 10px 14px 0;
+    gap: 3px;
+    border-bottom: 0;
+  }
+  .admin-tabs .tab { padding: 10px 12px; font-size: 13px; border-radius: 11px; }
+  .admin-tabs .tab-spacer { display: none; }
+  .admin-body { padding: 18px 0 0 22px; min-width: 0; }
+  .admin-table-wrap-fix, .admin-dash-grid, .admin-kpi-grid, .admin-page-head { min-width: 0; }
+}
+@media (min-width: 1201px) {
+  /* Comfortable reading width: long forms must not stretch across 1300px. */
+  .admin-body > .form, .panel > .form { max-width: 860px; }
+  .admin-phase2-pad .input, .admin-phase2-pad .admin-width-select { max-width: 520px; }
+  .admin-dash-grid { grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); }
+  .admin-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .admin-quality-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-table-toolbar .admin-table-search { max-width: 420px; }
+  .panel { max-width: 100%; }
+}
+@media (min-width: 901px) and (max-width: 1200px) {
+  .admin-shell { padding-inline: 12px; }
+  .admin-body > .form, .panel > .form { max-width: 100%; }
+  .admin-dash-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 901px) {
+  /* Keep the three presets visually identical in size to the other controls. */
+  .admin-width-select {
+    height: 36px; max-width: 140px; padding: 6px 9px;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--text-2);
+    font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  }
+  .admin-width-select:hover { border-color: var(--gold); color: var(--text); }
+  .admin-width-select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+}
+@media (max-width: 900px) {
+  .admin-width-select { display: none; }
+  .admin-shell { margin-inline: 0; width: 100%; }
+  .admin-body > .form, .panel > .form { max-width: 100%; }
+}

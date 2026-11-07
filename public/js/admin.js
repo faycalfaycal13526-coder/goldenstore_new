@@ -80,6 +80,37 @@
   }
   function goTab(key) { activeTab = key; renderApp(); }
 
+  /* ---------- Desktop content width (fixes the legacy 248px offset) ----------
+     An old @media (min-width:960px) rule still applied
+     `margin-inline-start: var(--admin-sidebar-w)` to .admin-shell, which pushed
+     the whole console off-centre on desktop. We neutralise it in CSS and let
+     the owner choose the exact max width here. */
+  const ADMIN_WIDTH_KEY = 'gs_admin_width';
+  const ADMIN_WIDTHS = { comfortable: '1200px', wide: '1440px', full: '100%' };
+  function currentWidthKey() {
+    try { const v = localStorage.getItem(ADMIN_WIDTH_KEY); return ADMIN_WIDTHS[v] ? v : 'wide'; } catch (e) { return 'wide'; }
+  }
+  function applyAdminWidth() {
+    try {
+      document.documentElement.style.setProperty('--admin-content-max', ADMIN_WIDTHS[currentWidthKey()]);
+    } catch (e) {}
+  }
+  function widthSelect() {
+    const sel = el('select', {
+      class: 'admin-width-select', 'aria-label': t('عرض المحتوى'), title: t('عرض المحتوى'),
+      onchange: () => {
+        try { localStorage.setItem(ADMIN_WIDTH_KEY, sel.value); } catch (e) {}
+        applyAdminWidth();
+        logAdminAction(`${t('عرض المحتوى')}: ${sel.options[sel.selectedIndex].text}`);
+      },
+    },
+      el('option', { value: 'comfortable' }, t('مريح') + ' · 1200'),
+      el('option', { value: 'wide' }, t('عريض') + ' · 1440'),
+      el('option', { value: 'full' }, t('عرض كامل')));
+    sel.value = currentWidthKey();
+    return sel;
+  }
+
   /* ---------- Pinned sections + keyboard shortcuts + quality checks ---------- */
   const ADMIN_PINNED_KEY = 'gs_admin_pinned';
   function readPinned() {
@@ -511,7 +542,7 @@
         crumb,
         el('div', { class: 'spacer' }),
         el('div', { class: 'admin-title' }, 'لوحة التحكم'),
-        el('div', { class: 'admin-actions' }, searchTrigger, pinnedBar(), pinBtn, helpBtn, storeLink, themeBtn, logoutBtn),
+        el('div', { class: 'admin-actions' }, widthSelect(), searchTrigger, pinnedBar(), pinBtn, helpBtn, storeLink, themeBtn, logoutBtn),
       ),
     );
   }
@@ -2064,12 +2095,31 @@
       { label: t('معاينة الجهاز اللوحي'), sub: '820 × 1180', w: 820, h: 1180, icon: 'grid' },
       { label: t('معاينة الحاسوب'), sub: '1440 × 900', w: 1440, h: 900, icon: 'dashboard' },
     ];
-    const card = (d) => el('button', { class: 'admin-device-btn', type: 'button', title: t('فتح المتجر بحجم الجهاز'),
-      onclick: () => {
-        const win = window.open(`/?device=${d.w}`, '_blank', `width=${d.w},height=${d.h},noopener`);
-        if (!win) toast(t('افتح الرابط في المتصفح الخارجي لتسجيل الدخول'), 'error');
-        logAdminAction(`${d.label} (${d.sub})`);
-      } }, ico(d.icon, 'icon'), el('b', null, d.label), el('span', null, d.sub));
+    const openDevice = (d) => {
+      // Clamp to the real screen so a 1440px "desktop" window is never larger
+      // than the monitor (browsers silently clamp and the preview looked wrong).
+      let w = d.w, h = d.h;
+      try {
+        const sw = (window.screen && window.screen.availWidth) || d.w;
+        const sh = (window.screen && window.screen.availHeight) || d.h;
+        w = Math.min(d.w, Math.max(320, sw - 20));
+        h = Math.min(d.h, Math.max(480, sh - 20));
+      } catch (e) {}
+      const features = `width=${w},height=${h},resizable=yes,scrollbars=yes`;
+      // NOTE: `noopener` in the feature string makes window.open() return null
+      // by spec, which used to trigger a FALSE "popup blocked" error toast.
+      const win = window.open(`/?device=${d.w}`, `gs_preview_${d.w}`, features);
+      if (win) {
+        try { win.opener = null; } catch (e) {}   // keep the security benefit
+        setTimeout(() => { try { win.resizeTo(w, h); win.focus(); } catch (e) {} }, 250);
+      } else {
+        toast(t('اسمح بالنوافذ المنبثقة'), 'error');
+      }
+      logAdminAction(`${d.label} (${d.sub})`);
+    };
+    const card = (d) => el('button', { class: 'admin-device-btn', type: 'button',
+      title: t('فتح المتجر بحجم الجهاز'), onclick: () => openDevice(d) },
+      ico(d.icon, 'icon'), el('b', null, d.label), el('span', null, d.sub));
     body.append(
       phaseHead(t('معاينة الأجهزة'), 'افتح المتجر في نافذة بأبعاد هاتف أو جهاز لوحي أو حاسوب للتحقق من التجاوبية مباشرة.'),
       el('div', { class: 'panel' },
@@ -3027,6 +3077,7 @@
 
   // ---------------- init ----------------
   try { if (localStorage.getItem('gs_admin_compact') === '1') document.body.classList.add('admin-compact'); } catch (e) {}
+  applyAdminWidth();
   let gsChord = 0;
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {

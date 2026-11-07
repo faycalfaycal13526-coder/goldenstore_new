@@ -450,6 +450,7 @@ app.get('/app-update/download', async (c) => {
   } catch {}
   if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
   await bumpDownloadCount(c.env).catch(() => {});
+  await recordDownloadEvent(c.env, 'app-update', 'web');
   return c.redirect(apkUrl, 302);
 });
 
@@ -883,6 +884,7 @@ app.get('/apps/:slug/download', async (c) => {
   }
   
   const filename = `${appData.slug}-${appData.version_name || ''}.apk`.replace(/-+/g, '-');
+  await recordDownloadEvent(c.env, appData.slug, 'web');
   const url = await r2PresignGet(c.env, appData.apk_key, 300, `attachment; filename="${filename}"`);
   return c.redirect(url);
 });
@@ -1382,13 +1384,236 @@ app.delete('/admin/reviews/:reviewId', async (c) => {
   }
 });
 
-app.get('/admin/settings', async (c) => c.json({ settings: await getStoreSettings(c.env) }));
+/* =========================================================================
+   Settings Center + Insights (2026-11-07)
+   All new tables are created lazily. Demographics are OPT-IN, anonymous and
+   aggregate-only: no invented numbers, no PII, no birth date.
+   ========================================================================= */
+const INSIGHTS_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS admin_preferences (
+     key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS download_events (
+     id TEXT PRIMARY KEY, slug TEXT, day TEXT, hour INTEGER, ts INTEGER,
+     platform TEXT DEFAULT 'web')`,
+  `CREATE INDEX IF NOT EXISTS idx_download_events_day ON download_events(day)`,
+  `CREATE TABLE IF NOT EXISTS user_demographics (
+     uid TEXT PRIMARY KEY, age_range TEXT, gender TEXT, country TEXT,
+     opted_in INTEGER DEFAULT 1, updated_at INTEGER)`,
+];
+const insightsReady = new WeakSet<object>();
+async function ensureInsightsTables(db: any) {
+  if (!db || insightsReady.has(db)) return;
+  insightsReady.add(db);
+  for (const sql of INSIGHTS_SCHEMA) { try { await db.prepare(sql).run(); } catch { /* best effort */ } }
+}
+const SETTING_DEFAULTS: Record<string, string> = {
+  store_name: 'Golden Store', tagline: 'متجرك الذهبي للتطبيقات والألعاب',
+  support_email: '', telegram_url: 'https://t.me/goldenstore_10', official_url: 'https://goldenstore.online',
+  theme_default: 'dark', accent: 'gold', density: 'comfortable', default_language: 'ar',
+  default_type: 'app', default_category: 'tools', max_upload_mb: '200',
+  allow_reviews: '1', show_download_counter: '1', require_login: '1',
+  notify_new_publications: '1', push_enabled: '1', auto_notify_update: '1',
+  quiet_start: '23', quiet_end: '7',
+  collect_demographics: '0', maintenance_mode: '0', maintenance_message: 'المتجر تحت الصيانة، نعود قريباً.',
+  session_days: '7',
+};
+const SETTING_KEYS = Object.keys(SETTING_DEFAULTS);
+const PUBLIC_SETTINGS = [
+  'store_name', 'tagline', 'support_email', 'telegram_url', 'official_url',
+  'theme_default', 'accent', 'density', 'default_language', 'allow_reviews',
+  'show_download_counter', 'require_login', 'collect_demographics',
+  'maintenance_mode', 'maintenance_message', 'notify_new_publications',
+];
+async function readAllSettings(env: Env): Promise<Record<string, string>> {
+  await ensureInsightsTables(env.DB);
+  const out: Record<string, string> = { ...SETTING_DEFAULTS };
+  const rows: any = await env.DB.prepare('SELECT key, value FROM admin_preferences').all().catch(() => ({ results: [] }));
+  (rows.results || []).forEach((r: any) => { if (SETTING_KEYS.includes(String(r.key))) out[String(r.key)] = String(r.value); });
+  // The legacy singleton row remains the source of truth for this flag.
+  try { const legacy = await getStoreSettings(env); out.notify_new_publications = legacy.notify_new_publications ? '1' : '0'; } catch (e) {}
+  return out;
+}
+async function publicSettings(env: Env): Promise<Record<string, string>> {
+  const all = await readAllSettings(env);
+  const out: Record<string, string> = {};
+  PUBLIC_SETTINGS.forEach((k) => { out[k] = all[k]; });
+  return out;
+}
+async function recordDownloadEvent(env: Env, slug: string, platform = 'web') {
+  await ensureInsightsTables(env.DB);
+  const ts = nowSec();
+  const d = new Date(ts * 1000);
+  const day = d.toISOString().slice(0, 10);
+  try {
+    await env.DB.prepare('INSERT INTO download_events (id, slug, day, hour, ts, platform) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(String(crypto.randomUUID()), sanitizeText(slug, 120), day, d.getUTCHours(), ts, platform).run();
+  } catch { /* analytics must never block a download */ }
+}
+app.get('/settings', async (c) => {
+  c.header('Cache-Control', 'public, max-age=60');
+  return c.json({ settings: await publicSettings(c.env) });
+});
+
+app.get('/admin/settings', async (c) => {
+  const settings = await readAllSettings(c.env);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ settings, keys: SETTING_KEYS, defaults: SETTING_DEFAULTS });
+});
 app.patch('/admin/settings', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  if (typeof body.notify_new_publications !== 'boolean') return c.json({ error: 'invalid' }, 400);
-  await c.env.DB.prepare(`INSERT OR REPLACE INTO store_settings (id, notify_new_publications, updated_at) VALUES ('general', ?, ?)`)
-    .bind(body.notify_new_publications ? 1 : 0, nowSec()).run();
-  return c.json({ settings: { notify_new_publications: body.notify_new_publications } });
+  await ensureInsightsTables(c.env.DB);
+  // Backwards-compatible single-flag contract used by the older UI.
+  if (typeof body.notify_new_publications === 'boolean') {
+    await c.env.DB.prepare(`INSERT OR REPLACE INTO store_settings (id, notify_new_publications, updated_at) VALUES ('general', ?, ?)`)
+      .bind(body.notify_new_publications ? 1 : 0, nowSec()).run();
+    return c.json({ settings: { notify_new_publications: body.notify_new_publications } });
+  }
+  const values = body.values && typeof body.values === 'object' ? body.values : null;
+  if (!values) return c.json({ error: 'invalid' }, 400);
+  let saved = 0;
+  for (const k of SETTING_KEYS) {
+    if (!(k in values)) continue;
+    const v = sanitizeText(values[k], 500);
+    await c.env.DB.prepare(`INSERT INTO admin_preferences (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+      .bind(k, v, nowSec()).run();
+    if (k === 'notify_new_publications') {
+      await c.env.DB.prepare(`INSERT OR REPLACE INTO store_settings (id, notify_new_publications, updated_at) VALUES ('general', ?, ?)`)
+        .bind(v === '1' ? 1 : 0, nowSec()).run();
+    }
+    saved++;
+  }
+  await recordActivity(c.env, consoleActor(c), `حفظ ${saved} إعداداً`, 'settings');
+  return c.json({ ok: true, saved, settings: await readAllSettings(c.env) });
+});
+app.post('/admin/settings/reset', async (c) => {
+  await ensureInsightsTables(c.env.DB);
+  await c.env.DB.prepare('DELETE FROM admin_preferences').run().catch(() => {});
+  await recordActivity(c.env, consoleActor(c), 'إعادة ضبط الإعدادات', 'settings');
+  return c.json({ ok: true, settings: await readAllSettings(c.env) });
+});
+
+/* ---------- Anonymous, opt-in demographics (aggregate only) ---------- */
+const AGE_RANGES = ['13-17', '18-24', '25-34', '35-44', '45-54', '55+'];
+const GENDERS = ['male', 'female', 'other', 'prefer_not'];
+app.post('/profile/demographics', async (c) => {
+  const settings = await readAllSettings(c.env);
+  if (settings.collect_demographics !== '1') return c.json({ error: 'collection_disabled' }, 403);
+  const body = await c.req.json().catch(() => ({}));
+  const uid = String(body.uid || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(uid)) return c.json({ error: 'invalid_uid' }, 400);
+  await ensureInsightsTables(c.env.DB);
+  const age = AGE_RANGES.includes(body.age_range) ? body.age_range : '';
+  const gender = GENDERS.includes(body.gender) ? body.gender : '';
+  const country = sanitizeText(body.country, 60);
+  const opted = body.opted_in === false ? 0 : 1;
+  await c.env.DB.prepare(`INSERT INTO user_demographics (uid, age_range, gender, country, opted_in, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(uid) DO UPDATE SET
+      age_range = excluded.age_range, gender = excluded.gender, country = excluded.country,
+      opted_in = excluded.opted_in, updated_at = excluded.updated_at`)
+    .bind(uid, age, gender, country, opted, nowSec()).run();
+  return c.json({ ok: true });
+});
+app.get('/profile/demographics/:uid', async (c) => {
+  await ensureInsightsTables(c.env.DB);
+  const row: any = await c.env.DB.prepare('SELECT age_range, gender, country, opted_in FROM user_demographics WHERE uid = ?')
+    .bind(c.req.param('uid')).first().catch(() => null);
+  return c.json({ demographics: row || null });
+});
+
+
+/* ---------- Insights: real aggregates, zero-filled, never fabricated ---------- */
+const zeroDays = (days: number) => {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+};
+app.get('/admin/analytics/insights', async (c) => {
+  await ensureInsightsTables(c.env.DB);
+  const days = [7, 30, 90].includes(Number(c.req.query('days'))) ? Number(c.req.query('days')) : 30;
+  const dayList = zeroDays(days);
+  const since = dayList[0];
+  const all = async (sql: string, ...bind: any[]) => {
+    try { const r: any = await c.env.DB.prepare(sql).bind(...bind).all(); return r.results || []; }
+    catch { return []; }
+  };
+  const [apps, dailyRows, hourlyRows, ratingRows, tokenRows, ageRows, genderRows,
+    countryRows, demoTotalRows, activityRows, releaseRows] = await Promise.all([
+    all('SELECT * FROM apps'),
+    all('SELECT day, COUNT(*) AS c FROM download_events WHERE day >= ? GROUP BY day', since),
+    all('SELECT hour, COUNT(*) AS c FROM download_events GROUP BY hour'),
+    all('SELECT rating, COUNT(*) AS c FROM star_votes GROUP BY rating'),
+    all('SELECT platform, COUNT(*) AS c FROM fcm_tokens GROUP BY platform'),
+    all("SELECT age_range AS k, COUNT(*) AS c FROM user_demographics WHERE opted_in = 1 AND age_range <> '' GROUP BY age_range"),
+    all("SELECT gender AS k, COUNT(*) AS c FROM user_demographics WHERE opted_in = 1 AND gender <> '' GROUP BY gender"),
+    all("SELECT country AS k, COUNT(*) AS c FROM user_demographics WHERE opted_in = 1 AND country <> '' GROUP BY country ORDER BY c DESC LIMIT 8"),
+    all('SELECT COUNT(*) AS c FROM user_demographics WHERE opted_in = 1'),
+    all('SELECT action, actor, ts FROM admin_activity ORDER BY ts DESC LIMIT 8'),
+    all('SELECT version_name, created_at, size_bytes FROM app_update_releases ORDER BY created_at DESC LIMIT 5'),
+  ]);
+  const webCount = (await all('SELECT COUNT(*) AS c FROM web_tokens'))[0]?.c || 0;
+  const dlMap: Record<string, number> = {};
+  dailyRows.forEach((r: any) => { dlMap[String(r.day)] = Number(r.c) || 0; });
+  const hourly = Array.from({ length: 24 }, (_, h) => {
+    const hit = hourlyRows.find((r: any) => Number(r.hour) === h);
+    return { hour: h, count: Number(hit?.c) || 0 };
+  });
+  const ratingMap: Record<string, number> = {};
+  ratingRows.forEach((r: any) => { ratingMap[String(Math.round(Number(r.rating) || 0))] = Number(r.c) || 0; });
+  const catMap: Record<string, { count: number; downloads: number }> = {};
+  const types = { app: { count: 0, downloads: 0 }, game: { count: 0, downloads: 0 } };
+  let totalDownloads = 0, totalSize = 0, ratingSum = 0, ratingCount = 0, newApps = 0;
+  const cutoff = nowSec() - 30 * 86400;
+  apps.forEach((a: any) => {
+    const dl = Number(a.downloads) || 0;
+    totalDownloads += dl; totalSize += Number(a.size_bytes) || 0;
+    const t = a.type === 'game' ? 'game' : 'app';
+    types[t].count++; types[t].downloads += dl;
+    const cat = String(a.category || 'other');
+    if (!catMap[cat]) catMap[cat] = { count: 0, downloads: 0 };
+    catMap[cat].count++; catMap[cat].downloads += dl;
+    const rc = Number(a.rating_count) || 0;
+    if (rc > 0) { ratingSum += (Number(a.rating) || 0) * rc; ratingCount += rc; }
+    if (Number(a.created_at) > cutoff) newApps++;
+  });
+  const demoTotal = Number(demoTotalRows[0]?.c) || 0;
+  const age = AGE_RANGES.map((k) => ({ key: k, count: Number(ageRows.find((r: any) => r.k === k)?.c) || 0 }));
+  const gender = GENDERS.map((k) => ({ key: k, count: Number(genderRows.find((r: any) => r.k === k)?.c) || 0 }));
+  const settings = await readAllSettings(c.env);
+  c.header('Cache-Control', 'no-store');
+  return c.json({
+    days, generated_at: nowSec(),
+    totals: {
+      apps: apps.length, games: types.game.count, downloads: totalDownloads,
+      storage_bytes: totalSize, avg_rating: ratingCount ? Math.round((ratingSum / ratingCount) * 10) / 10 : 0,
+      reviews: ratingRows.reduce((n: number, r: any) => n + (Number(r.c) || 0), 0),
+      devices: tokenRows.reduce((n: number, r: any) => n + (Number(r.c) || 0), 0) + Number(webCount),
+      new_apps_30d: newApps,
+    },
+    daily_downloads: dayList.map((day) => ({ day, count: dlMap[day] || 0 })),
+    hourly,
+    categories: Object.keys(catMap).map((k) => ({ key: k, ...catMap[k] }))
+      .sort((a, b) => b.count - a.count).slice(0, 10),
+    types,
+    rating_distribution: [1, 2, 3, 4, 5].map((k) => ({ key: k, count: ratingMap[String(k)] || 0 })),
+    top_apps: apps.slice().sort((a: any, b: any) => (Number(b.downloads) || 0) - (Number(a.downloads) || 0))
+      .slice(0, 8).map((a: any) => ({ name: a.name, slug: a.slug, downloads: Number(a.downloads) || 0, type: a.type })),
+    platforms: {
+      android: Number(tokenRows.find((r: any) => r.platform === 'android')?.c) || 0,
+      ios: Number(tokenRows.find((r: any) => r.platform === 'ios')?.c) || 0,
+      web: Number(webCount) || 0,
+    },
+    demographics: {
+      enabled: settings.collect_demographics === '1', total: demoTotal,
+      data_available: demoTotal > 0, age, gender,
+      countries: countryRows.map((r: any) => ({ key: String(r.k), count: Number(r.c) || 0 })),
+    },
+    activity: activityRows, releases: releaseRows,
+  });
 });
 
 app.get('/admin/stats', async (c) => {

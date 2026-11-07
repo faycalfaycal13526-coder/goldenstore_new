@@ -3672,3 +3672,34 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
   .gs-update-body { padding-top: 10px; }
   .gs-update-actions { margin-top: 10px; }
 }
+
+/* =====================================================================
+   Optional anonymous demographics card (account page, 2026-11-07)
+   ===================================================================== */
+.gs-demo-wrap { max-width: 900px; margin: 0 auto; padding: 0 16px 26px; }
+.gs-demo-card {
+  border: 1px solid var(--line); border-radius: 18px; background: var(--surface);
+  padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.12);
+}
+.gs-demo-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.gs-demo-icon {
+  flex: 0 0 38px; width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
+  background: rgba(244,192,31,.14); color: var(--gold); font-size: 18px;
+}
+.gs-demo-head h2 { margin: 0; font-size: 15px; font-weight: 800; }
+.gs-demo-head p { margin: 4px 0 0; font-size: 11.5px; color: var(--text-2); line-height: 1.6; }
+.gs-demo-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.gs-demo-fields label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 700; }
+.gs-demo-consent {
+  display: flex; align-items: flex-start; gap: 8px; margin: 14px 0;
+  font-size: 11.5px; line-height: 1.6; color: var(--text-2); cursor: pointer;
+}
+.gs-demo-consent input { margin-top: 3px; accent-color: var(--gold); }
+.gs-demo-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gs-demo-status { margin-inline-start: auto; font-size: 11px; }
+:root[data-theme="light"] .gs-demo-card { background: #ffffff; }
+@media (max-width: 540px) {
+  .gs-demo-wrap { padding-inline: 10px; }
+  .gs-demo-card { padding: 14px; }
+  .gs-demo-fields { grid-template-columns: 1fr; }
+}

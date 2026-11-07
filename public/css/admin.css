@@ -1232,3 +1232,105 @@ body.admin-compact .admin-tabs .tab { padding-top: 7px; padding-bottom: 7px; }
   .admin-shell { margin-inline: 0; width: 100%; }
   .admin-body > .form, .panel > .form { max-width: 100%; }
 }
+
+/* =====================================================================
+   Settings Center + Advanced Insights (2026-11-07)
+   ===================================================================== */
+.admin-settings-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px; margin-bottom: 14px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--surface);
+}
+.admin-settings-search { flex: 1 1 220px; min-width: 160px; }
+.admin-settings-toolbar > input[type=file] { max-width: 180px; font-size: 11px; }
+.admin-settings-dirty {
+  padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 800;
+  background: var(--surface-2); color: var(--text-2); white-space: nowrap;
+}
+.admin-settings-dirty.is-dirty { background: rgba(244,192,31,.14); color: var(--gold); }
+.admin-settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 330px); gap: 14px; align-items: start; }
+.admin-settings-groups { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.admin-settings-group { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow: hidden; }
+.admin-settings-group-head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  border-bottom: 1px solid var(--line); background: var(--surface-2);
+}
+.admin-settings-group-head .icon { width: 17px; height: 17px; color: var(--gold); }
+.admin-settings-group-head h2 { margin: 0; font-size: 14px; font-weight: 800; }
+.admin-settings-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; padding: 12px 14px; }
+.admin-settings-field {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface-2); min-width: 0;
+}
+.admin-settings-field-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.admin-settings-field-copy strong { font-size: 12px; }
+.admin-settings-field-copy code { font-size: 10px; color: var(--text-2); opacity: .75; }
+.admin-settings-field > .input, .admin-settings-field > select, .admin-settings-field > textarea {
+  flex: 0 1 170px; min-width: 110px; max-width: 100%; font-size: 12px; padding: 7px 9px;
+}
+.admin-settings-field > textarea { flex: 1 1 100%; }
+.admin-settings-field .admin-switch { flex: 0 0 auto; }
+.admin-settings-preview {
+  --accent-preview: #f4c01f;
+  padding: 16px; display: flex; justify-content: center;
+  background: #0b0b0d; border-radius: 0 0 14px 14px;
+}
+.admin-settings-preview.is-light { background: #f5f5f7; }
+.admin-settings-preview.is-compact { padding: 9px; }
+.admin-settings-preview-card {
+  width: 100%; max-width: 240px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 18px; border-radius: 14px; text-align: center;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  box-shadow: 0 10px 28px rgba(0,0,0,.25);
+}
+.admin-settings-preview.is-compact .admin-settings-preview-card { padding: 11px; gap: 5px; }
+.admin-settings-preview-logo {
+  width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+  font-weight: 900; font-size: 19px; color: #1a1400; background: var(--accent-preview);
+}
+.admin-settings-preview-card strong { font-size: 13px; }
+.admin-settings-preview-card span { font-size: 10.5px; color: var(--text-2); }
+.admin-settings-preview-card .btn { background: var(--accent-preview); border-color: var(--accent-preview); color: #1a1400; }
+.admin-recs { list-style: none; margin: 0; padding: 10px 14px 14px; }
+.admin-recs li { display: flex; align-items: center; gap: 7px; padding: 7px 0; font-size: 12px; color: var(--text-2); }
+.admin-recs li .icon { width: 14px; height: 14px; color: var(--gold); flex: 0 0 14px; }
+
+/* Insights */
+.ins-panel .panel-head { font-weight: 800; }
+.ins-bar-row { display: flex; align-items: center; gap: 9px; padding: 5px 14px; font-size: 11.5px; }
+.ins-bar-label { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.ins-bar-track { flex: 1; height: 9px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.ins-bar-track i { display: block; height: 100%; border-radius: inherit; transition: width .3s ease; }
+.ins-bar-value { flex: 0 0 48px; text-align: end; font-size: 11px; color: var(--text); }
+.ins-line { padding: 8px 12px 12px; }
+.ins-line svg { display: block; }
+.ins-heatmap { display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; padding: 14px; }
+.ins-heat {
+  display: grid; place-items: center; height: 30px; border-radius: 7px;
+  background: #f4c01f; color: #1a1400; font-size: 10px; font-weight: 800;
+}
+.ins-demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 6px 14px 12px; }
+.ins-demo-grid h3, .ins-countries h3 { margin: 0 0 9px; font-size: 12px; font-weight: 800; }
+.ins-demo-grid .ins-bar-row { padding-inline: 0; }
+.ins-gender { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ins-donut { flex: 0 0 130px; }
+.ins-legend { display: flex; flex-direction: column; gap: 5px; font-size: 11px; }
+.ins-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-inline-end: 5px; }
+.ins-countries { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 14px 14px; }
+.ins-countries h3 { flex: 0 0 100%; }
+.ins-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  margin: 12px 14px 0; padding: 16px; border-radius: 13px; text-align: center;
+  border: 1px dashed rgba(244,192,31,.4); background: rgba(244,192,31,.05);
+}
+.ins-empty .icon { width: 24px; height: 24px; color: var(--gold); }
+.ins-empty strong { font-size: 12.5px; }
+.ins-empty span { font-size: 11px; color: var(--text-2); line-height: 1.6; }
+@media (max-width: 900px) {
+  .admin-settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .admin-settings-fields { grid-template-columns: minmax(0, 1fr); }
+  .ins-demo-grid { grid-template-columns: 1fr; }
+  .ins-bar-label { flex-basis: 90px; }
+  .ins-heatmap { grid-template-columns: repeat(8, 1fr); }
+}

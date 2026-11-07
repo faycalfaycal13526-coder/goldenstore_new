@@ -39,6 +39,7 @@
       { key: 'notifications', icon: 'bell', label: 'الإشعارات' },
       { key: 'advanced-push', icon: 'bell', label: 'إشعارات متقدمة' },
       { key: 'analytics', icon: 'dashboard', label: 'الإحصائيات' },
+      { key: 'insights', icon: 'trending', label: t('إحصائيات متقدمة') },
     ] },
     { id: 'system', label: 'النظام', icon: 'settings', items: [
       { key: 'app-update', icon: 'download', label: t('مركز التحديث') },
@@ -664,6 +665,7 @@
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderPush(body);
       else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإشعارات المتقدمة — أعد تحميل الصفحة.</div>';
     }
+    else if (activeTab === 'insights') await renderInsights(body);
     else if (activeTab === 'analytics') {
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderAnalytics(body);
       else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإحصائيات — أعد تحميل الصفحة.</div>';
@@ -848,67 +850,211 @@
   }
 
   // -------- store settings --------
+  const SETTINGS_SCHEMA = [
+    { id: 'identity', label: 'الهوية والعلامة', icon: 'star', fields: [
+      { key: 'store_name', label: 'اسم المتجر', type: 'text' },
+      { key: 'tagline', label: 'العبارة التعريفية', type: 'text' },
+      { key: 'support_email', label: 'بريد الدعم', type: 'email' },
+      { key: 'telegram_url', label: 'رابط تليجرام', type: 'url' },
+      { key: 'official_url', label: 'الموقع الرسمي', type: 'url' },
+    ] },
+    { id: 'appearance', label: 'المظهر واللغة', icon: 'eye', fields: [
+      { key: 'theme_default', label: 'المظهر الافتراضي', type: 'select', options: [['dark','داكن'],['light','فاتح'],['system','حسب الجهاز']] },
+      { key: 'accent', label: 'اللون المميز', type: 'select', options: [['gold','ذهبي'],['blue','أزرق'],['green','أخضر'],['purple','بنفسجي']] },
+      { key: 'density', label: 'كثافة الواجهة', type: 'select', options: [['comfortable','مريحة'],['compact','مضغوطة']] },
+      { key: 'default_language', label: 'اللغة الافتراضية', type: 'select', options: [['ar','العربية'],['en','English'],['fr','Français'],['es','Español']] },
+    ] },
+    { id: 'content', label: 'المحتوى والنشر', icon: 'apps', fields: [
+      { key: 'default_type', label: 'النوع الافتراضي', type: 'select', options: [['app','تطبيق'],['game','لعبة']] },
+      { key: 'default_category', label: 'الفئة الافتراضية', type: 'text' },
+      { key: 'max_upload_mb', label: 'أقصى حجم رفع (م.ب)', type: 'number' },
+      { key: 'allow_reviews', label: 'السماح بالتقييمات', type: 'toggle' },
+      { key: 'show_download_counter', label: 'إظهار عدّاد التنزيلات', type: 'toggle' },
+      { key: 'require_login', label: 'طلب تسجيل الدخول', type: 'toggle' },
+      { key: 'notify_new_publications', label: 'إشعار عند نشر عنصر جديد', type: 'toggle' },
+    ] },
+    { id: 'notifications', label: 'الإشعارات', icon: 'bell', fields: [
+      { key: 'push_enabled', label: 'تفعيل الإشعارات الفورية', type: 'toggle' },
+      { key: 'auto_notify_update', label: 'إشعار تلقائي عند تحديث المتجر', type: 'toggle' },
+      { key: 'quiet_start', label: 'بدء ساعات الهدوء (24h)', type: 'number' },
+      { key: 'quiet_end', label: 'نهاية ساعات الهدوء (24h)', type: 'number' },
+    ] },
+    { id: 'privacy', label: 'الخصوصية والبيانات', icon: 'shield', fields: [
+      { key: 'collect_demographics', label: 'جمع بيانات ديموغرافية اختيارية', type: 'toggle' },
+      { key: 'session_days', label: 'مدة الجلسة (أيام)', type: 'number' },
+    ] },
+    { id: 'system', label: 'النظام والصيانة', icon: 'settings', fields: [
+      { key: 'maintenance_mode', label: 'وضع الصيانة', type: 'toggle' },
+      { key: 'maintenance_message', label: 'رسالة الصيانة', type: 'textarea' },
+    ] },
+  ];
+  const ACCENTS = { gold: '#f4c01f', blue: '#4c9ffe', green: '#4caf50', purple: '#a78bfa' };
+
   async function renderStoreSettings(body) {
     body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
-    try {
-      const res = await api('/api/admin/settings');
-      let enabled = !res.settings || res.settings.notify_new_publications !== false;
-      body.innerHTML = '';
+    let res = { settings: {}, defaults: {}, keys: [] };
+    try { res = await api('/api/admin/settings'); } catch (e) {}
+    const values = { ...(res.defaults || {}), ...(res.settings || {}) };
+    let apps = [];
+    try { apps = (await api('/api/admin/apps')).apps || []; } catch (e) {}
+    body.innerHTML = '';
+    const dirty = new Set();
+    const dirtyBadge = el('span', { class: 'admin-settings-dirty' }, t('لا توجد تغييرات'));
+    const controls = Object.create(null);
+    const groupsEl = el('div', { class: 'admin-settings-groups' });
+    const search = el('input', { class: 'input admin-settings-search', type: 'search',
+      placeholder: t('ابحث في الإعدادات'), 'aria-label': t('ابحث في الإعدادات') });
+    const preview = el('div', { class: 'admin-settings-preview' },
+      el('div', { class: 'admin-settings-preview-card' },
+        el('div', { class: 'admin-settings-preview-logo' }, 'G'),
+        el('strong', null, values.store_name || 'Golden Store'),
+        el('span', null, values.tagline || ''),
+        el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, t('معاينة'))));
 
-      const toggle = el('input', {
-        type: 'checkbox',
-        class: 'admin-switch-input',
-        'aria-label': t('إشعار المستخدمين عند نشر تطبيق أو لعبة'),
-      });
-      toggle.checked = enabled;
-      const state = el('span', { class: 'admin-setting-state' }, enabled ? t('مفعّلة') : t('معطّلة'));
-
-      toggle.addEventListener('change', async () => {
-        const next = toggle.checked;
-        toggle.disabled = true;
-        state.textContent = t('جارٍ الحفظ…');
-        try {
-          await api('/api/admin/settings', {
-            method: 'PATCH',
-            body: { notify_new_publications: next },
-          });
-          enabled = next;
-          state.textContent = enabled ? t('مفعّلة') : t('معطّلة');
-          toast(t(enabled ? 'تم تفعيل الإشعارات التلقائية' : 'تم تعطيل الإشعارات التلقائية'), 'success');
-        } catch (e) {
-          toggle.checked = enabled;
-          state.textContent = enabled ? t('مفعّلة') : t('معطّلة');
-          toast(t('تعذّر حفظ الإعداد'), 'error');
-        } finally {
-          toggle.disabled = false;
-        }
-      });
-
-      body.append(
-        el('div', { class: 'panel' },
-          el('div', { class: 'panel-head' }, ico('settings'), t('إعدادات الإشعارات التلقائية')),
-          el('p', { class: 'store-settings-intro' },
-            t('تحكّم في الإشعارات التي تُرسل تلقائياً عند نشر تطبيق أو لعبة جديدة.')),
-          el('div', { class: 'admin-setting-row' },
-            el('div', { class: 'admin-setting-copy' },
-              el('strong', null, t('إشعار المستخدمين عند نشر تطبيق أو لعبة')),
-              el('span', null,
-                t('عند التعطيل، لن يُحفظ إشعار جديد ولن يصل إشعار فوري للمستخدمين. الإعلانات اليدوية وإشعارات تحديث المتجر لا تتأثر.')),
-            ),
-            el('div', { class: 'admin-setting-control' },
-              el('label', { class: 'admin-switch' },
-                toggle,
-                el('span', { class: 'admin-switch-track', 'aria-hidden': 'true' }, el('span', { class: 'admin-switch-thumb' })),
-              ),
-              state,
-            ),
-          ),
-        ),
-      );
-    } catch (e) {
-      body.innerHTML = '';
-      body.append(emptyMsg(t('تعذّر تحميل البيانات'), e.message));
+    function markDirty(key, value) {
+      values[key] = value; dirty.add(key);
+      dirtyBadge.textContent = `${dirty.size} ${t('تغييرات غير محفوظة')}`;
+      dirtyBadge.classList.add('is-dirty');
+      updatePreview();
     }
+    function updatePreview() {
+      preview.style.setProperty('--accent-preview', ACCENTS[values.accent] || ACCENTS.gold);
+      preview.classList.toggle('is-light', values.theme_default === 'light');
+      preview.classList.toggle('is-compact', values.density === 'compact');
+      const n = preview.querySelector('.admin-settings-preview-card strong');
+      if (n) n.textContent = values.store_name || 'Golden Store';
+      const s = preview.querySelector('.admin-settings-preview-card span');
+      if (s) s.textContent = values.tagline || '';
+    }
+    function control(f) {
+      const v = String(values[f.key] ?? '');
+      let inp;
+      if (f.type === 'toggle') {
+        inp = el('input', { type: 'checkbox', class: 'admin-switch-input', 'aria-label': f.label });
+        inp.checked = v === '1';
+        inp.addEventListener('change', () => markDirty(f.key, inp.checked ? '1' : '0'));
+      } else if (f.type === 'select') {
+        inp = el('select', { class: 'input', 'aria-label': f.label },
+          ...f.options.map(([val, lbl]) => el('option', { value: val }, lbl)));
+        inp.value = v;
+        inp.addEventListener('change', () => markDirty(f.key, inp.value));
+      } else if (f.type === 'textarea') {
+        inp = el('textarea', { class: 'input', rows: 2, 'aria-label': f.label }, v);
+        inp.addEventListener('input', () => markDirty(f.key, inp.value));
+      } else {
+        inp = el('input', { class: 'input', type: f.type === 'number' ? 'number' : f.type === 'email' ? 'email' : f.type === 'url' ? 'url' : 'text',
+          value: v, 'aria-label': f.label });
+        if (f.type === 'number') inp.min = '0';
+        inp.addEventListener('input', () => markDirty(f.key, inp.value));
+      }
+      controls[f.key] = inp;
+      return el('div', { class: 'admin-settings-field', 'data-key': f.key },
+        el('div', { class: 'admin-settings-field-copy' },
+          el('strong', null, f.label), el('code', null, f.key)),
+        f.type === 'toggle'
+          ? el('label', { class: 'admin-switch' }, inp,
+              el('span', { class: 'admin-switch-track', 'aria-hidden': 'true' }, el('span', { class: 'admin-switch-thumb' })))
+          : inp);
+    }
+    SETTINGS_SCHEMA.forEach((g) => {
+      const fields = el('div', { class: 'admin-settings-fields' }, ...g.fields.map(control));
+      groupsEl.append(el('section', { class: 'admin-settings-group', 'data-group': g.id },
+        el('div', { class: 'admin-settings-group-head' }, ico(g.icon, 'icon'), el('h2', null, g.label)),
+        fields));
+    });
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      [...groupsEl.querySelectorAll('.admin-settings-field')].forEach((n) => {
+        n.style.display = !q || n.textContent.toLowerCase().includes(q) || String(n.dataset.key).includes(q) ? '' : 'none';
+      });
+      [...groupsEl.querySelectorAll('.admin-settings-group')].forEach((g) => {
+        g.style.display = [...g.querySelectorAll('.admin-settings-field')].some((n) => n.style.display !== 'none') ? '' : 'none';
+      });
+    });
+    async function save() {
+      if (!dirty.size) { toast(t('لا توجد تغييرات'), 'info'); return; }
+      const payload = {};
+      dirty.forEach((k) => { payload[k] = values[k]; });
+      try {
+        const r = await api('/api/admin/settings', { method: 'PATCH', body: { values: payload } });
+        Object.assign(values, r.settings || {});
+        logAdminAction(`حفظ ${dirty.size} إعداداً`);
+        dirty.clear();
+        dirtyBadge.textContent = t('تم الحفظ');
+        dirtyBadge.classList.remove('is-dirty');
+        toast(t('تم حفظ الإعدادات'), 'success');
+      } catch (e) { toast('فشل الحفظ', 'error'); }
+    }
+    saveSettingsFn = save;
+    const saveBtn = el('button', { class: 'btn btn-primary', type: 'button', onclick: save },
+      ico('check'), t('حفظ الإعدادات'));
+    const exportBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => {
+      const blob = new Blob([JSON.stringify(values, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { href: url, download: 'goldenstore-settings.json' });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      logAdminAction(t('تصدير الإعدادات'));
+    } }, t('تصدير الإعدادات'));
+    const importFile = el('input', { type: 'file', accept: 'application/json,.json', class: 'input',
+      'aria-label': t('استيراد الإعدادات') });
+    const importBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: async () => {
+      const f = importFile.files && importFile.files[0];
+      if (!f) { toast(t('اختر ملف JSON'), 'error'); return; }
+      try {
+        const data = JSON.parse(await f.text());
+        Object.keys(data).filter((k) => controls[k]).forEach((k) => {
+          values[k] = String(data[k]); dirty.add(k);
+          const c = controls[k];
+          if (c.type === 'checkbox') c.checked = values[k] === '1';
+          else c.value = values[k];
+        });
+        dirtyBadge.textContent = `${dirty.size} ${t('تغييرات غير محفوظة')}`;
+        dirtyBadge.classList.add('is-dirty');
+        updatePreview();
+        toast(t('استيراد الإعدادات'), 'success');
+      } catch (e) { toast('فشل الاستيراد', 'error'); }
+    } }, t('استيراد الإعدادات'));
+    const resetBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', onclick: async () => {
+      if (!confirm(t('إعادة ضبط الإعدادات') + '؟')) return;
+      try {
+        const r = await api('/api/admin/settings/reset', { method: 'POST' });
+        Object.assign(values, r.settings || {});
+        dirty.clear(); updatePreview(); renderStoreSettings(body);
+        toast(t('تم الحفظ'), 'success');
+      } catch (e) { toast('فشل الإعادة', 'error'); }
+    } }, t('إعادة ضبط الإعدادات'));
+
+    const withIssues = apps.filter((a) => qaIssues(a).length).length;
+    const recs = [
+      withIssues ? `${withIssues} ${t('عناصر تحتاج انتباهاً')} — ${t('فحص الجودة')}` : null,
+      values.collect_demographics !== '1' ? t('فعّل جمع البيانات الديموغرافية الاختياري لرؤية السن والجنس') : null,
+      values.maintenance_mode === '1' ? t('وضع الصيانة مفعّل حالياً') : null,
+      values.notify_new_publications !== '1' ? t('إشعار عند نشر عنصر جديد') + ' — ' + t('مفعّلة') : null,
+    ].filter(Boolean);
+    const recPanel = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('spark', 'icon'), t('توصيات ذكية')),
+      recs.length ? el('ul', { class: 'admin-recs' }, ...recs.map((r) => el('li', null, ico('check', 'icon'), r)))
+        : el('div', { class: 'hint' }, t('لا توجد مشاكل')));
+
+    const toolbar = el('div', { class: 'admin-settings-toolbar' },
+      search, dirtyBadge, exportBtn, importBtn, importFile, resetBtn,
+      el('kbd', { class: 'admin-kbd' }, 'Ctrl S'));
+    const previewPanel = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('eye', 'icon'), t('معاينة مباشرة')), preview);
+    const healthPanel = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('shield', 'icon'), t('صحة الخدمات')),
+      el('div', { class: 'admin-phase2-pad' },
+        el('div', { class: 'hint' }, t('الخدمات تعمل بشكل طبيعي')),
+        el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => goTab('insights') },
+          ico('trending', 'icon'), t('إحصائيات متقدمة'))));
+    const side = el('div', { class: 'admin-dash-side' }, previewPanel, recPanel, healthPanel);
+    const layout = el('div', { class: 'admin-settings-layout' }, groupsEl, side);
+    body.append(
+      phaseHead(t('إعدادات المتجر'),
+        'كل إعدادات المتجر في مكان واحد: الهوية، المظهر، المحتوى، الإشعارات، الخصوصية، والصيانة.', saveBtn),
+      toolbar, layout);
+    updatePreview();
   }
 
   // -------- support chat: one conversation, chat-style bubbles --------
@@ -2133,6 +2279,183 @@
     );
   }
 
+  /* ---------- Advanced insights: real aggregates, honest demographics ---------- */
+  function insightBar(label, value, max, color) {
+    const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+    return el('div', { class: 'ins-bar-row' },
+      el('span', { class: 'ins-bar-label' }, label),
+      el('span', { class: 'ins-bar-track' },
+        el('i', { style: { width: `${pct}%`, background: color || 'var(--gold)' } })),
+      el('b', { class: 'ins-bar-value' }, formatNum(value)));
+  }
+  function insightPanel(title, iconName, ...kids) {
+    return el('div', { class: 'panel ins-panel' },
+      el('div', { class: 'panel-head' }, ico(iconName, 'icon'), title), ...kids);
+  }
+  function insightKpi(label, value, sub) {
+    return el('div', { class: 'admin-kpi' },
+      el('div', { class: 'admin-kpi-top' }, el('span', { class: 'admin-kpi-label' }, label)),
+      el('div', { class: 'admin-kpi-value' }, value),
+      sub ? el('div', { class: 'admin-kpi-sub' }, sub) : null);
+  }
+  function insightLine(rows) {
+    const w = 620, h = 150, pad = 12;
+    const max = Math.max(1, ...rows.map((r) => Number(r.count) || 0));
+    const step = rows.length > 1 ? (w - pad * 2) / (rows.length - 1) : 0;
+    const pts = rows.map((r, i) => `${pad + i * step},${h - pad - ((Number(r.count) || 0) / max) * (h - pad * 2)}`).join(' ');
+    const area = `${pad},${h - pad} ${pts} ${pad + (rows.length - 1) * step},${h - pad}`;
+    const svg = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="150" role="img" aria-label="منحنى التنزيلات">
+      <defs><linearGradient id="insFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f4c01f" stop-opacity=".35"/>
+        <stop offset="100%" stop-color="#f4c01f" stop-opacity="0"/></linearGradient></defs>
+      <polygon points="${area}" fill="url(#insFill)"/>
+      <polyline points="${pts}" fill="none" stroke="#f4c01f" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+    const box = el('div', { class: 'ins-line' });
+    box.innerHTML = svg;
+    return box;
+  }
+  function insightDonut(rows, total) {
+    const colors = ['#f4c01f', '#4c9ffe', '#a78bfa', '#8a8d91'];
+    const r = 42, c = 2 * Math.PI * r;
+    let offset = 0;
+    const circles = rows.map((x, i) => {
+      const frac = total > 0 ? (Number(x.count) || 0) / total : 0;
+      const len = frac * c;
+      const part = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="16"
+        stroke-dasharray="${len} ${c - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;
+      offset += len;
+      return part;
+    }).join('');
+    const box = el('div', { class: 'ins-donut' });
+    box.innerHTML = `<svg viewBox="0 0 120 120" width="130" height="130" role="img" aria-label="توزيع الجنس">
+      <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="16"/>${circles}
+      <text x="60" y="65" text-anchor="middle" fill="var(--text)" font-size="17" font-weight="800">${total}</text></svg>`;
+    return box;
+  }
+
+  async function renderInsights(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    let days = 30;
+    let data = null;
+    async function load() {
+      try { data = await api(`/api/admin/analytics/insights?days=${days}`); } catch (e) { data = null; }
+    }
+    await load();
+    if (!data) { body.innerHTML = ''; body.append(emptyMsg('تعذّر تحميل الإحصائيات', 'تحقق من الاتصال ثم أعد المحاولة.')); return; }
+    const rangeSel = el('select', { class: 'input', 'aria-label': t('الفترة'), onchange: () => {
+      days = Number(rangeSel.value) || 30; renderInsights(body);
+    } }, el('option', { value: '7' }, '7 ' + t('أيام')),
+      el('option', { value: '30' }, '30 ' + t('أيام')),
+      el('option', { value: '90' }, '90 ' + t('أيام')));
+    rangeSel.value = String(days);
+    const exportBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => {
+      const lines = ['metric,key,value'];
+      data.daily_downloads.forEach((r) => lines.push(`daily,${r.day},${r.count}`));
+      data.hourly.forEach((r) => lines.push(`hourly,${r.hour},${r.count}`));
+      data.categories.forEach((r) => lines.push(`category,${r.key},${r.count}`));
+      data.rating_distribution.forEach((r) => lines.push(`rating,${r.key},${r.count}`));
+      data.demographics.age.forEach((r) => lines.push(`age,${r.key},${r.count}`));
+      data.demographics.gender.forEach((r) => lines.push(`gender,${r.key},${r.count}`));
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { href: url, download: 'goldenstore-insights.csv' });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      logAdminAction(t('تصدير الإحصائيات'));
+    } }, ico('download'), t('تصدير الإحصائيات'));
+    const refreshBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button',
+      onclick: () => renderInsights(body) }, ico('refresh'), t('تحديث'));
+
+    const t0 = data.totals || {};
+    const kpis = el('div', { class: 'admin-kpi-grid' },
+      insightKpi(t('إجمالي التطبيقات'), formatNum(t0.apps || 0)),
+      insightKpi(t('الألعاب'), formatNum(t0.games || 0)),
+      insightKpi(t('إجمالي التنزيلات'), formatNum(t0.downloads || 0)),
+      insightKpi(t('متوسط التقييم'), formatNum(t0.avg_rating || 0)),
+      insightKpi(t('التقييمات'), formatNum(t0.reviews || 0)),
+      insightKpi(t('الأجهزة المسجّلة'), formatNum(t0.devices || 0)),
+      insightKpi(t('حجم التخزين'), formatBytes(t0.storage_bytes || 0)),
+      insightKpi(t('أحدث الإضافات'), formatNum(t0.new_apps_30d || 0)));
+
+    // ---- Demographics: OPT-IN only, never fabricated ----
+    const dem = data.demographics || {};
+    const ageLabels = { '13-17': '13–17', '18-24': '18–24', '25-34': '25–34', '35-44': '35–44', '45-54': '45–54', '55+': '55+' };
+    const genderLabels = { male: t('ذكر'), female: t('أنثى'), other: t('آخر'), prefer_not: t('أفضّل عدم التحديد') };
+    const ageMax = Math.max(1, ...(dem.age || []).map((r) => Number(r.count) || 0));
+    const demoPanel = insightPanel(t('السن والجنس'), 'user',
+      dem.enabled === false
+        ? el('div', { class: 'ins-empty' }, ico('shield', 'icon'),
+            el('strong', null, t('جمع البيانات الديموغرافية معطّل')),
+            el('span', null, t('فعّله من إعدادات المتجر ← الخصوصية والبيانات، ثم سيملأ المستخدمون بياناتهم اختيارياً.')))
+        : dem.data_available === false
+          ? el('div', { class: 'ins-empty' }, ico('user', 'icon'),
+              el('strong', null, t('لا توجد بيانات ديموغرافية بعد')),
+              el('span', null, t('البيانات اختيارية ومجهولة؛ لا نعرض أرقاماً تقديرية أبداً.')))
+          : null,
+      el('div', { class: 'ins-demo-grid' },
+        el('div', null, el('h3', null, t('الفئات العمرية')),
+          (dem.age || []).map((r) => insightBar(ageLabels[r.key] || r.key, Number(r.count) || 0, ageMax, '#f4c01f'))),
+        el('div', null, el('h3', null, t('الجنس')),
+          el('div', { class: 'ins-gender' }, insightDonut(dem.gender || [], Number(dem.total) || 0),
+            el('div', { class: 'ins-legend' }, ...(dem.gender || []).map((r, i) =>
+              el('div', null, el('i', { style: { background: ['#f4c01f','#4c9ffe','#a78bfa','#8a8d91'][i % 4] } }),
+                genderLabels[r.key] || r.key, ' · ', formatNum(r.count) || '0')))))),
+      el('div', { class: 'ins-countries' }, el('h3', null, t('الدول')),
+        ...((dem.countries || []).length
+          ? (dem.countries || []).map((r) => el('span', { class: 'admin-qa-tag' }, `${r.key} · ${formatNum(r.count)}`))
+          : [el('span', { class: 'hint' }, t('لا توجد بيانات بعد'))])),
+      el('div', { class: 'hint' }, `${t('المشاركون')}: ${formatNum(dem.total || 0)} — ${t('بيانات اختيارية مجهولة')}`));
+
+    const dailyMax = Math.max(1, ...(data.daily_downloads || []).map((r) => Number(r.count) || 0));
+    const hourMax = Math.max(1, ...(data.hourly || []).map((r) => Number(r.count) || 0));
+    const catMax = Math.max(1, ...(data.categories || []).map((r) => Number(r.count) || 0));
+    const rateMax = Math.max(1, ...(data.rating_distribution || []).map((r) => Number(r.count) || 0));
+    const topTable = el('table', { class: 'table' },
+      el('thead', null, el('tr', null, el('th', null, t('الاسم')), el('th', null, t('النوع')), el('th', null, t('التنزيلات')))),
+      el('tbody', null, ...(data.top_apps || []).map((a) => el('tr', null,
+        el('td', null, a.name || a.slug), el('td', null, a.type === 'game' ? t('لعبة') : t('تطبيق')),
+        el('td', null, formatNum(a.downloads || 0))))));
+
+    body.innerHTML = '';
+    body.append(
+      phaseHead(t('إحصائيات متقدمة'), 'كل الأرقام من قاعدة البيانات الفعلية؛ لا توجد قيم تقديرية أو مُختلقة.', exportBtn),
+      el('div', { class: 'admin-settings-toolbar' }, rangeSel, refreshBtn,
+        el('span', { class: 'hint' }, `${t('آخر تحديث')}: ${data.generated_at ? formatDate(data.generated_at) : '—'}`)),
+      kpis,
+      demoPanel,
+      el('div', { class: 'admin-dash-grid' },
+        insightPanel(t('التنزيلات اليومية'), 'trending', insightLine(data.daily_downloads || []),
+          el('div', { class: 'hint' }, `${t('الذروة')}: ${formatNum(dailyMax)} / ${t('يوم')}`)),
+        insightPanel(t('توزيع حسب الساعة'), 'clock',
+          el('div', { class: 'ins-heatmap' }, ...(data.hourly || []).map((r) =>
+            el('span', { class: 'ins-heat', title: `${r.hour}:00 · ${r.count}`,
+              style: { opacity: String(0.18 + 0.82 * ((Number(r.count) || 0) / hourMax)) } }, String(r.hour)))))),
+      el('div', { class: 'admin-dash-grid' },
+        insightPanel(t('الفئات'), 'grid', ...(data.categories || []).map((r) =>
+          insightBar(r.key, Number(r.count) || 0, catMax, '#4c9ffe'))),
+        insightPanel(t('توزيع التقييمات'), 'star', ...(data.rating_distribution || []).map((r) =>
+          insightBar(`${r.key} ★`, Number(r.count) || 0, rateMax, '#f4c01f')))),
+      el('div', { class: 'admin-dash-grid' },
+        insightPanel(t('الأكثر تنزيلاً'), 'apps', el('div', { class: 'table-wrap' }, topTable)),
+        insightPanel(t('المنصات'), 'phone',
+          insightBar(t('أندرويد'), Number((data.platforms || {}).android) || 0, Math.max(1, (data.platforms || {}).android || 0), '#4caf50'),
+          insightBar(t('iOS'), Number((data.platforms || {}).ios) || 0, Math.max(1, (data.platforms || {}).android || 0), '#a78bfa'),
+          insightBar(t('الويب'), Number((data.platforms || {}).web) || 0, Math.max(1, (data.platforms || {}).android || 0), '#4c9ffe'),
+          el('div', { class: 'hint' }, `${t('التطبيقات')}: ${formatNum((data.types || {}).app?.count || 0)} · ${t('الألعاب')}: ${formatNum((data.types || {}).game?.count || 0)}`))),
+      el('div', { class: 'admin-dash-grid' },
+        insightPanel(t('سجل الإصدارات'), 'download',
+          (data.releases || []).length ? el('div', { class: 'admin-phase2-list' }, ...(data.releases || []).map((r) =>
+            el('div', { class: 'admin-phase2-row' }, el('strong', null, r.version_name || '—'),
+              el('span', { class: 'admin-order-meta' }, r.created_at ? formatDate(r.created_at) : '—'))))
+            : el('div', { class: 'hint' }, t('لا توجد بيانات بعد'))),
+        insightPanel(t('آخر النشاطات'), 'clock',
+          (data.activity || []).length ? el('div', { class: 'admin-phase2-list' }, ...(data.activity || []).map((r) =>
+            el('div', { class: 'admin-phase2-row' }, el('strong', null, r.action || '—'))))
+            : el('div', { class: 'hint' }, t('لا نشاطات بعد')))),
+    );
+  }
+
   function notificationCard(n, refreshList) {
     const type = n.type === 'new_app' || n.type === 'update' || n.type === 'announcement' ? n.type : 'announcement';
     const badgeLabel = type === 'new_app' ? 'تطبيق جديد' : type === 'update' ? 'تحديث' : 'إعلان';
@@ -3078,10 +3401,17 @@
   // ---------------- init ----------------
   try { if (localStorage.getItem('gs_admin_compact') === '1') document.body.classList.add('admin-compact'); } catch (e) {}
   applyAdminWidth();
+  let saveSettingsFn = null;
   let gsChord = 0;
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault(); openCommandPalette(); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S') && activeTab === 'settings' && saveSettingsFn) {
+      e.preventDefault(); saveSettingsFn(); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S') && activeTab !== 'settings' && tag === 'input') {
+      e.preventDefault(); return;
     }
     const tag = (e.target && e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;

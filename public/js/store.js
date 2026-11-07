@@ -1002,6 +1002,8 @@ async function signOut() {
 
 /* ----------------------------- App update popup ----------------------------- */
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
+const APP_UPDATE_SEEN_KEY = 'gs_app_update_seen';
+const APP_UPDATE_BANNER_KEY = 'gs_app_update_banner_dismissed';
 
 function getCurrentAppVersion() {
   try {
@@ -1028,16 +1030,90 @@ function getCurrentVersionCode() {
 }
 
 function shouldShowUpdate(update) {
-  if (!update || !update.version_name || !update.apk_url) return false;
-  try {
-    const dismissed = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
-    if (!update.force && dismissed[update.version_name]) return false;
-  } catch (e) {}
+  if (!update || !update.version_name || !updateApkUrl(update)) return false;
+  const nextName = String(update.version_name).trim();
+  const currentName = String(getCurrentAppVersion() || '').trim();
+  // The device already runs this exact build.
+  if (nextName && nextName === currentName) return false;
+  if (!update.force) {
+    try {
+      const dismissed = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
+      if (dismissed[nextName]) return false;
+    } catch (e) {}
+  }
+  // Publishing stores a Unix timestamp in version_code, while a native wrapper
+  // may report 1 (or 0). The old `vc > 100000 -> return false` guard therefore
+  // suppressed EVERY dialog published from the admin console. Only compare
+  // version codes when the native app reports a build number on the same scale.
   const vc = Number(update.version_code || 0);
   const nativeVc = getCurrentVersionCode();
-  if (vc && vc > 100000) return false;
-  if (vc && nativeVc && vc <= nativeVc) return false;
-  return String(update.version_name) !== getCurrentAppVersion();
+  if (vc && nativeVc >= 100000 && vc <= nativeVc) return false;
+  return true;
+}
+
+function updateSeen(version) {
+  try {
+    const seen = JSON.parse(localStorage.getItem(APP_UPDATE_SEEN_KEY) || '{}');
+    return !!seen[String(version)];
+  } catch (e) { return false; }
+}
+function markUpdateSeen(version) {
+  try {
+    const seen = JSON.parse(localStorage.getItem(APP_UPDATE_SEEN_KEY) || '{}');
+    seen[String(version)] = Date.now();
+    localStorage.setItem(APP_UPDATE_SEEN_KEY, JSON.stringify(seen));
+  } catch (e) {}
+}
+function dismissUpdateVersion(version) {
+  try {
+    const d = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
+    d[String(version)] = Date.now();
+    localStorage.setItem(APP_UPDATE_DISMISS_KEY, JSON.stringify(d));
+  } catch (e) {}
+  const banner = document.getElementById('gs-update-banner');
+  if (banner) banner.remove();
+  document.body.classList.remove('has-update-banner');
+}
+
+// Sticky announcement bar: after the cinematic dialog is postponed, the bar
+// stays at the top of the store and re-opens it with one tap.
+function showUpdateBanner(update) {
+  if (!update || !update.version_name || document.getElementById('gs-update-banner')) return;
+  const version = String(update.version_name);
+  if (!update.force) {
+    try {
+      const hidden = JSON.parse(localStorage.getItem(APP_UPDATE_BANNER_KEY) || '{}');
+      if (hidden[version]) return;
+    } catch (e) {}
+  }
+  const closeFn = () => {
+    try {
+      const d = JSON.parse(localStorage.getItem(APP_UPDATE_BANNER_KEY) || '{}');
+      d[version] = Date.now();
+      localStorage.setItem(APP_UPDATE_BANNER_KEY, JSON.stringify(d));
+    } catch (e) {}
+    banner.remove();
+    document.body.classList.remove('has-update-banner');
+  };
+  const banner = el('div', {
+    id: 'gs-update-banner', class: 'gs-update-banner', role: 'status', 'data-noi18n': '',
+  },
+    el('span', { class: 'gs-update-banner-glow', 'aria-hidden': 'true' }),
+    el('span', { class: 'gs-update-banner-icon', 'aria-hidden': 'true' }, ico('spark', 'icon')),
+    el('span', { class: 'gs-update-banner-copy' },
+      el('strong', null, t('إصدار جديد من Golden Store متاح')),
+      el('span', { class: 'gs-update-banner-sub' },
+        t('الإصدار') + ' ' + version + ' — ' + t('اضغط لمشاهدة التفاصيل'))),
+    el('button', { class: 'gs-update-banner-cta', type: 'button',
+      onclick: () => showUpdateDialog(update) }, t('عرض ما الجديد')),
+    update.force ? null : el('button', {
+      class: 'gs-update-banner-close', type: 'button',
+      'aria-label': t('إغلاق'), title: t('إغلاق'), onclick: closeFn,
+    }, ico('close', 'icon')),
+  );
+  banner.addEventListener('click', (e) => { if (e.target === banner) showUpdateDialog(update); });
+  document.body.append(banner);
+  document.body.classList.add('has-update-banner');
 }
 
 function updateApkUrl(update) {
@@ -1116,6 +1192,13 @@ async function checkForUpdates(opts = {}) {
 }
 
 
+function formatReleaseDate(ts) {
+  const n = Number(ts || 0);
+  if (!n || !Number.isFinite(n)) return '—';
+  try { return new Date(n > 1e12 ? n : n * 1000).toLocaleDateString('ar-EG-u-nu-latn', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  catch (e) { return '—'; }
+}
+
 function showUpdateDialog(update) {
   if (!update || !updateApkUrl(update)) return;
   const existing = document.getElementById('gs-update-dialog');
@@ -1127,13 +1210,28 @@ function showUpdateDialog(update) {
   });
   const apkUrl = updateApkUrl(update);
   const notes = update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.');
+  const prevFocus = document.activeElement;
+  const size = Number(update.size_bytes || 0);
+  const sizeText = size > 0 ? formatBytes(size) : '—';
+  const dateText = formatReleaseDate(update.created_at);
 
   const card = el('div', { class: 'gs-update-card', 'data-noi18n': '' },
+    // Cinematic aura: two slow orbits + drifting gold particles (CSS only).
+    el('div', { class: 'gs-update-halo', 'aria-hidden': 'true' },
+      el('span', { class: 'gs-update-orbit o1' }),
+      el('span', { class: 'gs-update-orbit o2' }),
+      el('span', { class: 'gs-update-particle p1' }),
+      el('span', { class: 'gs-update-particle p2' }),
+      el('span', { class: 'gs-update-particle p3' }),
+      el('span', { class: 'gs-update-particle p4' }),
+      el('span', { class: 'gs-update-particle p5' }),
+      el('span', { class: 'gs-update-particle p6' }),
+    ),
     el('div', { class: 'gs-update-hero' },
       el('div', { class: 'gs-update-logo' },
         el('img', { src: '/images/logo.png', alt: 'Golden Store', draggable: 'false' })),
       el('div', { class: 'gs-update-head' },
-        el('span', { class: 'gs-update-badge' }, t('تحديث جديد متاح')),
+        el('span', { class: 'gs-update-badge' }, update.force ? t('تحديث إلزامي') : t('تحديث جديد متاح')),
         el('span', { class: 'gs-update-version' }, t('الإصدار') + ' ' + (update.version_name || '—')),
       ),
       el('h2', { id: 'gs-update-title', class: 'gs-update-title' }, t('تحديث Golden Store')),
@@ -1146,6 +1244,12 @@ function showUpdateDialog(update) {
         el('span', { class: 'gs-update-arrow' }, '←'),
         el('span', { class: 'gs-update-ver-chip is-new' },
           el('span', null, t('الإصدار الجديد')), el('strong', null, update.version_name || '—')),
+      ),
+      el('div', { class: 'gs-update-meta' },
+        el('span', { class: 'gs-update-meta-item' },
+          ico('download', 'icon'), el('b', null, t('حجم التحديث')), el('i', null, sizeText)),
+        el('span', { class: 'gs-update-meta-item' },
+          ico('clock', 'icon'), el('b', null, t('تاريخ النشر')), el('i', null, dateText)),
       ),
       el('div', { class: 'gs-update-notes' },
         el('span', { class: 'gs-update-notes-label' }, t('ما الجديد')),
@@ -1160,6 +1264,26 @@ function showUpdateDialog(update) {
   );
 
   const android = window.GSAndroid;
+  let closed = false;
+  function closeDialog() {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+    document.body.classList.remove('update-dialog-open');
+    if (prevFocus && typeof prevFocus.focus === 'function') { try { prevFocus.focus(); } catch (e) {} }
+  }
+  function onKey(e) {
+    if (e.key === 'Escape' && !update.force) { e.preventDefault(); closeDialog(); }
+    else if (e.key === 'Tab') {
+      const items = [...overlay.querySelectorAll('button:not([disabled])')];
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+
   function startDownload() {
     if (android && typeof android.downloadApk === 'function') {
       const filename = 'goldenstore-' + (update.version_name || 'update') + '.apk';
@@ -1168,12 +1292,13 @@ function showUpdateDialog(update) {
         card.innerHTML = '<div class="gs-update-state"><div class="gs-update-state-icon">⬇</div>'
           + '<h2 class="gs-update-state-title">' + t('جارٍ التحميل…') + '</h2>'
           + '<p class="gs-update-state-text">' + t('سيتم التثبيت تلقائياً عند اكتمال التحميل.') + '</p>'
-          + '<div class="gs-update-progress"><i></i></div></div>';
+          + '<div class="gs-update-progress is-live"><i></i></div>'
+          + '<div class="gs-update-progress-label">0%</div></div>';
         return;
       } catch (e) {}
     }
     window.open(apkUrl, '_blank');
-    setTimeout(() => overlay.remove(), 200);
+    setTimeout(closeDialog, 200);
   }
 
   const actions = el('div', { class: 'gs-update-actions' },
@@ -1185,22 +1310,26 @@ function showUpdateDialog(update) {
     update.force ? null : el('button', {
       class: 'btn btn-secondary gs-update-later',
       type: 'button',
-      onclick: () => {
-        try { const d = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}'); d[update.version_name] = Date.now(); localStorage.setItem(APP_UPDATE_DISMISS_KEY, JSON.stringify(d)); } catch (e) {}
-        overlay.remove();
-      },
+      onclick: () => { closeDialog(); },
     }, t('لاحقاً')),
+    update.force ? null : el('button', {
+      class: 'gs-update-ignore', type: 'button',
+      onclick: () => { dismissUpdateVersion(update.version_name); closeDialog(); },
+    }, t('تجاهل هذا الإصدار')),
     el('button', {
       class: 'gs-update-recheck', type: 'button',
       onclick: () => checkForUpdates({}),
     }, ico('refresh', 'icon'), t('إعادة التحقق من التحديثات')),
-    el('div', { class: 'gs-update-foot' }, ico('shield', 'icon'), t('التحديث الرسمي من Golden Store')),
+    el('div', { class: 'gs-update-foot' }, ico('shield', 'icon'), t('تحديث رسمي وموقّع')),
   );
   card.append(actions);
 
   overlay.append(card);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay && !update.force) overlay.remove(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay && !update.force) closeDialog(); });
   document.body.append(overlay);
+  document.body.classList.add('update-dialog-open');
+  document.addEventListener('keydown', onKey, true);
+  try { const btn = card.querySelector('.gs-update-primary'); if (btn) btn.focus(); } catch (e) {}
 }
 
 
@@ -1259,6 +1388,14 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
   } catch (e) { console.error('[apkStateHub]', e); }
 
   if (slug !== 'app-update') return;
+  if (status === 'downloading' || status === 'downloaded') {
+    const raw = Number(progress) || 0;
+    const pct = status === 'downloaded' ? 100 : Math.max(0, Math.min(100, Math.round(raw <= 1 ? raw * 100 : raw)));
+    const bar = document.querySelector('#gs-update-dialog .gs-update-progress i');
+    const label = document.querySelector('#gs-update-dialog .gs-update-progress-label');
+    if (bar) bar.style.width = pct + '%';
+    if (label) label.textContent = pct + '%';
+  }
   if (status === 'failed') {
     const map = {
       signature_mismatch: t('تعارض توقيع الحزمة: ألغِ التطبيق المثبت ثم ثبّت النسخة الجديدة.'),
@@ -1336,7 +1473,15 @@ async function checkAppUpdate() {
   if (!isNativeApp()) return;
   try {
     const update = await api('/api/app-update', { timeoutMs: 8000 });
-    if (shouldShowUpdate(update)) showUpdateDialog(update);
+    if (!shouldShowUpdate(update)) return;
+    // 1) Always leave a sticky announcement bar at the top of the store.
+    showUpdateBanner(update);
+    // 2) Open the cinematic dialog once per published version on entry.
+    //    A forced update always opens, even if that version was seen before.
+    if (update.force || !updateSeen(update.version_name)) {
+      markUpdateSeen(update.version_name);
+      showUpdateDialog(update);
+    }
   } catch (e) { console.error('[appUpdate] check failed', e); }
 }
 
@@ -1723,7 +1868,7 @@ window.Store = {
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
-  checkAppUpdate, checkForUpdates, showUpdateDialog, offlineScreen, getCurrentAppVersion,
+  checkAppUpdate, checkForUpdates, showUpdateDialog, showUpdateBanner, shouldShowUpdate, offlineScreen, getCurrentAppVersion,
 };
 
 document.addEventListener('DOMContentLoaded', boot);

@@ -364,6 +364,8 @@ app.get('/app-update', async (c) => {
     apk_url: apkUrl, url: apkUrl,
     notes: row?.notes || CURRENT_RELEASE.notes,
     force: row?.force === 1,
+    size_bytes: Number(row?.size_bytes) || 0,   // real APK size for the dialog
+    created_at: Number(row?.created_at) || 0,   // release date for the dialog
     downloads,                                  // always a real number, never undefined
   };
   return c.json({ ...out, update: { ...out } });
@@ -1149,6 +1151,27 @@ app.post('/admin/notifications', async (c) => {
   return c.json({ ok: true, id: res.id, push: res.push });
 });
 
+// ---- Release history -----------------------------------------------------
+// Kept separate from the singleton `app_updates` row so the Update Center can
+// show every published build. Created lazily: no manual migration required.
+const releaseTableReady = new WeakSet<object>();
+async function ensureReleaseTable(db: any) {
+  if (!db || releaseTableReady.has(db)) return;
+  releaseTableReady.add(db);
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS app_update_releases (
+      id TEXT PRIMARY KEY,
+      version_name TEXT,
+      version_code INTEGER,
+      notes TEXT,
+      force INTEGER DEFAULT 0,
+      size_bytes INTEGER DEFAULT 0,
+      apk_url TEXT,
+      created_at INTEGER
+    )`).run();
+  } catch { /* read-only / race: history is best-effort */ }
+}
+
 app.post('/admin/app-update', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   let apk_url = sanitizeUrl(body.apk_url), apk_key = String(body.apk_key || '').trim(), size_bytes = 0;
@@ -1187,12 +1210,30 @@ app.post('/admin/app-update', async (c) => {
     if (Number.isFinite(requested) && requested >= 0) await setDownloadBaseline(c.env, requested);
   }
 
+  // Durable release history for the admin Update Center.
+  await ensureReleaseTable(c.env.DB);
+  try {
+    await c.env.DB.prepare(`INSERT INTO app_update_releases
+      (id, version_name, version_code, notes, force, size_bytes, apk_url, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(String(crypto.randomUUID()), String(body.version_name || ''), safeInt(body.version_code, 0, 999999999),
+        sanitizeText(body.notes, 1000), body.force ? 1 : 0, size_bytes, apk_url, nowSec()).run();
+  } catch { /* history must never block publishing */ }
+
   let push = null;
   if (body.send_notification) {
     const res = await addNotification(c.env, { type: 'update', title: body.version_name ? `تحديث ${body.version_name}` : 'تحديث جديد', body: body.notes || 'تحديث', data: { apk_url }, created_at: nowSec() });
     push = res.push;
   }
   return c.json({ ok: true, push });
+});
+
+app.get('/admin/app-update/releases', async (c) => {
+  await ensureReleaseTable(c.env.DB);
+  const rows: any = await c.env.DB.prepare(
+    'SELECT version_name, version_code, notes, force, size_bytes, apk_url, created_at FROM app_update_releases ORDER BY created_at DESC LIMIT 20'
+  ).all().catch(() => ({ results: [] }));
+  return c.json({ releases: rows.results || [] });
 });
 
 app.get('/admin/push/status', async (c) => {

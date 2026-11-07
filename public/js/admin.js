@@ -886,6 +886,8 @@
     { id: 'system', label: 'النظام والصيانة', icon: 'settings', fields: [
       { key: 'maintenance_mode', label: 'وضع الصيانة', type: 'toggle' },
       { key: 'maintenance_message', label: 'رسالة الصيانة', type: 'textarea' },
+      { key: 'maintenance_duration_minutes', label: 'مدة الصيانة (بالدقائق)', type: 'number' },
+      { key: 'maintenance_end_at', label: 'وقت انتهاء الصيانة', type: 'readonly' },
     ] },
   ];
   const ACCENTS = { gold: '#f4c01f', blue: '#4c9ffe', green: '#4caf50', purple: '#a78bfa' };
@@ -929,6 +931,18 @@
     function control(f) {
       const v = String(values[f.key] ?? '');
       let inp;
+      if (f.type === 'readonly') {
+        const epoch = Number(v || 0);
+        let label = '—';
+        if (epoch > 0) {
+          try { label = new Date(epoch * 1000).toLocaleString(document.documentElement.lang || 'ar', { dateStyle: 'medium', timeStyle: 'short' }); }
+          catch (e) { label = String(epoch); }
+        }
+        // Not registered in `controls`: derived values must never be imported/overwritten.
+        return el('div', { class: 'admin-settings-field', 'data-key': f.key },
+          el('div', { class: 'admin-settings-field-copy' }, el('strong', null, f.label), el('code', null, f.key)),
+          el('div', { class: 'input admin-settings-readonly', 'aria-label': f.label }, label));
+      }
       if (f.type === 'toggle') {
         inp = el('input', { type: 'checkbox', class: 'admin-switch-input', 'aria-label': f.label });
         inp.checked = v === '1';
@@ -1032,7 +1046,11 @@
     const recs = [
       withIssues ? `${withIssues} ${t('عناصر تحتاج انتباهاً')} — ${t('فحص الجودة')}` : null,
       values.collect_demographics !== '1' ? t('فعّل جمع البيانات الديموغرافية الاختياري لرؤية السن والجنس') : null,
-      values.maintenance_mode === '1' ? t('وضع الصيانة مفعّل حالياً') : null,
+      values.maintenance_mode === '1'
+        ? t('وضع الصيانة مفعّل حالياً') + (Number(values.maintenance_end_at) > 0
+            ? ' — ' + t('ينتهي في') + ' ' + new Date(Number(values.maintenance_end_at) * 1000).toLocaleString(document.documentElement.lang || 'ar', { dateStyle: 'medium', timeStyle: 'short' })
+            : '')
+        : null,
       values.notify_new_publications !== '1' ? t('إشعار عند نشر عنصر جديد') + ' — ' + t('مفعّلة') : null,
     ].filter(Boolean);
     const recPanel = el('div', { class: 'panel' },

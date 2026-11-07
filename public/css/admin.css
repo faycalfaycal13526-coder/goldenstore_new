@@ -1339,3 +1339,11 @@ body.admin-compact .admin-tabs .tab { padding-top: 7px; padding-bottom: 7px; }
 body.admin-compact .admin-settings-group-head { padding: 8px 12px; }
 body.admin-compact .admin-settings-field { padding: 7px 9px; }
 body.admin-compact .admin-kpi { padding: 10px; }
+
+/* Derived maintenance deadline (read-only, computed by the server) */
+.admin-settings-readonly {
+  display: flex; align-items: center; min-height: 36px;
+  padding: 8px 11px; border-radius: 10px; font-size: 12px; font-weight: 700;
+  color: var(--muted, #b9b9b9); background: rgba(244,192,31,.07);
+  border: 1px dashed rgba(244,192,31,.35); direction: ltr; text-align: start;
+}

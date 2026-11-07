@@ -96,6 +96,63 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+/* =========================================================================
+   Maintenance lock — a REAL server-side gate.
+   The centered modal cannot be bypassed with DevTools or by calling the API
+   directly: every public endpoint returns 503 while maintenance is active.
+   Only the admin session (verified JWT) and a tiny allowlist pass through.
+   ========================================================================= */
+const MAINTENANCE_ALLOWLIST = ['/api/settings', '/api/login', '/api/logout'];
+const maintenanceCache: { data: Record<string, string> | null; ts: number } = { data: null, ts: 0 };
+const MAINTENANCE_CACHE_TTL = 3000;
+function invalidateMaintenanceCache() { maintenanceCache.data = null; maintenanceCache.ts = 0; }
+function maintenanceActive(cfg: Record<string, string>, now = nowSec()): boolean {
+  if (cfg.maintenance_mode !== '1') return false;
+  const end = Number(cfg.maintenance_end_at || 0);
+  return !(end > 0 && end <= now);
+}
+function maintenanceRemaining(cfg: Record<string, string>, now = nowSec()): number {
+  const end = Number(cfg.maintenance_end_at || 0);
+  return end > now ? end - now : 0;
+}
+async function hasAdminSession(c: any): Promise<boolean> {
+  try {
+    const secret = c.env.JWT_SECRET;
+    if (!secret) return false;
+    let token = getCookie(c, COOKIE_NAME);
+    const auth = c.req.header('authorization') || '';
+    if (!token && auth.toLowerCase().startsWith('bearer ')) token = auth.slice(7).trim();
+    if (!token) return false;
+    const payload = await verifyJwt(token, secret);
+    return !!payload && payload.role === 'admin';
+  } catch { return false; }
+}
+async function maintenanceConfig(c: any): Promise<Record<string, string>> {
+  const t = Date.now();
+  if (maintenanceCache.data && t - maintenanceCache.ts < MAINTENANCE_CACHE_TTL) return maintenanceCache.data;
+  const data = await readAllSettings(c.env).catch(() => ({ ...SETTING_DEFAULTS }));
+  maintenanceCache.data = data; maintenanceCache.ts = t;
+  return data;
+}
+app.use('*', async (c, next) => {
+  const path = c.req.path;
+  if (MAINTENANCE_ALLOWLIST.includes(path) || path.startsWith('/api/admin/')) return next();
+  const cfg = await maintenanceConfig(c);
+  if (!maintenanceActive(cfg)) return next();
+  if (await hasAdminSession(c)) return next();
+  const now = nowSec();
+  c.header('Cache-Control', 'no-store');
+  c.header('Retry-After', String(Math.max(1, maintenanceRemaining(cfg, now))));
+  return c.json({ error: 'maintenance', maintenance: {
+    active: true,
+    message: cfg.maintenance_message || '',
+    end_at: Number(cfg.maintenance_end_at || 0),
+    remaining: maintenanceRemaining(cfg, now),
+    duration_minutes: Number(cfg.maintenance_duration_minutes || 0),
+    server_time: now,
+  } }, 503);
+});
+
 // Helpers
 function isValidSlug(s: string): boolean {
   if (!s || s.length > 200 || /[\/\\<>\x00-\x1f]/.test(s) || s.includes('..')) return false;
@@ -1434,6 +1491,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   notify_new_publications: '1', push_enabled: '1', auto_notify_update: '0',
   quiet_start: '23', quiet_end: '7',
   collect_demographics: '0', maintenance_mode: '0', maintenance_message: 'المتجر تحت الصيانة، نعود قريباً.',
+  maintenance_duration_minutes: '60', maintenance_end_at: '0',
   session_days: '7',
 };
 const SETTING_KEYS = Object.keys(SETTING_DEFAULTS);
@@ -1441,7 +1499,8 @@ const PUBLIC_SETTINGS = [
   'store_name', 'tagline', 'support_email', 'telegram_url', 'official_url',
   'theme_default', 'accent', 'density', 'default_language', 'allow_reviews',
   'show_download_counter', 'require_login', 'collect_demographics',
-  'maintenance_mode', 'maintenance_message', 'notify_new_publications',
+  'maintenance_mode', 'maintenance_message', 'maintenance_duration_minutes',
+  'maintenance_end_at', 'notify_new_publications',
   // Non-secret operational values the shared client applier also needs.
   'default_type', 'default_category', 'max_upload_mb', 'auto_notify_update',
   'push_enabled', 'quiet_start', 'quiet_end', 'session_days',
@@ -1451,9 +1510,39 @@ async function readAllSettings(env: Env): Promise<Record<string, string>> {
   const out: Record<string, string> = { ...SETTING_DEFAULTS };
   const rows: any = await env.DB.prepare('SELECT key, value FROM admin_preferences').all().catch(() => ({ results: [] }));
   (rows.results || []).forEach((r: any) => { if (SETTING_KEYS.includes(String(r.key))) out[String(r.key)] = String(r.value); });
+  // Maintenance always has a real end time. Normalise legacy rows and auto-expire.
+  await persistSetting(env, 'maintenance_end_at', out, () => {
+    const now = nowSec();
+    if (out.maintenance_mode !== '1') return false;
+    const end = Number(out.maintenance_end_at || 0);
+    if (end > 0 && end <= now) {
+      // Time is up: switch the store back on for everybody (idempotent).
+      out.maintenance_mode = '0'; out.maintenance_end_at = '0';
+      void env.DB.prepare(`INSERT INTO admin_preferences (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+        .bind('maintenance_mode', '0', now).run().catch(() => {});
+      invalidateMaintenanceCache();
+      return true;
+    }
+    if (end === 0) {
+      // An activation saved before the duration feature existed: give it a deadline.
+      const mins = Math.min(10080, Math.max(1, Number(out.maintenance_duration_minutes) || 60));
+      out.maintenance_end_at = String(now + mins * 60);
+      return true;
+    }
+    return false;
+  });
   // The legacy singleton row remains the source of truth for this flag.
   try { const legacy = await getStoreSettings(env); out.notify_new_publications = legacy.notify_new_publications ? '1' : '0'; } catch (e) {}
   return out;
+}
+async function persistSetting(env: Env, key: string, out: Record<string, string>, mutate: () => boolean) {
+  if (!mutate()) return;
+  try {
+    await env.DB.prepare(`INSERT INTO admin_preferences (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+      .bind(key, String(out[key] ?? ''), nowSec()).run();
+  } catch { /* best effort: the computed value is still returned */ }
 }
 async function publicSettings(env: Env): Promise<Record<string, string>> {
   const all = await readAllSettings(env);
@@ -1474,7 +1563,16 @@ async function recordDownloadEvent(env: Env, slug: string, platform = 'web') {
 app.get('/settings', async (c) => {
   // no-store: an admin change must take effect on the very next page load.
   c.header('Cache-Control', 'no-store');
-  return c.json({ settings: await publicSettings(c.env) });
+  const settings = await publicSettings(c.env);
+  const now = nowSec();
+  return c.json({
+    settings,
+    server_time: now,
+    maintenance_active: maintenanceActive(settings, now),
+    maintenance_bypass: await hasAdminSession(c),
+    maintenance_end_at: Number(settings.maintenance_end_at || 0),
+    maintenance_remaining: maintenanceRemaining(settings, now),
+  });
 });
 
 app.get('/admin/settings', async (c) => {
@@ -1493,10 +1591,28 @@ app.patch('/admin/settings', async (c) => {
   }
   const values = body.values && typeof body.values === 'object' ? body.values : null;
   if (!values) return c.json({ error: 'invalid' }, 400);
+  // "Maintenance duration (minutes)" is converted into ONE absolute deadline at
+  // activation time, so every visitor sees the same countdown and it auto-ends.
+  const computed: Record<string, string> = {};
+  if ('maintenance_mode' in values || 'maintenance_duration_minutes' in values) {
+    const current = await readAllSettings(c.env).catch(() => ({ ...SETTING_DEFAULTS }));
+    const raw = Number(values.maintenance_duration_minutes ?? current.maintenance_duration_minutes ?? 60);
+    const minutes = Math.min(10080, Math.max(1, Math.round(raw) || 60));
+    if ('maintenance_duration_minutes' in values) computed.maintenance_duration_minutes = String(minutes);
+    const turningOn = values.maintenance_mode === '1';
+    const turningOff = values.maintenance_mode === '0';
+    const durationChanged = 'maintenance_duration_minutes' in values;
+    if (turningOn || (durationChanged && current.maintenance_mode === '1' && !turningOff)) {
+      computed.maintenance_end_at = String(nowSec() + minutes * 60);
+    } else if (turningOff) {
+      computed.maintenance_end_at = '0';
+    }
+  }
+  const merged: Record<string, string> = { ...values, ...computed };
   let saved = 0;
   for (const k of SETTING_KEYS) {
-    if (!(k in values)) continue;
-    const v = sanitizeText(values[k], 500);
+    if (!(k in merged)) continue;
+    const v = sanitizeText(merged[k], 500);
     await c.env.DB.prepare(`INSERT INTO admin_preferences (key, value, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
       .bind(k, v, nowSec()).run();
@@ -1504,14 +1620,16 @@ app.patch('/admin/settings', async (c) => {
       await c.env.DB.prepare(`INSERT OR REPLACE INTO store_settings (id, notify_new_publications, updated_at) VALUES ('general', ?, ?)`)
         .bind(v === '1' ? 1 : 0, nowSec()).run();
     }
-    saved++;
+    if (k in values) saved++;
   }
+  invalidateMaintenanceCache();
   await recordActivity(c.env, consoleActor(c), `حفظ ${saved} إعداداً`, 'settings');
   return c.json({ ok: true, saved, settings: await readAllSettings(c.env) });
 });
 app.post('/admin/settings/reset', async (c) => {
   await ensureInsightsTables(c.env.DB);
   await c.env.DB.prepare('DELETE FROM admin_preferences').run().catch(() => {});
+  invalidateMaintenanceCache();
   await recordActivity(c.env, consoleActor(c), 'إعادة ضبط الإعدادات', 'settings');
   return c.json({ ok: true, settings: await readAllSettings(c.env) });
 });

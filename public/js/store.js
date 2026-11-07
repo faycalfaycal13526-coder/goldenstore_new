@@ -1491,10 +1491,9 @@ async function checkAppUpdate() {
   try {
     const update = await api('/api/app-update', { timeoutMs: 8000 });
     if (!shouldShowUpdate(update)) return;
-    // 1) Always leave a sticky announcement bar at the top of the store.
-    showUpdateBanner(update);
-    // 2) Open the cinematic dialog once per published version on entry.
-    //    A forced update always opens, even if that version was seen before.
+    // Centered popup ONLY: the old sticky top bar is intentionally gone.
+    // The cinematic dialog opens once per published version on entry, and a
+    // forced update always opens even if that version was seen before.
     if (update.force || !updateSeen(update.version_name)) {
       markUpdateSeen(update.version_name);
       showUpdateDialog(update);

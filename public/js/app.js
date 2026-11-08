@@ -1508,9 +1508,6 @@
     let fingerprint = null, voted = false, myRating = 0, selected = 0;
     let reviews = [];
     let reviewsModalBody = null;
-    // Explicit breakdown so a star-only rating is never mistaken for the
-    // ghost of a deleted comment. Counting semantics stay unchanged.
-    let ratingStats = { comments: 0, silent: 0 };
     reviewsState = reviews;
 
     const avg = S.ratingValue(app);
@@ -1521,11 +1518,6 @@
     const avgBar = starBar(avg);
     const count = el('div', { class: 'rate-meta' },
       initialCount > 0 ? `${formatNum(initialCount)} ${t('تقييم')}` : t('كن أول من يقيّم هذا التطبيق'));
-    const breakdown = el('div', { class: 'rate-breakdown' });
-    function renderBreakdown(total) {
-      if (!total) { breakdown.textContent = ''; return; }
-      breakdown.textContent = `${formatNum(ratingStats.comments)} ${t('تعليق مكتوب')} • ${formatNum(ratingStats.silent)} ${t('تقييم بالنجوم فقط')}`;
-    }
 
     const distRows = el('div', { class: 'rate-dist' });
     function renderDist(dist, total) {
@@ -1534,13 +1526,11 @@
     }
     renderDist({}, 0);
 
-    function refreshAverage(ratingAvg, ratingCount, stats) {
-      if (stats) ratingStats = stats;
+    function refreshAverage(ratingAvg, ratingCount) {
       big.textContent = ratingCount > 0 ? Number(ratingAvg).toFixed(1) : '—';
       const fresh = starBar(ratingAvg);
       avgBar.replaceChildren(...fresh.childNodes);
       count.textContent = ratingCount > 0 ? `${formatNum(ratingCount)} ${t('تقييم')}` : t('كن أول من يقيّم هذا التطبيق');
-      renderBreakdown(ratingCount);
     }
 
     const icons = [];
@@ -1606,22 +1596,13 @@
       const label = restoreHiddenBtn.querySelector('.restore-hidden-label');
       if (label) label.textContent = `${t('إظهار المراجعات المخفية')} (${hiddenHere})`;
     }
-    function emptyReviewsNote() {
-      if (ratingStats.silent > 0) {
-        return el('div', { class: 'reviews-empty reviews-empty-silent' },
-          el('strong', null, t('لا توجد تعليقات مكتوبة.')),
-          el('span', null, `${t('يوجد')} ${formatNum(ratingStats.silent)} ${t('تقييم بالنجوم فقط مُحتسب ضمن المتوسط')}.`),
-          el('small', null, t('هذه تقييمات أعطيت بدون كتابة مراجعة، وليست أثراً لتعليق محذوف.')));
-      }
-      return el('div', { class: 'reviews-empty' }, t('لا توجد مراجعات بعد. كن أول من يكتب مراجعة!'));
-    }
     function renderReviews() {
       const list = visibleReviews();
       reviewsList.innerHTML = '';
       showMoreBtn.style.display = 'none';
       syncHiddenControl();
       if (!list.length) {
-        reviewsList.append(emptyReviewsNote());
+        reviewsList.append(el('div', { class: 'reviews-empty' }, t('لا توجد مراجعات بعد. كن أول من يكتب مراجعة!')));
         return;
       }
       list.slice(0, INITIAL_REVIEWS).forEach((r) => reviewsList.append(reviewCard(r)));
@@ -1634,7 +1615,7 @@
       body.innerHTML = '';
       const list = visibleReviews();
       if (!list.length) {
-        body.append(emptyReviewsNote());
+        body.append(el('div', { class: 'reviews-empty' }, t('لا توجد مراجعات بعد. كن أول من يكتب مراجعة!')));
         return;
       }
       list.forEach((r) => body.append(reviewCard(r)));
@@ -1685,8 +1666,7 @@
         fingerprint = await getFingerprint();
         const res = await window.Store.api(`/api/apps/${encodeURIComponent(app.slug)}/star-check`, { method: 'POST', body: { fp: fingerprint, uid: accountUid } });
         if (res.voted) lockVoted(Number(res.my_rating || 0), res.my_comment || '');
-        if (typeof res.rating === 'number') refreshAverage(res.rating, Number(res.rating_count || 0),
-          { comments: Number(res.reviews_count ?? 0), silent: Number(res.silent_votes ?? 0) });
+        if (typeof res.rating === 'number') refreshAverage(res.rating, Number(res.rating_count || 0));
       } catch {}
     })();
 
@@ -1699,13 +1679,9 @@
           liked: !!r.liked,
           likes_count: Number(r.likes_count) || 0,
         }));
-        ratingStats = {
-          comments: Number(res.reviews_count ?? res.total ?? 0),
-          silent: Number(res.silent_votes ?? 0),
-        };
         renderReviews();
         renderDist(res.dist || {}, Number(res.rating_count || 0));
-        if (typeof res.rating === 'number') refreshAverage(res.rating, Number(res.rating_count || 0), ratingStats);
+        if (typeof res.rating === 'number') refreshAverage(res.rating, Number(res.rating_count || 0));
       } catch {}
     }
     loadReviews();
@@ -1730,7 +1706,7 @@
         });
         const rated = selected;
         lockVoted(rated, myComment);
-        refreshAverage(res.rating, Number(res.rating_count || 0), ratingStats);
+        refreshAverage(res.rating, Number(res.rating_count || 0));
         if (res.review || myComment) {
           const fresh = res.review || {
             name: myName || t('مستخدم'), rating: rated, comment: myComment,
@@ -1801,7 +1777,7 @@
     return el('div', { class: 'd-section' },
       rateHeader,
       el('div', { class: 'rate-summary' },
-        el('div', { class: 'rate-side' }, big, avgBar, count, breakdown),
+        el('div', { class: 'rate-side' }, big, avgBar, count),
         distRows,
       ),
       rateBody,

@@ -114,7 +114,6 @@
       { key: 'reports', icon: 'message', label: t('بلاغات المراجعات') },
       { key: 'support', icon: 'message', label: t('رسائل الدعم') },
       { key: 'users', icon: 'users', label: t('المستخدمون') },
-      { key: 'ratings', icon: 'star', label: t('إدارة التقييمات') },
     ] },
     { id: 'growth', label: 'النمو', icon: 'trending', items: [
       { key: 'notifications', icon: 'bell', label: 'الإشعارات' },
@@ -742,7 +741,6 @@
     else if (activeTab === 'reports') await renderReports(body);
     else if (activeTab === 'support') await renderSupport(body);
     else if (activeTab === 'users') await renderUsers(body);
-    else if (activeTab === 'ratings') await renderRatingsAdmin(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
     else if (activeTab === 'advanced-push') {
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderPush(body);
@@ -2783,131 +2781,6 @@
   }
 
   // -------- apps list --------
-
-
-  /* ---------------- Ratings management: every vote, including star-only -----
-     A rating given without a comment is legitimate, but after the last written
-     comment is deleted it used to look like the ghost of that comment. This
-     screen makes those votes visible, searchable and removable. The counting
-     rule itself is unchanged: explicit deletion is what removes the trace. */
-  async function renderRatingsAdmin(body) {
-    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
-    let all = [];
-    let silentTotal = 0, commentsTotal = 0;
-    try {
-      let page = 1, pages = 1;
-      do {
-        const d = await api(`/api/admin/reviews?limit=100&page=${page}`);
-        all = all.concat(Array.isArray(d.reviews) ? d.reviews : []);
-        pages = Number(d.pages || 1);
-        silentTotal = Number(d.silent_total ?? silentTotal);
-        commentsTotal = Number(d.comments_total ?? commentsTotal);
-        page++;
-      } while (page <= pages && page <= 20);
-    } catch (e) {}
-    body.innerHTML = '';
-
-    const state = { q: '', silent: false, page: 1, pageSize: 10 };
-    const countEl = el('span', { class: 'admin-table-count' });
-    const searchInput = el('input', {
-      class: 'input admin-table-search', type: 'search',
-      placeholder: t('ابحث بالتطبيق أو الكاتب أو نص التعليق'),
-      'aria-label': t('بحث في التقييمات'),
-    });
-    const silentToggle = el('label', { class: 'admin-ratings-filter' },
-      el('input', { type: 'checkbox' }), t('بدون تعليق فقط'));
-    const tableWrap = el('div', { class: 'table-wrap' });
-
-    function visible() {
-      const q = state.q.trim().toLowerCase();
-      return all.filter((r) => {
-        if (state.silent && !r.silent) return false;
-        if (!q) return true;
-        return [r.app_name, r.app_slug, r.comment, r.author, r.uid, r.id]
-          .some((v) => String(v || '').toLowerCase().includes(q));
-      });
-    }
-    async function removeVote(id) {
-      if (!confirm(t('هل أنت متأكد من حذف هذا التقييم نهائياً؟'))) return;
-      try {
-        const res = await api(`/api/admin/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        toast(t('تم حذف التقييم'), 'success');
-        if (res && typeof res.rating === 'number') {
-          toast(`${t('التقييم الآن')} ${Number(res.rating).toFixed(1)} / 5 (${formatNum(res.rating_count || 0)} ${t('تقييم')})`, 'info');
-        }
-        logAdminAction('حذف تقييم');
-        renderRatingsAdmin(body);
-      } catch { toast(t('تعذّر حذف التقييم'), 'error'); }
-    }
-    async function purgeSilent() {
-      if (!silentTotal) { toast(t('لا توجد تقييمات صامتة'), 'info'); return; }
-      if (!confirm(t('هل تريد حذف جميع التقييمات التي بلا تعليق؟'))) return;
-      try {
-        const res = await api('/api/admin/reviews/purge-silent', { method: 'POST', body: {} });
-        toast(`${t('تم حذف التقييمات الصامتة')}: ${formatNum(res.deleted || 0)}`, 'success');
-        logAdminAction('حذف التقييمات بلا تعليق');
-        renderRatingsAdmin(body);
-      } catch { toast(t('تعذّر إعادة الاحتساب'), 'error'); }
-    }
-    function renderTable() {
-      const list = visible();
-      const pages = Math.max(1, Math.ceil(list.length / state.pageSize));
-      state.page = Math.min(state.page, pages);
-      const slice = list.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
-      countEl.textContent = `${list.length} / ${all.length}`;
-      tableWrap.innerHTML = '';
-      if (!slice.length) {
-        tableWrap.append(emptyMsg(t('لا توجد نتائج'), t('غيّر عبارة البحث.')));
-        return;
-      }
-      const head = el('tr', null,
-        el('th', null, t('التطبيق')), el('th', null, t('النجوم')),
-        el('th', null, t('التعليقات المكتوبة')), el('th', null, t('الكاتب')),
-        el('th', null, t('التاريخ')), el('th', null, t('الإجراءات')));
-      const rows = slice.map((r) => el('tr', null,
-        el('td', { 'data-label': t('التطبيق') }, r.app_name || r.app_slug || '—'),
-        el('td', { 'data-label': t('النجوم') }, `${Number(r.rating || 0)} ★`),
-        el('td', { 'data-label': t('التعليقات المكتوبة') }, r.silent
-          ? el('span', { class: 'admin-silent-tag' }, t('تقييم بالنجوم فقط (بدون تعليق)'))
-          : r.comment),
-        el('td', { 'data-label': t('الكاتب') }, r.author || '—'),
-        el('td', { 'data-label': t('التاريخ') }, r.ts ? formatDate(r.ts) : '—'),
-        el('td', { class: 'cell-actions' },
-          el('button', { class: 'btn btn-sm btn-danger', type: 'button',
-            onclick: () => removeVote(r.id) }, ico('trash'), t('حذف التقييم')))));
-      tableWrap.append(el('table', { class: 'table admin-table admin-ratings-table' },
-        el('thead', null, head), el('tbody', null, ...rows)));
-      tableWrap.append(pager(list.length, state.page, state.pageSize, (p) => {
-        state.page = p; renderTable();
-      }));
-    }
-    searchInput.addEventListener('input', () => { state.q = searchInput.value; state.page = 1; renderTable(); });
-    silentToggle.querySelector('input').addEventListener('change', (e) => {
-      state.silent = !!e.target.checked; state.page = 1; renderTable();
-    });
-
-    body.append(
-      el('div', { class: 'admin-page-head' },
-        el('div', null,
-          el('h1', { class: 'admin-page-title' }, t('إدارة التقييمات')),
-          el('p', { class: 'admin-page-sub' },
-            t('كل الأصوات ظاهرة هنا، بما فيها التقييمات بالنجوم فقط. حذف أي صف يعيد احتساب المتوسط فوراً.'))),
-        el('button', { class: 'btn btn-secondary btn-sm', type: 'button',
-          onclick: () => renderRatingsAdmin(body) }, ico('refresh'), t('تحديث'))),
-      el('div', { class: 'admin-kpi-grid admin-ratings-summary' },
-        el('div', { class: 'admin-kpi' }, el('b', null, formatNum(all.length)), el('span', null, t('إجمالي الأصوات'))),
-        el('div', { class: 'admin-kpi' }, el('b', null, formatNum(commentsTotal)), el('span', null, t('التعليقات المكتوبة'))),
-        el('div', { class: 'admin-kpi' }, el('b', null, formatNum(silentTotal)), el('span', null, t('التقييمات بلا تعليق'))),
-        el('div', { class: 'admin-kpi' },
-          el('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: purgeSilent },
-            t('حذف كل التقييمات الصامتة')))),
-      el('div', { class: 'admin-table-toolbar' }, searchInput, silentToggle, countEl),
-      el('div', { class: 'panel' },
-        el('div', { class: 'panel-head' }, ico('star', 'icon'), t('كل التقييمات')),
-        tableWrap),
-    );
-    renderTable();
-  }
 
   /* ---------------- Users directory: search + pagination ---------------- */
   async function renderUsers(body) {

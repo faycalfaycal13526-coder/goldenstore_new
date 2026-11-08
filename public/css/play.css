@@ -3126,7 +3126,14 @@ body.has-update-banner { padding-top: 0 !important; }
 .gs-update-actions { padding: 0 22px; margin-top: 18px; }
 .gs-update-primary { min-height: 52px; border-radius: 16px; font-size: 15px; }
 .gs-update-primary .icon { width: 19px; height: 19px; }
-.gs-update-later { min-height: 44px; border-radius: 14px; }
+/* "Update later" is EXACTLY the same size as "Download now" and sits below it. */
+.gs-update-later {
+  min-height: 52px; border-radius: 16px; font-size: 15px; font-weight: 800;
+  width: 100%; padding: 10px 22px;
+}
+.gs-update-actions > .gs-update-primary,
+.gs-update-actions > .gs-update-later { width: 100%; min-height: 52px; }
+.gs-update-actions > .gs-update-later { margin-top: 0; }
 .gs-update-recheck {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   margin: 12px auto 0; padding: 6px 12px; border: 0; background: transparent;
@@ -3646,7 +3653,7 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
 }
 @media (min-width: 1200px) { .gs-update-card { max-width: 480px; } }
 @media (max-width: 540px) {
-  .gs-update-overlay { padding: 10px; align-items: center; }
+  .gs-update-overlay { padding: 10px; align-items: safe center; }
   .gs-update-card { max-width: 100%; border-radius: 20px; }
   .gs-update-hero { padding: 22px 14px 14px; }
   .gs-update-hero .gs-update-title { font-size: 20px; }
@@ -3657,7 +3664,7 @@ a.gs-notif-item:hover { border-color: rgba(244,192,31,.55); transform: translate
   .gs-update-meta-item { padding: 8px 5px; }
   .gs-update-meta-item i { font-size: 11.5px; }
   .gs-update-actions { padding: 0 14px; margin-top: 14px; gap: 8px; }
-  .gs-update-primary { min-height: 48px; }
+  .gs-update-primary, .gs-update-later { min-height: 48px; }
   .gs-update-chips { gap: 6px; }
   .gs-update-chip { font-size: 10px; padding: 4px 8px; }
   .gs-update-progress.is-live { margin-inline: 14px; }
@@ -3830,4 +3837,60 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
 @media (prefers-reduced-motion: reduce) {
   .gs-maintenance-logo, .gs-maintenance-dot { animation: none; }
   .gs-maintenance-fill { transition: none; }
+}
+
+
+/* =====================================================================
+   Shared modal actions: language switcher + Telegram news (2026-11-08)
+   Used by BOTH the update popup and the maintenance modal.
+   ===================================================================== */
+.gs-modal-extras {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; flex-wrap: wrap; margin-top: 14px;
+}
+.gs-modal-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 38px; padding: 7px 14px; border-radius: 999px;
+  font: inherit; font-size: 12px; font-weight: 800; text-decoration: none;
+  cursor: pointer; white-space: nowrap;
+  color: #f4c01f; background: rgba(244,192,31,.09);
+  border: 1px solid rgba(244,192,31,.35);
+  transition: filter .15s ease, transform .06s ease;
+}
+.gs-modal-btn:hover { filter: brightness(1.12); }
+.gs-modal-btn:active { transform: scale(.98); }
+.gs-modal-btn .icon { width: 16px; height: 16px; }
+.gs-modal-lang { position: relative; }
+.gs-modal-lang-code { font-size: 10px; opacity: .75; letter-spacing: .5px; }
+.gs-modal-lang-menu {
+  display: none; position: absolute; z-index: 5; inset-inline-start: 0;
+  bottom: calc(100% + 8px); min-width: 132px; padding: 6px;
+  border-radius: 14px; background: #151518; border: 1px solid rgba(244,192,31,.35);
+  box-shadow: 0 14px 40px rgba(0,0,0,.5);
+}
+:root[data-theme="light"] .gs-modal-lang-menu { background: #fff; }
+.gs-modal-lang.is-open .gs-modal-lang-menu { display: grid; gap: 3px; }
+.gs-modal-lang-item {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  padding: 8px 10px; border-radius: 9px; text-align: start;
+  font: inherit; font-size: 12px; font-weight: 700;
+}
+.gs-modal-lang-item:hover, .gs-modal-lang-item.is-on {
+  background: rgba(244,192,31,.14); color: #f4c01f;
+}
+.gs-modal-telegram { color: #f4c01f; }
+.gs-modal-lang-select {
+  min-height: 38px; padding: 7px 10px; border-radius: 999px;
+  color: #f4c01f; background: rgba(244,192,31,.09);
+  border: 1px solid rgba(244,192,31,.35); font: inherit; font-size: 12px; font-weight: 800;
+}
+/* Inside the maintenance card the extras sit above the footer note. */
+.gs-maintenance-card .gs-modal-extras { margin-top: 16px; }
+.gs-maintenance-card .gs-modal-btn { color: #f4c01f; }
+@media (max-width: 420px) {
+  .gs-modal-extras { gap: 7px; }
+  .gs-modal-btn { padding: 7px 11px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gs-modal-btn { transition: none; }
 }

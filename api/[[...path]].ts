@@ -1492,6 +1492,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   quiet_start: '23', quiet_end: '7',
   collect_demographics: '0', maintenance_mode: '0', maintenance_message: 'المتجر تحت الصيانة، نعود قريباً.',
   maintenance_duration_minutes: '60', maintenance_end_at: '0',
+  update_later_minutes: '60',
   session_days: '7',
 };
 const SETTING_KEYS = Object.keys(SETTING_DEFAULTS);
@@ -1504,6 +1505,7 @@ const PUBLIC_SETTINGS = [
   // Non-secret operational values the shared client applier also needs.
   'default_type', 'default_category', 'max_upload_mb', 'auto_notify_update',
   'push_enabled', 'quiet_start', 'quiet_end', 'session_days',
+  'update_later_minutes',
 ];
 async function readAllSettings(env: Env): Promise<Record<string, string>> {
   await ensureInsightsTables(env.DB);

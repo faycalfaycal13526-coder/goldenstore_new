@@ -878,6 +878,7 @@
       { key: 'auto_notify_update', label: 'إشعار تلقائي عند تحديث المتجر', type: 'toggle' },
       { key: 'quiet_start', label: 'بدء ساعات الهدوء (24h)', type: 'number' },
       { key: 'quiet_end', label: 'نهاية ساعات الهدوء (24h)', type: 'number' },
+      { key: 'update_later_minutes', label: 'مهلة «تحديث لاحقاً» (بالدقائق)', type: 'number' },
     ] },
     { id: 'privacy', label: 'الخصوصية والبيانات', icon: 'shield', fields: [
       { key: 'collect_demographics', label: 'جمع بيانات ديموغرافية اختيارية', type: 'toggle' },

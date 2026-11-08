@@ -31,7 +31,7 @@
     const updateData = type === 'update' && n.data && n.data.apk_url ? n.data : null;
     if (updateData) {
       node = el('a', { class: `gs-notif-item is-update`, href: '#', 'data-noi18n': '',
-        onclick: (e) => { e.preventDefault(); S.showUpdateDialog(updateData); } });
+        onclick: (e) => { e.preventDefault(); S.showUpdateDialog(updateData, { manual: true }); } });
     } else if (n.app_slug) {
       node = el('a', { class: `gs-notif-item is-${type}`, 'data-noi18n': '',
         href: `/app?slug=${encodeURIComponent(n.app_slug)}` });

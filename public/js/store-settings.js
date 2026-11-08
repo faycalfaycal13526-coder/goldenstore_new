@@ -94,6 +94,83 @@
     return n;
   }
 
+  function iconNode(name) {
+    try {
+      if (window.GSIcons && typeof window.GSIcons.iconEl === 'function') {
+        var el = window.GSIcons.iconEl(name, 'icon');
+        if (el) return el;
+      }
+    } catch (e) {}
+    return node('span', 'icon');
+  }
+  function changeLang(code) {
+    try { localStorage.setItem('gs_lang', code); } catch (e) {}
+    try {
+      var i18n = window.GSI18N;
+      if (i18n && typeof i18n.setLang === 'function') {
+        var before = i18n.lang;
+        i18n.setLang(code);
+        if (before !== code) return;      // setLang() reloads the page
+      }
+    } catch (e) {}
+    try { window.location.reload(); } catch (e) {}
+  }
+  function currentLang() {
+    try { return (window.GSI18N && window.GSI18N.lang) || 'ar'; } catch (e) { return 'ar'; }
+  }
+  function languageSwitcher() {
+    var wrap = node('div', 'gs-modal-lang');
+    wrap.setAttribute('data-noi18n', '');
+    var btn = node('button', 'gs-modal-btn gs-modal-lang-btn');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', tr('اللغة'));
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.appendChild(iconNode('globe'));
+    btn.appendChild(node('span', 'gs-modal-lang-code', String(currentLang()).toUpperCase()));
+    var menu = node('div', 'gs-modal-lang-menu');
+    [['ar', 'العربية'], ['en', 'English'], ['fr', 'Français'], ['es', 'Español']].forEach(function (pair) {
+      var it = node('button', 'gs-modal-lang-item' + (pair[0] === currentLang() ? ' is-on' : ''), pair[1]);
+      it.type = 'button';
+      it.onclick = function (e) { e.stopPropagation(); changeLang(pair[0]); };
+      menu.appendChild(it);
+    });
+    btn.onclick = function (e) { e.stopPropagation(); wrap.classList.toggle('is-open'); };
+    document.addEventListener('click', function (e) {
+      if (!wrap.contains(e.target)) wrap.classList.remove('is-open');
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    return wrap;
+  }
+  function telegramButton() {
+    // The admin configures this URL in Settings Center; safeUrl blocks javascript:.
+    var url = safeUrl(get('telegram_url')) || 'https://t.me/goldenstore_10';
+    var a = document.createElement('a');
+    a.className = 'gs-modal-btn gs-modal-telegram';
+    a.setAttribute('href', url);
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+    a.setAttribute('aria-label', tr('المزيد من الأخبار'));
+    a.setAttribute('data-noi18n', '');
+    a.appendChild(iconNode('send'));
+    a.appendChild(document.createTextNode(tr('المزيد من الأخبار')));
+    return a;
+  }
+  function modalExtras() {
+    var row = node('div', 'gs-modal-extras');
+    row.setAttribute('data-noi18n', '');
+    row.appendChild(languageSwitcher());
+    row.appendChild(telegramButton());
+    return row;
+  }
+  // Shared by store.js so BOTH popups get the same controls.
+  window.GSModalTools = {
+    languageSwitcher: languageSwitcher,
+    telegramButton: telegramButton,
+    extras: modalExtras,
+    t: tr,
+  };
+
   function buildOverlay(msg) {
     var overlay = node('div', 'gs-maintenance-overlay');
     overlay.id = 'gs-maintenance-overlay';
@@ -140,6 +217,7 @@
     clock.appendChild(track);
     card.appendChild(clock);
 
+    card.appendChild(modalExtras());
     card.appendChild(node('div', 'gs-maintenance-foot',
       tr('لا يمكن متابعة التصفح حتى انتهاء الصيانة')));
     overlay.appendChild(card);
@@ -185,6 +263,8 @@
   }
   function blockEvent(e) {
     if (!activeOverlay) return;
+    // Controls inside the modal (language menu, Telegram) must stay usable.
+    try { if (e.target && activeOverlay.contains(e.target)) return; } catch (e2) {}
     if (e.type === 'keydown') {
       var k = e.key || '';
       if (k === 'Escape' || k === 'Tab' || k === 'Enter' || k === ' ' ||

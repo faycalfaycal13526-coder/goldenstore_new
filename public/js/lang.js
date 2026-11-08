@@ -996,6 +996,11 @@
     'وضع الصيانة مفعّل — الزوار محجوبون': { en: 'Maintenance on — visitors are locked out', fr: 'Maintenance activée — visiteurs bloqués', es: 'Mantenimiento activo — visitantes bloqueados' },
     'لوحة التحكم': { en: 'Admin console', fr: 'Console d’administration', es: 'Panel de administración' },
     'المتجر تحت الصيانة، نعود قريباً.': { en: 'The store is under maintenance, we will be back soon.', fr: 'La boutique est en maintenance, nous revenons bientôt.', es: 'La tienda está en mantenimiento, volvemos pronto.' },
+    // ---- Update dialog: snooze + shared modal actions ----
+    'تحديث لاحقاً': { en: 'Update later', fr: 'Mettre à jour plus tard', es: 'Actualizar más tarde' },
+    'المزيد من الأخبار': { en: 'More news', fr: 'Plus d’actualités', es: 'Más noticias' },
+    'سنذكّرك بالتحديث في': { en: 'We will remind you to update at', fr: 'Nous vous rappellerons la mise à jour à', es: 'Te recordaremos la actualización a las' },
+    'مهلة «تحديث لاحقاً» (بالدقائق)': { en: '“Update later” delay (minutes)', fr: 'Délai « Mettre à jour plus tard » (minutes)', es: 'Aplazamiento «Actualizar más tarde» (minutos)' },
   };
 
   // Number/size unit labels per language.

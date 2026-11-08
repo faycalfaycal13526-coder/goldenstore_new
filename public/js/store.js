@@ -1020,7 +1020,35 @@ async function signOut() {
 /* ----------------------------- App update popup ----------------------------- */
 const APP_UPDATE_DISMISS_KEY = 'gs_app_update_dismissed';
 const APP_UPDATE_SEEN_KEY = 'gs_app_update_seen';
+const APP_UPDATE_SNOOZE_KEY = 'gs_app_update_snooze';
 const APP_UPDATE_BANNER_KEY = 'gs_app_update_banner_dismissed';
+
+// Some Android WebViews (and in-app browsers) wipe localStorage on reload.
+// Mirroring the "already shown" state into sessionStorage, a cookie and memory
+// is what actually makes the popup appear ONCE instead of on every page load.
+const UPDATE_MEMORY = Object.create(null);
+function durableGet(key) {
+  try { const v = localStorage.getItem(key); if (v) return v; } catch (e) {}
+  try { const v = sessionStorage.getItem(key); if (v) return v; } catch (e) {}
+  try {
+    const hit = document.cookie.match(new RegExp('(?:^|; )' + key + '=([^;]*)'));
+    if (hit) return decodeURIComponent(hit[1]);
+  } catch (e) {}
+  return UPDATE_MEMORY[key] || '';
+}
+function durableSet(key, value) {
+  const v = String(value);
+  UPDATE_MEMORY[key] = v;
+  try { localStorage.setItem(key, v); } catch (e) {}
+  try { sessionStorage.setItem(key, v); } catch (e) {}
+  try { document.cookie = key + '=' + encodeURIComponent(v) + '; path=/; max-age=2592000; SameSite=Lax'; } catch (e) {}
+}
+function readUpdateMap(key) {
+  try { const v = JSON.parse(durableGet(key) || '{}'); return v && typeof v === 'object' ? v : {}; }
+  catch (e) { return {}; }
+}
+let autoUpdateChecked = false;
+let dialogShownThisLoad = false;
 
 function getCurrentAppVersion() {
   try {
@@ -1046,17 +1074,23 @@ function getCurrentVersionCode() {
   return 0;
 }
 
-function shouldShowUpdate(update) {
+function shouldShowUpdate(update, opts = {}) {
   if (!update || !update.version_name || !updateApkUrl(update)) return false;
+  const manual = !!(opts && opts.manual);
   const nextName = String(update.version_name).trim();
   const currentName = String(getCurrentAppVersion() || '').trim();
   // The device already runs this exact build.
   if (nextName && nextName === currentName) return false;
-  if (!update.force) {
-    try {
-      const dismissed = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
-      if (dismissed[nextName]) return false;
-    } catch (e) {}
+  // Automatic checks honour ALL suppression layers. A manual check (Account
+  // page / notification link) deliberately bypasses them, because the user
+  // asked to see the release again.
+  if (!manual) {
+    const snoozeUntil = Number(durableGet(APP_UPDATE_SNOOZE_KEY) || 0);
+    if (Number.isFinite(snoozeUntil) && snoozeUntil > Date.now()) return false;
+    const seen = readUpdateMap(APP_UPDATE_SEEN_KEY);
+    if (seen[nextName]) return false;
+    const dismissed = readUpdateMap(APP_UPDATE_DISMISS_KEY);
+    if (dismissed[nextName]) return false;
   }
   // Publishing stores a Unix timestamp in version_code, while a native wrapper
   // may report 1 (or 0). The old `vc > 100000 -> return false` guard therefore
@@ -1068,28 +1102,38 @@ function shouldShowUpdate(update) {
   return true;
 }
 
-function updateSeen(version) {
-  try {
-    const seen = JSON.parse(localStorage.getItem(APP_UPDATE_SEEN_KEY) || '{}');
-    return !!seen[String(version)];
-  } catch (e) { return false; }
-}
+function updateSeen(version) { return !!readUpdateMap(APP_UPDATE_SEEN_KEY)[String(version)]; }
 function markUpdateSeen(version) {
-  try {
-    const seen = JSON.parse(localStorage.getItem(APP_UPDATE_SEEN_KEY) || '{}');
-    seen[String(version)] = Date.now();
-    localStorage.setItem(APP_UPDATE_SEEN_KEY, JSON.stringify(seen));
-  } catch (e) {}
+  const seen = readUpdateMap(APP_UPDATE_SEEN_KEY);
+  seen[String(version)] = Date.now();
+  durableSet(APP_UPDATE_SEEN_KEY, JSON.stringify(seen));
 }
 function dismissUpdateVersion(version) {
-  try {
-    const d = JSON.parse(localStorage.getItem(APP_UPDATE_DISMISS_KEY) || '{}');
-    d[String(version)] = Date.now();
-    localStorage.setItem(APP_UPDATE_DISMISS_KEY, JSON.stringify(d));
-  } catch (e) {}
+  const d = readUpdateMap(APP_UPDATE_DISMISS_KEY);
+  d[String(version)] = Date.now();
+  durableSet(APP_UPDATE_DISMISS_KEY, JSON.stringify(d));
   const banner = document.getElementById('gs-update-banner');
   if (banner) banner.remove();
   document.body.classList.remove('has-update-banner');
+}
+function laterMinutes() {
+  try {
+    const cfg = window.GSSettings;
+    if (cfg && typeof cfg.get === 'function') {
+      const n = Number(cfg.get('update_later_minutes', '60'));
+      if (Number.isFinite(n) && n > 0) return Math.min(10080, Math.max(1, Math.round(n)));
+    }
+  } catch (e) {}
+  return 60;
+}
+// "Update later": the admin sets the delay manually in Settings Center; the
+// reminder is deferred until now + N minutes and the version is marked seen.
+function snoozeUpdate(version, minutes) {
+  const mins = Math.min(10080, Math.max(1, Number(minutes) || 60));
+  const until = Date.now() + mins * 60000;
+  durableSet(APP_UPDATE_SNOOZE_KEY, String(until));
+  markUpdateSeen(version);
+  return until;
 }
 
 // Sticky announcement bar: after the cinematic dialog is postponed, the bar
@@ -1122,13 +1166,13 @@ function showUpdateBanner(update) {
       el('span', { class: 'gs-update-banner-sub' },
         t('الإصدار') + ' ' + version + ' — ' + t('اضغط لمشاهدة التفاصيل'))),
     el('button', { class: 'gs-update-banner-cta', type: 'button',
-      onclick: () => showUpdateDialog(update) }, t('عرض ما الجديد')),
+      onclick: () => showUpdateDialog(update, { manual: true }) }, t('عرض ما الجديد')),
     update.force ? null : el('button', {
       class: 'gs-update-banner-close', type: 'button',
       'aria-label': t('إغلاق'), title: t('إغلاق'), onclick: closeFn,
     }, ico('close', 'icon')),
   );
-  banner.addEventListener('click', (e) => { if (e.target === banner) showUpdateDialog(update); });
+  banner.addEventListener('click', (e) => { if (e.target === banner) showUpdateDialog(update, { manual: true }); });
   document.body.append(banner);
   document.body.classList.add('has-update-banner');
 }
@@ -1197,8 +1241,8 @@ async function checkForUpdates(opts = {}) {
     return { status: 'error', error: new Error('invalid_update') };
   }
   if (isNativeApp()) {
-    if (shouldShowUpdate(update)) {
-      showUpdateDialog(update);
+    if (shouldShowUpdate(update, { manual: true })) {
+      showUpdateDialog(update, { manual: true });
       return { status: 'available', update };
     }
     showUpdateCheckCard('up-to-date', update);
@@ -1216,8 +1260,41 @@ function formatReleaseDate(ts) {
   catch (e) { return '—'; }
 }
 
-function showUpdateDialog(update) {
+// Shared by both popups: language switcher + Telegram news. Falls back to a
+// self-contained version when the shared applier is not loaded (isolated pages).
+function modalExtras() {
+  try {
+    const tools = window.GSModalTools;
+    if (tools && typeof tools.extras === 'function') {
+      const built = tools.extras();
+      if (built) return built;
+    }
+  } catch (e) {}
+  const row = el('div', { class: 'gs-modal-extras', 'data-noi18n': '' });
+  const sel = el('select', { class: 'gs-modal-lang-select', 'aria-label': t('اللغة') },
+    el('option', { value: 'ar' }, 'العربية'), el('option', { value: 'en' }, 'English'),
+    el('option', { value: 'fr' }, 'Français'), el('option', { value: 'es' }, 'Español'));
+  sel.onchange = () => {
+    try { localStorage.setItem('gs_lang', sel.value); } catch (e) {}
+    try {
+      if (window.GSI18N && window.GSI18N.setLang) window.GSI18N.setLang(sel.value);
+      else location.reload();
+    } catch (e) { location.reload(); }
+  };
+  const tg = el('a', { class: 'gs-modal-btn gs-modal-telegram',
+    href: 'https://t.me/goldenstore_10', target: '_blank', rel: 'noopener noreferrer',
+    'data-noi18n': '' }, t('المزيد من الأخبار'));
+  row.append(sel, tg);
+  return row;
+}
+
+function showUpdateDialog(update, opts = {}) {
   if (!update || !updateApkUrl(update)) return;
+  if (!opts.manual && dialogShownThisLoad) return;   // never auto-open twice per load
+  dialogShownThisLoad = true;
+  // ANY display counts as "once", including a manual open followed by a
+  // language switch (which reloads the WebView).
+  markUpdateSeen(update.version_name);
   const existing = document.getElementById('gs-update-dialog');
   if (existing) existing.remove();
 
@@ -1290,8 +1367,20 @@ function showUpdateDialog(update) {
     document.body.classList.remove('update-dialog-open');
     if (prevFocus && typeof prevFocus.focus === 'function') { try { prevFocus.focus(); } catch (e) {} }
   }
+  function dismissDialog(showToast) {
+    if (closed) return;
+    const until = snoozeUpdate(update.version_name, laterMinutes());
+    closeDialog();
+    if (showToast) {
+      try {
+        const at = new Date(until).toLocaleTimeString(document.documentElement.lang || 'ar',
+          { hour: '2-digit', minute: '2-digit' });
+        toast(t('سنذكّرك بالتحديث في') + ' ' + at, 'info');
+      } catch (e) {}
+    }
+  }
   function onKey(e) {
-    if (e.key === 'Escape' && !update.force) { e.preventDefault(); closeDialog(); }
+    if (e.key === 'Escape') { e.preventDefault(); dismissDialog(false); }
     else if (e.key === 'Tab') {
       const items = [...overlay.querySelectorAll('button:not([disabled])')];
       if (!items.length) return;
@@ -1318,31 +1407,26 @@ function showUpdateDialog(update) {
     setTimeout(closeDialog, 200);
   }
 
+  // Exactly TWO big actions: Download now, then "Update later" directly below
+  // it at the same width/height. The shared row adds language + Telegram news.
   const actions = el('div', { class: 'gs-update-actions' },
     el('button', {
       class: 'btn btn-primary btn-lg gs-update-primary',
       type: 'button',
       onclick: startDownload,
     }, ico('download'), t('تحميل الآن')),
-    update.force ? null : el('button', {
+    el('button', {
       class: 'btn btn-secondary gs-update-later',
       type: 'button',
-      onclick: () => { closeDialog(); },
-    }, t('لاحقاً')),
-    update.force ? null : el('button', {
-      class: 'gs-update-ignore', type: 'button',
-      onclick: () => { dismissUpdateVersion(update.version_name); closeDialog(); },
-    }, t('تجاهل هذا الإصدار')),
-    el('button', {
-      class: 'gs-update-recheck', type: 'button',
-      onclick: () => checkForUpdates({}),
-    }, ico('refresh', 'icon'), t('إعادة التحقق من التحديثات')),
+      onclick: () => dismissDialog(true),
+    }, t('تحديث لاحقاً')),
+    modalExtras(),
     el('div', { class: 'gs-update-foot' }, ico('shield', 'icon'), t('تحديث رسمي وموقّع')),
   );
   card.append(actions);
 
   overlay.append(card);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay && !update.force) closeDialog(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) dismissDialog(false); });
   document.body.append(overlay);
   document.body.classList.add('update-dialog-open');
   document.addEventListener('keydown', onKey, true);
@@ -1487,17 +1571,16 @@ window.__gsPackageUninstalled = function (packageName) {
 };
 
 async function checkAppUpdate() {
-  if (!isNativeApp()) return;
+  if (!isNativeApp() || autoUpdateChecked) return;
+  autoUpdateChecked = true;                 // one automatic check per page load
   try {
     const update = await api('/api/app-update', { timeoutMs: 8000 });
-    if (!shouldShowUpdate(update)) return;
+    if (!shouldShowUpdate(update)) return; // seen / dismissed / snoozed -> never again
     // Centered popup ONLY: the old sticky top bar is intentionally gone.
-    // The cinematic dialog opens once per published version on entry, and a
-    // forced update always opens even if that version was seen before.
-    if (update.force || !updateSeen(update.version_name)) {
-      markUpdateSeen(update.version_name);
-      showUpdateDialog(update);
-    }
+    // The dialog opens ONCE per published version, then "Update later" defers
+    // any reminder by the number of minutes set manually in Settings Center.
+    markUpdateSeen(update.version_name);
+    showUpdateDialog(update);
   } catch (e) { console.error('[appUpdate] check failed', e); }
 }
 

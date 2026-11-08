@@ -1347,3 +1347,110 @@ body.admin-compact .admin-kpi { padding: 10px; }
   color: var(--muted, #b9b9b9); background: rgba(244,192,31,.07);
   border: 1px dashed rgba(244,192,31,.35); direction: ltr; text-align: start;
 }
+
+/* ==========================================================================
+   Live admin statistics + vanilla SVG charts + pagination (2026-11-08)
+   Dependency-free: inline SVG and CSS only, responsive down to 320px.
+   ========================================================================== */
+.admin-live-section { margin: 18px 0 4px; }
+.admin-live-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.admin-live-head h2 { margin: 0; font-size: 17px; font-weight: 800; color: var(--text); }
+.admin-live-head p { margin: 3px 0 0; font-size: 12px; color: var(--text-2); }
+.admin-live-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.admin-live-stamp {
+  font-size: 11px; font-weight: 700; color: var(--text-2);
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(244,192,31,.08); border: 1px solid rgba(244,192,31,.28);
+}
+.admin-kpi-grid-live { margin-bottom: 14px; }
+.admin-live-grid {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, 1fr);
+  gap: 14px; margin-bottom: 14px;
+}
+.admin-svg-wrap { padding: 10px 14px 4px; }
+.admin-svg-chart { display: block; width: 100%; height: 180px; overflow: visible; }
+.admin-svg-grid { stroke: rgba(255,255,255,.09); stroke-width: 1; }
+:root[data-theme="light"] .admin-svg-grid { stroke: rgba(0,0,0,.09); }
+.admin-svg-area { fill: rgba(244,192,31,.13); }
+.admin-svg-line { stroke: #f4c01f; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.admin-svg-dot { fill: #f4c01f; stroke: #151517; stroke-width: 1.5; }
+.admin-chart-legend {
+  display: flex; justify-content: space-between; padding: 0 16px 14px;
+  font-size: 10.5px; color: var(--text-2); direction: ltr;
+}
+.admin-cat-bars { display: flex; flex-direction: column; gap: 9px; padding: 4px 16px 16px; }
+.admin-cat-bar { display: flex; align-items: center; gap: 9px; font-size: 11.5px; }
+.admin-cat-bar-label { flex: 0 0 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.admin-cat-bar-track {
+  flex: 1 1 auto; height: 9px; border-radius: 999px; overflow: hidden;
+  background: rgba(255,255,255,.07);
+}
+:root[data-theme="light"] .admin-cat-bar-track { background: rgba(0,0,0,.07); }
+.admin-cat-bar-track i {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #f4c01f, #d99b0c);
+}
+.admin-cat-bar b { flex: 0 0 42px; text-align: end; font-size: 11px; color: var(--text); }
+
+/* Pagination: shared by apps, games and users tables */
+.admin-pager {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 5px; padding: 12px 8px 4px;
+}
+.admin-pager-btn {
+  min-width: 32px; height: 32px; padding: 0 8px; border-radius: 9px;
+  border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04);
+  color: var(--text); font: 700 12px/1 inherit; cursor: pointer;
+}
+.admin-pager-btn:hover:not(:disabled) { border-color: rgba(244,192,31,.55); }
+.admin-pager-btn.is-active {
+  background: #f4c01f; color: #111; border-color: #f4c01f; cursor: default;
+}
+.admin-pager-btn:disabled { opacity: .38; cursor: not-allowed; }
+.admin-pager-info {
+  flex: 1 1 100%; text-align: center; margin-top: 6px;
+  font-size: 10.5px; color: var(--text-2);
+}
+.admin-uid {
+  font: 700 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  direction: ltr; unicode-bidi: isolate; color: var(--gold, #f4c01f);
+  word-break: break-all;
+}
+.admin-users-table td { vertical-align: middle; }
+
+/* Phone / tablet responsiveness */
+@media (max-width: 900px) {
+  .admin-live-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .admin-kpi-grid-live { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+@media (max-width: 760px) {
+  .admin-live-head { align-items: flex-start; }
+  .admin-live-head h2 { font-size: 15px; }
+  .admin-live-actions { width: 100%; justify-content: space-between; }
+  .admin-svg-chart { height: 150px; }
+  .admin-cat-bar-label { flex-basis: 72px; }
+  .admin-pager { gap: 4px; }
+  .admin-pager-btn { min-width: 30px; height: 30px; padding: 0 6px; }
+  /* Tables become readable cards instead of horizontal scrolling on phones */
+  .admin-users-table thead { display: none; }
+  .admin-users-table tr {
+    display: block; padding: 9px 10px; margin-bottom: 8px;
+    border: 1px solid rgba(255,255,255,.09); border-radius: 12px;
+  }
+  .admin-users-table td {
+    display: flex; justify-content: space-between; gap: 10px;
+    border: 0; padding: 4px 0; text-align: start;
+  }
+  .admin-users-table td::before {
+    content: attr(data-label); font-size: 10.5px; font-weight: 800;
+    color: var(--text-2); white-space: nowrap;
+  }
+}
+@media (max-width: 380px) {
+  .admin-kpi-grid-live { grid-template-columns: minmax(0, 1fr); }
+  .admin-cat-bar-label { flex-basis: 60px; font-size: 10px; }
+  .admin-svg-chart { height: 130px; }
+}

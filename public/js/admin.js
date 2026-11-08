@@ -15,6 +15,85 @@
   let cats = [];
   let activeTab = 'dashboard';
   let newKind = 'app';
+  // Live dashboard refresh: a single visibility listener (no long-lived
+  // interval, so background tabs and tests never keep a timer running).
+  let liveRefreshTarget = null;
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' || !liveRefreshTarget) return;
+    if (!liveRefreshTarget.isConnected) return;
+    renderDashboard(liveRefreshTarget);
+  });
+
+  /* ---------------- Dependency-free charts + pagination -----------------
+     Vanilla JS + inline SVG only: no Chart.js, no CDN, no network requests.
+     Used by the live dashboard and by the apps/users tables. */
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs, ...kids) {
+    const n = document.createElementNS(SVG_NS, tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => {
+      if (v != null && v !== false) n.setAttribute(k, String(v));
+    });
+    kids.forEach((k) => {
+      if (k == null || k === false) return;
+      n.append(k && k.nodeType ? k : document.createTextNode(String(k)));
+    });
+    return n;
+  }
+  function lineChartSvg(series) {
+    const W = 640, H = 180, P = 22;
+    const vals = (series || []).map((d) => Number(d.count || 0));
+    if (!vals.length) return svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'admin-svg-chart' });
+    const max = Math.max(1, ...vals);
+    const step = vals.length > 1 ? (W - P * 2) / (vals.length - 1) : 0;
+    const pts = vals.map((v, i) => [P + i * step, H - P - (v / max) * (H - P * 2)]);
+    const d = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+    const base = H - P;
+    const area = `${d} L ${pts[pts.length - 1][0].toFixed(1)} ${base} L ${P} ${base} Z`;
+    const svg = svgEl('svg', {
+      viewBox: `0 0 ${W} ${H}`, class: 'admin-svg-chart', role: 'img',
+      'aria-label': t('منحنى التنزيلات خلال 14 يوماً'), preserveAspectRatio: 'none',
+    });
+    [0, 0.5, 1].forEach((f) => svg.append(svgEl('line', {
+      x1: P, x2: W - P, y1: P + f * (H - 2 * P), y2: P + f * (H - 2 * P),
+      class: 'admin-svg-grid',
+    })));
+    svg.append(svgEl('path', { d: area, class: 'admin-svg-area' }));
+    svg.append(svgEl('path', { d, class: 'admin-svg-line', fill: 'none' }));
+    pts.forEach((q, i) => svg.append(svgEl('circle', {
+      cx: q[0], cy: q[1], r: vals[i] ? 3.2 : 2, class: 'admin-svg-dot',
+    })));
+    return svg;
+  }
+  function categoryBars(items) {
+    const list = (items || []).slice(0, 8);
+    const max = Math.max(1, ...list.map((x) => Number(x.count || 0)));
+    if (!list.length) return el('div', { class: 'hint' }, t('لا توجد بيانات بعد'));
+    return el('div', { class: 'admin-cat-bars' }, ...list.map((x) =>
+      el('div', { class: 'admin-cat-bar' },
+        el('span', { class: 'admin-cat-bar-label' }, t(x.key) || x.key),
+        el('div', { class: 'admin-cat-bar-track' },
+          el('i', { style: { width: `${Math.max(3, Math.round((Number(x.count || 0) / max) * 100))}%` } })),
+        el('b', null, formatNum(x.count)))));
+  }
+  function pager(total, page, pageSize, onGo) {
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const box = el('div', { class: 'admin-pager', role: 'navigation', 'aria-label': t('ترقيم الصفحات') });
+    const btn = (label, target, disabled, active) => el('button', {
+      class: 'admin-pager-btn' + (active ? ' is-active' : ''),
+      type: 'button', disabled: disabled || active,
+      'aria-label': `${t('صفحة')} ${target}`,
+      onclick: () => onGo(target),
+    }, label);
+    box.append(btn('‹', Math.max(1, page - 1), page <= 1));
+    let start = Math.max(1, Math.min(page - 2, pages - 4));
+    const end = Math.min(pages, start + 4);
+    if (end - start < 4) start = Math.max(1, end - 4);
+    for (let i = start; i <= end; i++) box.append(btn(String(i), i, false, i === page));
+    box.append(btn('›', Math.min(pages, page + 1), page >= pages));
+    box.append(el('span', { class: 'admin-pager-info' },
+      `${formatNum(total)} ${t('عنصر')} • ${t('صفحة')} ${page}/${pages}`));
+    return box;
+  }
 
   /* ---------------- Admin console: grouped navigation -------------------
      One source of truth drives the sidebar, the breadcrumb, the command
@@ -34,6 +113,7 @@
       { key: 'requests', icon: 'flag', label: 'الطلبات والبلاغات' },
       { key: 'reports', icon: 'message', label: t('بلاغات المراجعات') },
       { key: 'support', icon: 'message', label: t('رسائل الدعم') },
+      { key: 'users', icon: 'users', label: t('المستخدمون') },
     ] },
     { id: 'growth', label: 'النمو', icon: 'trending', items: [
       { key: 'notifications', icon: 'bell', label: 'الإشعارات' },
@@ -660,6 +740,7 @@
     else if (activeTab === 'requests') await renderRequests(body);
     else if (activeTab === 'reports') await renderReports(body);
     else if (activeTab === 'support') await renderSupport(body);
+    else if (activeTab === 'users') await renderUsers(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
     else if (activeTab === 'advanced-push') {
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderPush(body);
@@ -694,8 +775,11 @@
 
   // -------- dashboard --------
   async function renderDashboard(body) {
+    liveRefreshTarget = body;
     body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
-    let stats = { total_apps: 0, total_downloads: 0, total_size_bytes: 0, top_apps: [] };
+    let stats = { total_apps: 0, total_downloads: 0, total_size_bytes: 0, top_apps: [],
+      total_users: 0, pending_requests: 0, recent_reports: [], pending_list: [],
+      downloads_series: [], apps_by_category: [], rating_distribution: [] };
     let update = null;
     let allApps = [];
     try { stats = await api('/api/admin/stats'); } catch (e) {}
@@ -778,6 +862,57 @@
         onclick: () => goTab('app-update') }, ico('upload', 'icon'), t('نشر تحديث جديد')),
     );
 
+    /* ---------- Live statistics (real D1 aggregates, no fabricated data) ---------- */
+    const series = Array.isArray(stats.downloads_series) ? stats.downloads_series : [];
+    const categories = Array.isArray(stats.apps_by_category) ? stats.apps_by_category : [];
+    const reports = Array.isArray(stats.recent_reports) ? stats.recent_reports : [];
+    const pending = Array.isArray(stats.pending_list) ? stats.pending_list : [];
+    const seriesTotal = series.reduce((n, d) => n + Number(d.count || 0), 0);
+    const liveStamp = el('span', { class: 'admin-live-stamp' },
+      stats.generated_at ? `${t('آخر تحديث')}: ${formatDate(stats.generated_at)}` : t('بيانات حية'));
+    const refreshBtn = el('button', {
+      class: 'btn btn-sm btn-secondary', type: 'button',
+      onclick: () => renderDashboard(body),
+    }, ico('refresh'), t('تحديث الإحصائيات'));
+    const liveKpis = el('div', { class: 'admin-kpi-grid admin-kpi-grid-live' },
+      kpi('users', t('إجمالي المستخدمين'), formatNum(stats.total_users || 0), t('معرفات حقيقية من D1')),
+      kpi('download', t('تنزيلات آخر 14 يوماً'), formatNum(seriesTotal), t('من سجل التنزيلات')),
+      kpi('flag', t('طلبات معلّقة'), formatNum(stats.pending_requests || 0), t('بانتظار المراجعة')),
+      kpi('message', t('بلاغات حديثة'), formatNum(reports.length), t('مراجعات وتطبيقات')));
+    const liveCharts = el('div', { class: 'admin-live-grid' },
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('trending', 'icon'), t('التنزيلات خلال 14 يوماً')),
+        series.length ? el('div', { class: 'admin-svg-wrap' }, lineChartSvg(series))
+          : el('div', { class: 'hint' }, t('لا توجد أحداث تنزيل بعد')),
+        el('div', { class: 'admin-chart-legend' },
+          el('span', null, series.length ? series[0].day : '—'),
+          el('span', null, series.length ? series[series.length - 1].day : '—'))),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('grid', 'icon'), t('التطبيقات حسب التصنيف')),
+        categoryBars(categories)));
+    const reportRows = (rows, emptyLabel) => rows.length
+      ? el('div', { class: 'admin-phase2-list' }, ...rows.slice(0, 6).map((r) =>
+          el('div', { class: 'admin-phase2-row' },
+            el('strong', null, r.app_name || r.app_slug || r.slug || r.reason || '—'),
+            el('span', { class: 'admin-order-meta' }, r.created_at ? formatDate(r.created_at) : (r.ts ? formatDate(r.ts) : '—')))))
+      : el('div', { class: 'hint' }, emptyLabel);
+    const liveLists = el('div', { class: 'admin-live-grid' },
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('message', 'icon'), t('أحدث البلاغات')),
+        reportRows(reports, t('لا بلاغات حديثة'))),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('flag', 'icon'), t('الطلبات المعلّقة')),
+        reportRows(pending, t('لا طلبات معلّقة')),
+        el('button', { class: 'btn btn-sm btn-secondary', type: 'button', style: { margin: '0 14px 14px' },
+          onclick: () => goTab('requests') }, ico('external'), t('فتح الطلبات'))));
+    const liveSection = el('div', { class: 'admin-live-section' },
+      el('div', { class: 'admin-live-head' },
+        el('div', null,
+          el('h2', null, t('إحصائيات حية')),
+          el('p', null, t('أرقام حقيقية من قاعدة البيانات، تُحدَّث تلقائياً كل دقيقة.'))),
+        el('div', { class: 'admin-live-actions' }, liveStamp, refreshBtn)),
+      liveKpis, liveCharts, liveLists);
+
     body.append(
       el('div', { class: 'admin-page-head' },
         el('div', null,
@@ -791,6 +926,7 @@
         kpi('download', 'إجمالي التنزيلات', formatNum(stats.total_downloads || 0), 'حقيقي ومستمر'),
         kpi('storage', 'حجم التخزين', formatBytes(stats.total_size_bytes || 0), 'ملفات APK والصور'),
         kpi('trending', 'الأكثر تنزيلاً', formatNum((stats.top_apps && stats.top_apps[0] && stats.top_apps[0].downloads) || 0), (stats.top_apps && stats.top_apps[0] && stats.top_apps[0].name) || '—')),
+      liveSection,
       el('div', { class: 'admin-dash-grid' },
         el('div', { class: 'panel' },
           el('div', { class: 'panel-head' }, ico('trending', 'icon'), 'الأكثر تنزيلاً'),
@@ -2613,6 +2749,90 @@
   }
 
   // -------- apps list --------
+
+  /* ---------------- Users directory: search + pagination ---------------- */
+  async function renderUsers(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    let payload = { users: [], total: 0, note: '' };
+    try { payload = await api('/api/admin/users?limit=1000'); } catch (e) {}
+    const all = Array.isArray(payload.users) ? payload.users : [];
+    const state = { q: '', page: 1, pageSize: 10, sort: 'recent' };
+    body.innerHTML = '';
+
+    const countEl = el('span', { class: 'admin-table-count' });
+    const searchInput = el('input', {
+      class: 'input admin-table-search', type: 'search',
+      placeholder: t('ابحث بالمعرّف أو المصدر أو القناة'),
+      'aria-label': t('بحث في المستخدمين'),
+    });
+    const sortSel = el('select', { class: 'input admin-table-filter', 'aria-label': t('فرز حسب') },
+      el('option', { value: 'recent' }, t('الأحدث نشاطاً')),
+      el('option', { value: 'devices' }, t('الأكثر أجهزة')),
+      el('option', { value: 'uid' }, t('المعرّف')));
+    const tableWrap = el('div', { class: 'table-wrap' });
+
+    function visible() {
+      const q = state.q.trim().toLowerCase();
+      const list = all.filter((u) => {
+        if (!q) return true;
+        return [u.uid, u.uid_masked, (u.sources || []).join(' '), (u.channels || []).join(' ')]
+          .some((v) => String(v || '').toLowerCase().includes(q));
+      });
+      list.sort((a, b) => {
+        if (state.sort === 'devices') return Number(b.devices || 0) - Number(a.devices || 0);
+        if (state.sort === 'uid') return String(a.uid || '').localeCompare(String(b.uid || ''));
+        return Number(b.last_seen_at || 0) - Number(a.last_seen_at || 0);
+      });
+      return list;
+    }
+    function renderTable() {
+      const list = visible();
+      const pages = Math.max(1, Math.ceil(list.length / state.pageSize));
+      state.page = Math.min(state.page, pages);
+      const slice = list.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+      countEl.textContent = `${list.length} / ${all.length} ${t('مستخدم')}`;
+      tableWrap.innerHTML = '';
+      if (!slice.length) {
+        tableWrap.append(emptyMsg(t('لا توجد نتائج'), t('غيّر عبارة البحث.')));
+        return;
+      }
+      const headRow = el('tr', null,
+        el('th', null, t('المعرّف')), el('th', null, t('الأجهزة')),
+        el('th', null, t('القنوات')), el('th', null, t('المصادر')),
+        el('th', null, t('آخر نشاط')));
+      const bodyRows = slice.map((u) => el('tr', null,
+        el('td', { 'data-label': t('المعرّف') }, el('code', { class: 'admin-uid' }, u.uid_masked || u.uid)),
+        el('td', { 'data-label': t('الأجهزة') }, formatNum(u.devices || 0)),
+        el('td', { 'data-label': t('القنوات') }, (u.channels || []).join(' / ') || '—'),
+        el('td', { 'data-label': t('المصادر') }, (u.sources || []).join(' / ') || '—'),
+        el('td', { 'data-label': t('آخر نشاط') }, u.last_seen_at ? formatDate(u.last_seen_at) : '—')));
+      const table = el('table', { class: 'table admin-table admin-users-table' },
+        el('thead', null, headRow), el('tbody', null, ...bodyRows));
+      tableWrap.append(table);
+      tableWrap.append(pager(list.length, state.page, state.pageSize, (p) => {
+        state.page = p; renderTable();
+      }));
+    }
+    searchInput.addEventListener('input', () => { state.q = searchInput.value; state.page = 1; renderTable(); });
+    sortSel.addEventListener('change', () => { state.sort = sortSel.value; state.page = 1; renderTable(); });
+
+    body.append(
+      el('div', { class: 'admin-page-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, t('المستخدمون')),
+          el('p', { class: 'admin-page-sub' },
+            t('معرفات حقيقية من سجل الأجهزة والتقييمات والدعم — بحث وترقيم صفحات، بلا بيانات مُخمّنة.'))),
+        el('button', { class: 'btn btn-secondary btn-sm', type: 'button',
+          onclick: () => renderUsers(body) }, ico('refresh'), t('تحديث'))),
+      el('div', { class: 'admin-table-toolbar' }, searchInput, sortSel, countEl),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('users', 'icon'), t('دليل المستخدمين')),
+        tableWrap),
+      el('div', { class: 'hint', style: { marginTop: '10px' } }, payload.note || ''),
+    );
+    renderTable();
+  }
+
   async function renderAppsList(body, kind) {
     kind = kind === 'game' ? 'game' : 'app';
     const isGame = (a) => a.type === 'game';
@@ -2622,7 +2842,7 @@
       const { apps: allApps } = await api('/api/admin/apps');
       const apps = allApps.filter((a) => kind === 'game' ? isGame(a) : !isGame(a));
       body.innerHTML = '';
-      const state = { q: '', cat: '', sort: 'downloads', selected: new Set() };
+      const state = { q: '', cat: '', sort: 'downloads', page: 1, pageSize: 12, selected: new Set() };
 
       const countEl = el('span', { class: 'admin-table-count' });
       const searchInput = el('input', {
@@ -2731,8 +2951,11 @@
         renderApp();
       }
       function renderTable() {
-        const list = visible();
-        countEl.textContent = `${list.length} / ${apps.length}`;
+        const filtered = visible();
+        const pages = Math.max(1, Math.ceil(filtered.length / state.pageSize));
+        state.page = Math.min(state.page, pages);
+        const list = filtered.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+        countEl.textContent = `${filtered.length} / ${apps.length} • ${t('صفحة')} ${state.page}/${pages}`;
         tableWrap.innerHTML = '';
         if (!list.length) { tableWrap.append(emptyMsg(t('لا توجد نتائج'), 'غيّر البحث أو التصفية.')); return; }
         const table = el('table', { class: 'table admin-table' },
@@ -2776,6 +2999,11 @@
           })),
         );
         tableWrap.append(table);
+        // Pagination never changes the bulk selection: "select all" still
+        // applies to every filtered row, and CSV/JSON export keeps all rows.
+        tableWrap.append(pager(filtered.length, state.page, state.pageSize, (p) => {
+          state.page = p; renderTable();
+        }));
         selectAll.checked = list.length > 0 && list.every((a) => state.selected.has(a.id));
       }
 
@@ -2821,9 +3049,9 @@
         else list.forEach((a) => state.selected.delete(a.id));
         updateBulk(); renderTable();
       });
-      searchInput.addEventListener('input', () => { state.q = searchInput.value; renderTable(); });
-      catSel.addEventListener('change', () => { state.cat = catSel.value; renderTable(); });
-      sortSel.addEventListener('change', () => { state.sort = sortSel.value; renderTable(); });
+      searchInput.addEventListener('input', () => { state.q = searchInput.value; state.page = 1; renderTable(); });
+      catSel.addEventListener('change', () => { state.cat = catSel.value; state.page = 1; renderTable(); });
+      sortSel.addEventListener('change', () => { state.sort = sortSel.value; state.page = 1; renderTable(); });
 
       const densityBtn = el('button', {
         class: 'btn btn-sm btn-secondary admin-density-btn' + (document.body.classList.contains('admin-compact') ? ' is-on' : ''),

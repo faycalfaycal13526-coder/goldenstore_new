@@ -566,9 +566,15 @@ export async function setSupportThreadStatus(env: Env, threadId: string, status:
   return true;
 }
 
+/* SQL-injection audit: the ONLY interpolated identifiers in this module are
+   chosen from compile-time constant maps below (never from request data).
+   Every value from a caller goes through .bind(). */
+const SUPPORT_UNREAD_COLUMNS: Record<'user' | 'admin', string> = {
+  user: 'unread_user', admin: 'unread_admin',
+};
 export async function markSupportThreadRead(env: Env, threadId: string, who: 'user' | 'admin'): Promise<void> {
   await ensureSupportSchema(env);
-  const column = who === 'admin' ? 'unread_admin' : 'unread_user';
+  const column = SUPPORT_UNREAD_COLUMNS[who] || SUPPORT_UNREAD_COLUMNS.user;
   await env.DB.prepare(`UPDATE support_threads SET ${column} = 0 WHERE id = ?`).bind(threadId).run();
 }
 

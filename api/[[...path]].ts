@@ -81,6 +81,102 @@ function getClientIp(c: any): string {
   return c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip') || 'unknown';
 }
 
+/* =========================================================================
+   CENTRAL WRITE-AUTHORIZATION POLICY  (security audit, 2026-11-08)
+   -------------------------------------------------------------------------
+   Registered BEFORE every route, so a handler added later can never silently
+   become an unauthenticated database write. Three rules:
+
+   1. The 7 legacy `/api/import-*-temp` bulk-import scripts (which used
+      INSERT OR REPLACE on production tables) are PERMANENTLY retired. Even if
+      somebody re-adds such a route, this middleware answers 404 first.
+   2. `/api/admin/*` and `/api/setup-r2-cors` always require a verified admin
+      JWT (requireAdmin), independently of route registration order.
+   3. Every other POST/PUT/PATCH/DELETE must be on an explicit allowlist of
+      intentionally public, rate-limited endpoints. Anything else is 403.
+
+   All D1 statements use .bind() placeholders; see lib/d1.ts whitelists.
+   ========================================================================= */
+const LEGACY_IMPORT_TEMP = /^\/api\/import-[a-z0-9_-]*temp(?:\/|$)/i;
+const PUBLIC_WRITE_EXACT = new Set([
+  '/api/login', '/api/logout', '/api/legal/consent', '/api/translate',
+  '/api/notifications/register-token', '/api/notifications/register-web',
+  '/api/notifications/register-device', '/api/notifications/unregister-token',
+  '/api/notifications/preference', '/api/notifications/receipt',
+  '/api/notifications/click', '/api/notifications/self-test',
+  '/api/profile/demographics', '/api/support/threads',
+]);
+const PUBLIC_WRITE_PATTERNS: RegExp[] = [
+  /^\/api\/apps\/[^/]+\/(star|star-check|request-update|report|follow)$/,
+  /^\/api\/apps\/[^/]+\/reviews\/[^/]+\/(like|report)$/,
+  /^\/api\/support\/threads\/[^/]+\/(messages|read)$/,
+];
+// Stricter buckets for endpoints that write on every request or are brute-force
+// targets. The generic bucket is a backstop, not the only control: individual
+// handlers keep their own validation, sanitizers and rate limits.
+const WRITE_BUCKETS: Record<string, { max: number; sec: number }> = {
+  '/api/login': { max: 8, sec: 60 },
+  '/api/translate': { max: 40, sec: 60 },
+  '/api/notifications/unregister-token': { max: 20, sec: 60 },
+  '/api/profile/demographics': { max: 15, sec: 60 },
+  '/api/apps/:slug/report': { max: 10, sec: 60 },
+  '/api/apps/:slug/request-update': { max: 10, sec: 60 },
+};
+const loginFailures = new Map<string, { count: number; lockedUntil: number }>();
+
+app.use('*', async (c, next) => {
+  const path = c.req.path;
+  // 1) Retired bulk-import endpoints — never reachable again.
+  if (LEGACY_IMPORT_TEMP.test(path)) {
+    c.header('Cache-Control', 'no-store');
+    return c.json({ error: 'not_found' }, 404);
+  }
+  const method = c.req.method.toUpperCase();
+  if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH' && method !== 'DELETE') return next();
+
+  const ip = getClientIp(c);
+  // 2) Admin namespace: verified JWT, no exceptions and no ordering gap.
+  if (path.startsWith('/api/admin/') || path === '/api/setup-r2-cors') {
+    if (!rateLimit(ip, 'write:admin', 300, 60)) return c.json({ error: 'rate_limited' }, 429);
+    return requireAdmin(c, next);
+  }
+
+  // 3) Secure-by-default allowlist for public writes.
+  const exact = PUBLIC_WRITE_EXACT.has(path);
+  const patterned = PUBLIC_WRITE_PATTERNS.some((re) => re.test(path));
+  if (!exact && !patterned) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'blocked_unlisted_write', path, method, ip }));
+    return c.json({ error: 'forbidden', message: 'Write endpoint is not on the public allowlist.' }, 403);
+  }
+
+  // 4) Per-endpoint rate limiting + progressive lockout for admin login.
+  const bucketKey = WRITE_BUCKETS[path]
+    ? path
+    : (path.includes('/report') ? '/api/apps/:slug/report'
+      : path.includes('/request-update') ? '/api/apps/:slug/request-update' : '');
+  const rule = WRITE_BUCKETS[bucketKey] || { max: 180, sec: 60 };
+  if (!rateLimit(ip, 'write:' + (bucketKey || 'public'), rule.max, rule.sec)) {
+    return c.json({ error: 'rate_limited' }, 429);
+  }
+  if (path === '/api/login') {
+    const attempt = loginFailures.get(ip);
+    if (attempt && attempt.lockedUntil > Date.now()) {
+      return c.json({ error: 'too_many_attempts', retry_after: Math.ceil((attempt.lockedUntil - Date.now()) / 1000) }, 429);
+    }
+    await next();
+    if (c.res.status === 401) {
+      const cur = loginFailures.get(ip) || { count: 0, lockedUntil: 0 };
+      cur.count++;
+      if (cur.count >= 8) { cur.lockedUntil = Date.now() + 15 * 60 * 1000; cur.count = 0; }
+      loginFailures.set(ip, cur);
+    } else if (c.res.status === 200) {
+      loginFailures.delete(ip);
+    }
+    return;
+  }
+  return next();
+});
+
 // Security headers
 app.use('*', async (c, next) => {
   await next();
@@ -670,7 +766,21 @@ app.post('/notifications/receipt', async (c) => {
 
 app.post('/notifications/unregister-token', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  if (body.token) await unregisterPushToken(c.env, String(body.token));
+  const token = String(body.token || '').trim();
+  // The token itself is a bearer capability, but we still validate it and,
+  // when the caller is signed in, scope the deletion to that account so a
+  // leaked/guessed token cannot be used to triage somebody else's devices.
+  if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
+  const user = await requireFirebaseUser(c).catch(() => null);
+  if (user) {
+    const owned: any = await c.env.DB.prepare(
+      'SELECT uid FROM push_devices WHERE token = ?',
+    ).bind(token).first().catch(() => null);
+    if (!owned || String(owned.uid) !== user.uid) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+  }
+  await unregisterPushToken(c.env, token);
   return c.json({ ok: true });
 });
 
@@ -1184,6 +1294,9 @@ app.get('/me', async (c) => {
 });
 
 app.post('/setup-r2-cors', async (c) => {
+  // The central write guard already verified an admin JWT. The shared
+  // x-admin-password header remains as a SECOND factor for one-off setup
+  // scripts; it is no longer sufficient on its own.
   const setupPass = c.env.ADMIN_PASSWORD;
   if (!setupPass) return c.json({ error: 'server_misconfigured', message: 'ADMIN_PASSWORD is not set' }, 500);
   if (!constantTimeEqual(String(c.req.header('x-admin-password') || ''), setupPass)) return c.json({ error: 'unauthorized' }, 401);
@@ -1689,7 +1802,11 @@ app.post('/profile/demographics', async (c) => {
   const settings = await readAllSettings(c.env);
   if (settings.collect_demographics !== '1') return c.json({ error: 'collection_disabled' }, 403);
   const body = await c.req.json().catch(() => ({}));
-  const uid = String(body.uid || '').trim();
+  // Anonymous opt-in is a product requirement (aggregate-only, no PII). When
+  // a Firebase session IS present we ignore the client-supplied id and use the
+  // verified uid, so a caller can never overwrite another visitor's row.
+  const signedIn = await requireFirebaseUser(c).catch(() => null);
+  const uid = signedIn ? signedIn.uid : String(body.uid || '').trim();
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(uid)) return c.json({ error: 'invalid_uid' }, 400);
   await ensureInsightsTables(c.env.DB);
   const age = AGE_RANGES.includes(body.age_range) ? body.age_range : '';
@@ -1805,11 +1922,183 @@ app.get('/admin/analytics/insights', async (c) => {
   });
 });
 
+/* -------------------------------------------------------------------------
+   Admin dashboard: live statistics + D1 indexes (2026-11-08)
+   Every number comes from a real aggregate. Missing tables (fresh database)
+   degrade to zeros/empty arrays instead of a 500. No fabricated values.
+   ------------------------------------------------------------------------- */
+const ADMIN_INDEX_SQL = [
+  `CREATE INDEX IF NOT EXISTS idx_apps_category ON apps(category)`,
+  `CREATE INDEX IF NOT EXISTS idx_apps_type ON apps(type)`,
+  `CREATE INDEX IF NOT EXISTS idx_apps_created_at ON apps(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_apps_downloads ON apps(downloads DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_apps_slug ON apps(slug)`,
+  `CREATE INDEX IF NOT EXISTS idx_star_votes_app_id ON star_votes(app_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_star_votes_uid ON star_votes(uid)`,
+  `CREATE INDEX IF NOT EXISTS idx_star_votes_app_uid ON star_votes(app_id, uid)`,
+  `CREATE INDEX IF NOT EXISTS idx_review_reports_status ON review_reports(status, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_app_requests_status ON app_requests(status, ts DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_app_requests_type ON app_requests(type, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_download_events_day ON download_events(day)`,
+  `CREATE INDEX IF NOT EXISTS idx_download_events_slug ON download_events(slug, day)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_devices_uid ON push_devices(uid, channel, notifications_enabled)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_demographics_upd ON user_demographics(updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_threads_uid ON support_threads(uid, created_at DESC)`,
+];
+const adminIndexesReady = new WeakSet<object>();
+async function ensureAdminIndexes(env: any): Promise<void> {
+  if (!env || !env.DB || adminIndexesReady.has(env.DB)) return;
+  adminIndexesReady.add(env.DB);
+  // An index on a column that does not exist yet (legacy DB) must never break
+  // the request; the migration file is the canonical, ordered version.
+  for (const sql of ADMIN_INDEX_SQL) {
+    try { await env.DB.prepare(sql).run(); } catch { /* optional index */ }
+  }
+}
+async function safeAll(env: any, sql: string, args: any[] = []): Promise<any[]> {
+  try {
+    const r: any = await env.DB.prepare(sql).bind(...args).all();
+    return Array.isArray(r?.results) ? r.results : [];
+  } catch { return []; }
+}
+async function safeFirst(env: any, sql: string, args: any[] = []): Promise<any> {
+  try { return (await env.DB.prepare(sql).bind(...args).first()) || {}; } catch { return {}; }
+}
+
+/** Distinct real user ids across every table that records an authenticated
+    or device-identifying interaction. Never invents or estimates users. */
+async function collectAdminUsers(env: any): Promise<any[]> {
+  const map = new Map<string, any>();
+  const merge = (rows: any[], source: string) => {
+    for (const r of rows) {
+      const uid = String(r?.uid || '').trim();
+      if (!uid || uid.startsWith('gs_')) continue;
+      const ts = Number(r?.ts ?? r?.updated_at ?? r?.created_at ?? 0) || 0;
+      let u = map.get(uid);
+      if (!u) {
+        u = { uid, uid_masked: uid.slice(0, 10) + (uid.length > 10 ? '…' : ''),
+          sources: new Set<string>(), channels: new Set<string>(),
+          devices: 0, last_seen_at: ts };
+        map.set(uid, u);
+      }
+      u.sources.add(source);
+      u.last_seen_at = Math.max(u.last_seen_at, ts);
+    }
+  };
+  merge(await safeAll(env, `SELECT uid, channel,
+      COALESCE(NULLIF(last_seen_at, 0), updated_at, 0) AS ts FROM push_devices`), 'devices');
+  merge(await safeAll(env, `SELECT uid, MAX(ts) AS ts FROM star_votes
+      WHERE COALESCE(uid, '') != '' GROUP BY uid`), 'reviews');
+  merge(await safeAll(env, `SELECT uid, updated_at AS ts FROM user_demographics`), 'demographics');
+  merge(await safeAll(env, `SELECT uid, MAX(created_at) AS ts FROM support_threads GROUP BY uid`), 'support');
+  merge(await safeAll(env, `SELECT uid, MAX(updatedAt) AS ts FROM web_tokens GROUP BY uid`), 'web');
+  merge(await safeAll(env, `SELECT uid, MAX(updated_at) AS ts FROM fcm_tokens GROUP BY uid`), 'native');
+  for (const d of await safeAll(env, `SELECT uid, channel, COUNT(*) AS c
+      FROM push_devices GROUP BY uid, channel`)) {
+    const u = map.get(String(d.uid));
+    if (u) { u.devices += Number(d.c || 0); u.channels.add(String(d.channel)); }
+  }
+  return Array.from(map.values()).map((u: any) => ({
+    ...u, sources: Array.from(u.sources), channels: Array.from(u.channels),
+  })).sort((a: any, b: any) => b.last_seen_at - a.last_seen_at);
+}
+
+function lastNDays(n: number): string[] {
+  const out: string[] = [];
+  const base = Date.now();
+  for (let i = n - 1; i >= 0; i--) {
+    out.push(new Date(base - i * 86400000).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 app.get('/admin/stats', async (c) => {
-  const res = await c.env.DB.prepare('SELECT id, slug, name, downloads, size_bytes, icon_key FROM apps ORDER BY downloads DESC').all();
-  let totDl = 0, totSize = 0;
-  const apps = (res.results || []).map(a => { totDl += (a.downloads as number); totSize += (a.size_bytes as number); return { ...a, icon_url: icon_url(a.icon_key as string, c.env) }; });
-  return c.json({ total_apps: apps.length, total_downloads: totDl, total_size_bytes: totSize, top_apps: apps.slice(0, 5) });
+  await ensureAdminIndexes(c.env);
+  await ensureInsightsTables(c.env.DB).catch(() => {});
+  const env: any = c.env;
+  const rows = await safeAll(env,
+    `SELECT id, slug, name, downloads, size_bytes, icon_key, category, type, created_at, rating
+       FROM apps`);
+  const apps = rows.map((a: any) => ({
+    ...a, icon_url: icon_url(a.icon_key as string, env),
+  }));
+  const total_apps = apps.length;
+  const total_downloads = apps.reduce((n: number, a: any) => n + Number(a.downloads || 0), 0);
+  const total_size_bytes = apps.reduce((n: number, a: any) => n + Number(a.size_bytes || 0), 0);
+  const top_apps = apps.slice().sort((a: any, b: any) =>
+    Number(b.downloads || 0) - Number(a.downloads || 0)).slice(0, 5);
+
+  const users = await collectAdminUsers(env);
+  const total_users = users.length;
+
+  const reviewReports = await safeAll(env,
+    `SELECT id, review_id, app_slug, reason, status, created_at
+       FROM review_reports ORDER BY created_at DESC LIMIT 8`);
+  const appReports = await safeAll(env,
+    `SELECT id, slug, app_name, reason, status, ts AS created_at
+       FROM app_requests WHERE type = 'report' ORDER BY ts DESC LIMIT 8`);
+  const recent_reports = [
+    ...reviewReports.map((r: any) => ({ ...r, kind: 'review' })),
+    ...appReports.map((r: any) => ({ ...r, kind: 'app' })),
+  ].sort((a: any, b: any) => Number(b.created_at || 0) - Number(a.created_at || 0)).slice(0, 8);
+
+  const pendingRow = await safeFirst(env,
+    `SELECT COUNT(*) AS c FROM app_requests WHERE COALESCE(status, 'new') = 'new'`);
+  const pending_requests = Number(pendingRow.c || 0);
+  const pending_list = await safeAll(env,
+    `SELECT id, type, slug, app_name, new_version, status, ts
+       FROM app_requests WHERE COALESCE(status, 'new') = 'new' ORDER BY ts DESC LIMIT 8`);
+
+  const days = lastNDays(14);
+  const dlRows = await safeAll(env,
+    `SELECT day, COUNT(*) AS c FROM download_events WHERE day >= ? GROUP BY day`, [days[0]]);
+  const dlMap = new Map<string, number>();
+  for (const d of dlRows) dlMap.set(String(d.day), Number(d.c || 0));
+  const downloads_series = days.map((day) => ({ day, count: dlMap.get(day) || 0 }));
+
+  const byCategory = await safeAll(env,
+    `SELECT COALESCE(NULLIF(category, ''), 'other') AS k, COUNT(*) AS c
+       FROM apps GROUP BY k ORDER BY c DESC LIMIT 8`);
+  const apps_by_category = byCategory.map((r: any) => ({ key: String(r.k), count: Number(r.c || 0) }));
+  const ratingRows = await safeAll(env,
+    `SELECT rating, COUNT(*) AS c FROM star_votes GROUP BY rating`);
+  const rating_distribution = ratingRows.map((r: any) => ({
+    rating: Number(r.rating || 0), count: Number(r.c || 0),
+  }));
+
+  c.header('Cache-Control', 'no-store');
+  return c.json({
+    // Legacy keys are preserved so older dashboards/tests keep working.
+    total_apps, total_downloads, total_size_bytes, top_apps,
+    // New live aggregates.
+    total_users, recent_reports, pending_requests, pending_list,
+    downloads_series, apps_by_category, rating_distribution,
+    generated_at: nowSec(),
+    source: 'd1-live',
+    note: 'All counters are real D1 aggregates. Users = distinct real ids across device/review/support tables; no estimates.',
+  });
+});
+
+// Searchable, paginated user directory for the admin console. Admin only
+// (covered by /admin/* requireAdmin and the central write guard).
+app.get('/admin/users', async (c) => {
+  await ensureAdminIndexes(c.env);
+  const all = await collectAdminUsers(c.env);
+  const q = String(c.req.query('q') || '').trim().toLowerCase();
+  const filtered = q ? all.filter((u: any) =>
+    String(u.uid).toLowerCase().includes(q)
+    || (u.sources || []).some((s: string) => s.toLowerCase().includes(q))
+    || (u.channels || []).some((s: string) => s.toLowerCase().includes(q))) : all;
+  const page = Math.max(1, Math.floor(Number(c.req.query('page')) || 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(c.req.query('limit')) || 25)));
+  const pages = Math.max(1, Math.ceil(filtered.length / limit));
+  const safePage = Math.min(page, pages);
+  c.header('Cache-Control', 'no-store');
+  return c.json({
+    users: filtered.slice((safePage - 1) * limit, safePage * limit),
+    total: filtered.length, page: safePage, limit, pages,
+    note: 'Real identifiers only; no synthetic or estimated accounts.',
+  });
 });
 
 app.get('/admin/apps', async (c) => {

@@ -153,11 +153,14 @@ async function cfRequest(token: string, query: string, variables: Record<string,
 }
 
 /** Returns explicit zeros + a precise reason when it cannot fetch data. */
-export async function cloudflareUsage(env: Env, opts: { debug?: boolean } = {}): Promise<any> {
+export async function cloudflareUsage(env: Env, opts: { debug?: boolean; days?: number } = {}): Promise<any> {
+  // Selectable range for the Command Center (7 / 14 / 30 days). Cloudflare's
+  // 1d dataset allows at most 31 groups per query.
+  const days = Math.max(1, Math.min(Number(opts.days) || 7, 30));
   const { token, accountTag, zoneTag, config } = await cfConfig(env);
   const empty = { configured: false, requests: 0, bytes: 0, cached_requests: 0,
     cached_bytes: 0, page_views: 0, threats: 0, series: [], source: null as string | null,
-    config, attempts: [] as any[] };
+    config, attempts: [] as any[], days };
   if (!token || (!accountTag && !zoneTag)) {
     return { ...empty, error: 'missing_configuration',
       hint: 'Run `npx wrangler secret put CF_API_TOKEN` on the goldenstore-api Worker, plus CF_ACCOUNT_ID (or CF_ZONE_ID for a zone-scoped token). Secrets belong on the Worker, not only the Pages project.' };
@@ -165,7 +168,7 @@ export async function cloudflareUsage(env: Env, opts: { debug?: boolean } = {}):
 
   const now = new Date();
   const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const since = iso(new Date(now.getTime() - 7 * 86400 * 1000));
+  const since = iso(new Date(now.getTime() - days * 86400 * 1000));
   const until = iso(new Date(now.getTime() + 86400 * 1000)); // exclusive date_lt
   const attempts: any[] = [];
   let groups: any[] = [], source: string | null = null, lastError = '';
@@ -215,7 +218,7 @@ export async function cloudflareUsage(env: Env, opts: { debug?: boolean } = {}):
   }));
   const sum = (key: string) => series.reduce((a: number, b: any) => a + Number(b[key] || 0), 0);
   return {
-    configured: true, source, from: since, until_exclusive: until,
+    configured: true, source, days, from: since, until_exclusive: until,
     requests: sum('requests'), bytes: sum('bytes'),
     cached_requests: sum('cachedRequests'), cached_bytes: sum('cachedBytes'),
     page_views: sum('pageViews'), threats: sum('threats'),

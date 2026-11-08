@@ -75,6 +75,52 @@
           el('i', { style: { width: `${Math.max(3, Math.round((Number(x.count || 0) / max) * 100))}%` } })),
         el('b', null, formatNum(x.count)))));
   }
+  /* Compact sparkline + donut for the Command Center (pure inline SVG). */
+  function sparklineSvg(values) {
+    const W = 120, H = 34, P = 3;
+    const vals = (values || []).map((v) => Number(v || 0));
+    if (!vals.length) return svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'cc-spark' });
+    const max = Math.max(1, ...vals);
+    const step = vals.length > 1 ? (W - P * 2) / (vals.length - 1) : 0;
+    const pts = vals.map((v, i) => [P + i * step, H - P - (v / max) * (H - P * 2)]);
+    const d = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'cc-spark', preserveAspectRatio: 'none', role: 'img' });
+    svg.append(svgEl('path', { d: `${d} L ${pts[pts.length - 1][0].toFixed(1)} ${H} L ${P} ${H} Z`, class: 'cc-spark-area' }));
+    svg.append(svgEl('path', { d, class: 'cc-spark-line', fill: 'none' }));
+    return svg;
+  }
+  function donutSvg(percent, label) {
+    const p = Math.max(0, Math.min(100, Number(percent) || 0));
+    const R = 42, C = 2 * Math.PI * R;
+    const svg = svgEl('svg', { viewBox: '0 0 110 110', class: 'cc-donut', role: 'img', 'aria-label': String(label || '') });
+    svg.append(svgEl('circle', { cx: 55, cy: 55, r: R, class: 'cc-donut-track' }));
+    svg.append(svgEl('circle', { cx: 55, cy: 55, r: R, class: 'cc-donut-value',
+      'stroke-dasharray': `${(C * p / 100).toFixed(1)} ${C.toFixed(1)}`,
+      transform: 'rotate(-90 55 55)' }));
+    svg.append(svgEl('text', { x: 55, y: 52, 'text-anchor': 'middle', class: 'cc-donut-num' }, `${p}%`));
+    svg.append(svgEl('text', { x: 55, y: 68, 'text-anchor': 'middle', class: 'cc-donut-label' }, String(label || '')));
+    return svg;
+  }
+  function ccCard(label, value, sub, accent, spark) {
+    return el('div', { class: 'cc-card' + (accent ? ' ' + accent : '') },
+      el('div', { class: 'cc-card-label' }, label),
+      el('div', { class: 'cc-card-value' }, value),
+      el('div', { class: 'cc-card-sub' }, sub || ''),
+      spark ? el('div', { class: 'cc-card-spark' }, sparklineSvg(spark)) : null);
+  }
+  function ccPill(label, ok, detail) {
+    return el('div', { class: 'cc-pill ' + (ok ? 'is-ok' : 'is-warn') },
+      el('span', { class: 'cc-pill-dot' }), el('strong', null, label),
+      el('span', null, detail || ''));
+  }
+  function ccAction(label, icon, handler, danger) {
+    return el('button', { class: 'btn btn-sm ' + (danger ? 'btn-danger' : 'btn-secondary'), type: 'button',
+      onclick: async (e) => {
+        const b = e.currentTarget; b.disabled = true;
+        try { await handler(); } finally { b.disabled = false; }
+      } }, ico(icon), label);
+  }
+
   function pager(total, page, pageSize, onGo) {
     const pages = Math.max(1, Math.ceil(total / pageSize));
     const box = el('div', { class: 'admin-pager', role: 'navigation', 'aria-label': t('ترقيم الصفحات') });
@@ -120,6 +166,8 @@
       { key: 'advanced-push', icon: 'bell', label: 'إشعارات متقدمة' },
       { key: 'analytics', icon: 'dashboard', label: 'الإحصائيات' },
       { key: 'insights', icon: 'trending', label: t('إحصائيات متقدمة') },
+      { key: 'firebase', icon: 'sparkle', label: t('مركز Firebase') },
+      { key: 'cloudflare', icon: 'cloud', label: t('Cloudflare Analytics') },
     ] },
     { id: 'system', label: 'النظام', icon: 'settings', items: [
       { key: 'app-update', icon: 'download', label: t('مركز التحديث') },
@@ -747,6 +795,8 @@
       else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإشعارات المتقدمة — أعد تحميل الصفحة.</div>';
     }
     else if (activeTab === 'insights') await renderInsights(body);
+    else if (activeTab === 'firebase') await renderFirebaseCenter(body);
+    else if (activeTab === 'cloudflare') await renderCloudflareCenter(body);
     else if (activeTab === 'analytics') {
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderAnalytics(body);
       else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإحصائيات — أعد تحميل الصفحة.</div>';
@@ -796,6 +846,277 @@
     return el('div', { class: 'admin-ratings-repair' }, note, button);
   }
 
+
+  /* =======================================================================
+     Firebase Command Center — real FCM/credentials data, no secrets exposed.
+     ======================================================================= */
+  async function renderFirebaseCenter(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    let fb = { config: {}, fcm: {}, unified: {}, usage: [], registrations: [], logs: [] };
+    try { fb = (await api('/api/admin/firebase/status')).firebase || fb; } catch (e) {}
+    const cfg = fb.config || {}, fcm = fb.fcm || {}, uni = fb.unified || {};
+    const usage = Array.isArray(fb.usage) ? fb.usage : [];
+    const regs = Array.isArray(fb.registrations) ? fb.registrations : [];
+    const logs = Array.isArray(fb.logs) ? fb.logs : [];
+    const channels = uni.channels || {};
+    const native = Number((channels.native || {}).total || 0);
+    const web = Number((channels.web || {}).total || 0);
+    const devices = Number(uni.devices_total || native + web || 0);
+    const eligible = Number(uni.devices_eligible || 0);
+    const delivery = uni.delivery || {};
+    const deliveryTotal = Object.values(delivery).reduce((n, v) => n + Number(v || 0), 0);
+    const failed = Number(delivery.failed || delivery.error || 0);
+    const successPct = deliveryTotal ? Math.round(((deliveryTotal - failed) / deliveryTotal) * 100) : 0;
+    body.innerHTML = '';
+
+    const testResult = el('div', { class: 'cc-status-box' }, t('لم يُجرَ اختبار الاتصال بعد.'));
+    async function runTest() {
+      testResult.textContent = t('جارٍ اختبار بيانات الاعتماد…');
+      try {
+        const r = await api('/api/admin/firebase/test', { method: 'POST', body: {} });
+        testResult.textContent = r.connected
+          ? `${t('الاتصال ناجح')} • ${t('زمن الاستجابة')}: ${formatNum(r.latency_ms || 0)} ms • ${String(r.note || '')}`
+          : `${t('تعذّر الاتصال')} • ${String(r.error || '')} ${String(r.hint || '')}`;
+        testResult.classList.toggle('is-ok', !!r.connected);
+        toast(r.connected ? t('Firebase متصل') : t('تعذّر الاتصال'), r.connected ? 'success' : 'error');
+      } catch (e) { testResult.textContent = t('تعذّر الاتصال') + ': ' + (e.message || ''); }
+    }
+    const actions = [
+      ccAction(t('اختبار اتصال Firebase'), 'shieldCheck', runTest),
+      ccAction(t('إرسال إشعار تجريبي'), 'bell', async () => {
+        try {
+          const r = await api('/api/admin/push/test', { method: 'POST',
+            body: { title: t('إشعار تجريبي'), body: t('اختبار من مركز Firebase') } });
+          toast(`${t('تم الإرسال')}: ${formatNum((r.push && r.push.targeted) || 0)}`, 'success');
+          logAdminAction('اختبار FCM من مركز Firebase');
+        } catch (e) { toast(t('تعذّر إرسال الإشعار'), 'error'); }
+      }),
+      ccAction(t('مزامنة المواضيع'), 'refresh', async () => {
+        try {
+          const r = await api('/api/admin/push/sync-topics', { method: 'POST', body: { all: true } });
+          toast(`${t('تمت المزامنة')}: ${formatNum(r.subscribed || 0)}`, 'success');
+        } catch (e) { toast(t('تعذّر المزامنة'), 'error'); }
+      }),
+      ccAction(t('تفريغ الطابور'), 'upload', async () => {
+        try {
+          const r = await api('/api/admin/push/flush', { method: 'POST', body: {} });
+          toast(`${t('تم التفريغ')}: ${formatNum(r.processed || r.drained || 0)}`, 'success');
+        } catch (e) { toast(t('تعذّر التفريغ'), 'error'); }
+      }),
+      ccAction(t('تحديث'), 'refresh', () => renderFirebaseCenter(body)),
+    ];
+
+    const configRows = [
+      [t('معرّف المشروع'), cfg.project_id || '—', !!cfg.project_id],
+      [t('بريد حساب الخدمة'), cfg.client_email_masked || '—', !!cfg.client_email_masked],
+      [t('مفتاح API'), cfg.api_key_present ? t('موجود') : t('غير موجود'), !!cfg.api_key_present],
+      [t('مفتاح الخدمة الخاص'), cfg.private_key_source || t('غير موجود'), !!cfg.service_account_present],
+      [t('جاهزية الإعداد'), cfg.configured ? t('مكتمل') : t('ناقص'), !!cfg.configured],
+    ];
+    const configList = el('div', { class: 'cc-config-list' },
+      ...configRows.map((row) => el('div', { class: 'cc-config-row' },
+        el('span', null, row[0]), el('strong', null, row[1]),
+        el('i', { class: 'cc-config-dot ' + (row[2] ? 'is-ok' : 'is-warn') }))));
+
+    const usageBars = categoryBars(usage.slice().reverse().map((u) => ({
+      key: String(u.day || '').slice(5), count: Number(u.reads || 0) + Number(u.writes || 0),
+    })));
+    const channelDonut = donutSvg(devices ? Math.round((native / devices) * 100) : 0, t('أصلي'));
+    const deliveryDonut = donutSvg(successPct, t('ناجح'));
+
+    const regTable = el('table', { class: 'table admin-table cc-table' });
+    regTable.append(el('thead', null, el('tr', null,
+      el('th', null, t('القناة')), el('th', null, t('المنصة')),
+      el('th', null, t('المعرّف')), el('th', null, t('التاريخ')))));
+    const regBody = el('tbody');
+    (regs.length ? regs : []).forEach((r) => regBody.append(el('tr', null,
+      el('td', { 'data-label': t('القناة') }, String(r.channel || r.platform || '—')),
+      el('td', { 'data-label': t('المنصة') }, String(r.platform || '—')),
+      el('td', { 'data-label': t('المعرّف') }, String(r.uid_masked || r.installation_id || '—')),
+      el('td', { 'data-label': t('التاريخ') }, r.created_at ? formatDate(r.created_at) : '—'))));
+    if (!regs.length) regBody.append(el('tr', null, el('td', { colspan: '4' }, t('لا تسجيلات بعد'))));
+    regTable.append(regBody);
+
+    const logTable = el('table', { class: 'table admin-table cc-table' });
+    logTable.append(el('thead', null, el('tr', null,
+      el('th', null, t('الإشعار')), el('th', null, t('مستهدف')),
+      el('th', null, t('ناجح')), el('th', null, t('فاشل')), el('th', null, t('التاريخ')))));
+    const logBody = el('tbody');
+    (logs.length ? logs : []).forEach((r) => logBody.append(el('tr', null,
+      el('td', { 'data-label': t('الإشعار') }, String(r.notification_id || '—').slice(0, 22)),
+      el('td', { 'data-label': t('مستهدف') }, formatNum(r.targeted)),
+      el('td', { 'data-label': t('ناجح') }, formatNum(r.success)),
+      el('td', { 'data-label': t('فاشل') }, formatNum(r.failure)),
+      el('td', { 'data-label': t('التاريخ') }, r.created_at ? formatDate(r.created_at) : '—'))));
+    if (!logs.length) logBody.append(el('tr', null, el('td', { colspan: '5' }, t('لا عمليات إرسال بعد'))));
+    logTable.append(logBody);
+
+    const deliveryLegend = el('div', { class: 'cc-donut-legend' });
+    Object.keys(delivery).forEach((k) => deliveryLegend.append(
+      el('div', null, `${k}: ${formatNum(delivery[k])}`)));
+    if (!Object.keys(delivery).length) deliveryLegend.append(el('div', null, t('لا عمليات بعد')));
+    const deliveryRatioRow = el('div', { class: 'cc-donut-row' }, deliveryDonut, deliveryLegend);
+
+    body.append(
+      el('div', { class: 'admin-page-head cc-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, t('مركز Firebase')),
+          el('p', { class: 'admin-page-sub' }, t('حالة بيانات الاعتماد، أجهزة FCM، التسليم، والاستخدام — بيانات حقيقية بلا أسرار.'))),
+        el('div', { class: 'admin-head-actions' }, ccPill(t('المشروع'), !!cfg.configured, cfg.project_id || t('غير مهيّأ')))),
+      el('div', { class: 'cc-grid' },
+        ccCard(t('الأجهزة الموحّدة'), formatNum(devices), t('سجل واحد لكل جهاز'), 'cc-gold', usage.map((u) => Number(u.reads || 0) + Number(u.writes || 0))),
+        ccCard(t('المؤهّلة للاستقبال'), formatNum(eligible), t('إذن ممنوح وحساب مفعل'), 'cc-green'),
+        ccCard(t('تسجيلات آخر 24 ساعة'), formatNum(fcm.registrations_24h || 0), t('من التطبيق والمتصفح'), 'cc-blue'),
+        ccCard(t('وظائف قيد الانتظار'), formatNum(uni.pending_jobs || fcm.pending_jobs || 0), t('يُفرَغ تلقائياً عبر Cron'), 'cc-purple')),
+      el('div', { class: 'cc-panel-grid' },
+        el('div', { class: 'panel cc-panel' },
+          el('div', { class: 'panel-head' }, ico('shieldCheck', 'icon'), t('فحص بيانات الاعتماد')),
+          configList, testResult,
+          el('div', { class: 'cc-actions' }, ...actions)),
+        el('div', { class: 'panel cc-panel' },
+          el('div', { class: 'panel-head' }, ico('android', 'icon'), t('توزيع القنوات')),
+          el('div', { class: 'cc-donut-row' },
+            channelDonut,
+            el('div', { class: 'cc-donut-legend' },
+              el('div', null, `${t('أصلي')}: ${formatNum(native)}`),
+              el('div', null, `${t('ويب')}: ${formatNum(web)}`),
+              el('div', null, `${t('المشتركين في الموضوع')}: ${formatNum(fcm.native_subscribed || 0)}`))),
+          el('div', { class: 'panel-head' }, ico('check', 'icon'), t('نسبة التسليم')),
+          deliveryRatioRow)),
+      el('div', { class: 'cc-panel-grid' },
+        el('div', { class: 'panel cc-panel' },
+          el('div', { class: 'panel-head' }, ico('database', 'icon'), t('استخدام Firebase (7 أيام)')),
+          usageBars),
+        el('div', { class: 'panel cc-panel' },
+          el('div', { class: 'panel-head' }, ico('clock', 'icon'), t('أحدث التسجيلات')),
+          el('div', { class: 'table-wrap' }, regTable))),
+      el('div', { class: 'panel cc-panel' },
+        el('div', { class: 'panel-head' }, ico('send', 'icon'), t('سجل عمليات الإرسال')),
+        el('div', { class: 'table-wrap' }, logTable),
+        el('div', { class: 'hint' }, t('كل الأرقام من D1 و FCM v1 — لا قيم مُخمّنة.'))),
+    );
+  }
+
+  /* =======================================================================
+     Cloudflare GraphQL Analytics — selectable range, chart, diagnostics.
+     ======================================================================= */
+  async function renderCloudflareCenter(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    const rangeSel = el('select', { class: 'input admin-table-filter', 'aria-label': t('المدى الزمني') },
+      el('option', { value: '7' }, '7 ' + t('أيام')),
+      el('option', { value: '14' }, '14 ' + t('يوم')),
+      el('option', { value: '30' }, '30 ' + t('يوم')));
+    let days = 7;
+    let payload = { cloudflare: {}, derived: {} };
+    const load = async () => {
+      try { payload = await api(`/api/admin/cloudflare/analytics?days=${days}`) || payload; }
+      catch (e) { payload = { cloudflare: {}, derived: {}, error: String(e.message || e) }; }
+      return payload;
+    };
+    await load();
+    const cf = payload.cloudflare || {}, d = payload.derived || {};
+    const series = Array.isArray(cf.series) ? cf.series : [];
+    const cfg = cf.config || {};
+    const status = el('div', { class: 'cc-status-box' });
+    function showDiagnostics(x) {
+      const c = x.config || cfg;
+      const bits = [
+        `${t('المصدر')}: ${x.source === 'zones' ? 'Zone' : x.source === 'accounts' ? 'Account' : '—'}`,
+        `CF_API_TOKEN: ${c.has_token ? t('موجود') + ' (…' + (c.token_tail || '') + ')' : t('غير موجود')}`,
+        `Account: ${c.has_account ? String(c.account_source || t('موجود')) : t('غير موجود')}`,
+        `CF_ZONE_ID: ${c.has_zone ? t('موجود') : t('غير موجود')}`,
+      ];
+      if (x.from) bits.push(`${t('الفترة')}: ${x.from} → ${x.until_exclusive || ''}`);
+      const attempts = x.attempts || [];
+      if (attempts.length) bits.push(`${t('المحاولات')}: ` + attempts.map((a) =>
+        `${a.source} HTTP ${a.status}` + ((a.errors || []).length ? ` (${String(a.errors[0]).slice(0, 60)})` : '')).join(' | '));
+      let text = bits.join(' • ');
+      if (x.error) text += '\n' + t('الخطأ') + ': ' + x.error;
+      if (x.hint) text += '\n' + x.hint;
+      status.textContent = text;
+      status.classList.toggle('is-ok', !!x.source && !x.error);
+    }
+    showDiagnostics(cf);
+    body.innerHTML = '';
+
+    const chartHost = el('div', { class: 'admin-svg-wrap cc-chart' });
+    const redrawChart = () => {
+      chartHost.innerHTML = '';
+      chartHost.append(series.length
+        ? lineChartSvg(series.map((r) => ({ count: Number(r.requests || 0), day: r.date })))
+        : el('div', { class: 'hint' }, t('لا توجد بيانات GraphQL لهذا المدى.')));
+    };
+    redrawChart();
+
+    const tableWrap = el('div', { class: 'table-wrap' });
+    const table = el('table', { class: 'table admin-table cc-table' });
+    table.append(el('thead', null, el('tr', null,
+      el('th', null, t('اليوم')), el('th', null, t('الطلبات')),
+      el('th', null, t('البايتات')), el('th', null, t('مخزّنة')), el('th', null, t('التهديدات')))));
+    const tbody = el('tbody');
+    if (!series.length) tbody.append(el('tr', null, el('td', { colspan: '5' }, t('لا توجد بيانات بعد'))));
+    else series.slice().reverse().forEach((r) => tbody.append(el('tr', null,
+      el('td', { 'data-label': t('اليوم') }, String(r.date || '—')),
+      el('td', { 'data-label': t('الطلبات') }, formatNum(r.requests)),
+      el('td', { 'data-label': t('البايتات') }, formatBytes(r.bytes || 0)),
+      el('td', { 'data-label': t('مخزّنة') }, formatNum(r.cachedRequests)),
+      el('td', { 'data-label': t('التهديدات') }, formatNum(r.threats)))));
+    table.append(tbody); tableWrap.append(table);
+
+    const diagnosticsPanel = el('div', { class: 'panel cc-panel' },
+      el('div', { class: 'panel-head' }, ico('wrench', 'icon'), t('تشخيص الاتصال')),
+      status,
+      el('div', { class: 'cc-actions' },
+        ccAction(t('اختبار الاتصال / تشخيص'), 'refresh', async () => {
+          status.textContent = t('جارٍ اختبار GraphQL…');
+          try {
+            const r = await api('/api/admin/push/cloudflare');
+            showDiagnostics(r.cloudflare || {});
+            toast(t('تم تحديث التشخيص'), 'success');
+          } catch (e) { status.textContent = t('فشل الاختبار') + ': ' + (e.message || ''); }
+        }),
+        ccAction(t('تحديث'), 'cloud', async () => { await load(); renderCloudflareCenter(body); })),
+      el('div', { class: 'cc-hint-code' }, 'npx wrangler secret put CF_API_TOKEN'),
+      el('div', { class: 'hint' }, t('رمز Analytics: Read على الحساب أو النطاق + CF_ACCOUNT_ID / CF_ZONE_ID على الـ Worker.')));
+
+    body.append(
+      el('div', { class: 'admin-page-head cc-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, t('Cloudflare Analytics')),
+          el('p', { class: 'admin-page-sub' }, t('بيانات GraphQL الحقيقية: الطلبات، النطاق، الكاش، والتهديدات — مع تشخيص كامل للإعداد.'))),
+        el('div', { class: 'admin-head-actions' }, rangeSel,
+          ccPill(t('GraphQL'), !!cf.configured, cf.source === 'zones' ? 'Zone' : cf.source === 'accounts' ? 'Account' : t('غير مهيّأ')))),
+      el('div', { class: 'cc-grid' },
+        ccCard(t('الطلبات'), formatNum(cf.requests || 0), `${d.days || days} ${t('يوم')}`, 'cc-gold', series.map((r) => Number(r.requests || 0))),
+        ccCard(t('عرض النطاق'), formatBytes(cf.bytes || 0), `${t('متوسط')} ${formatNum(d.avg_bytes_per_request || 0)} B/${t('طلب')}`, 'cc-blue'),
+        ccCard(t('نسبة الكاش'), `${formatNum(d.cache_hit_ratio || 0)}%`, `${formatNum(cf.cached_requests || 0)} ${t('طلب مخزّن')}`, 'cc-green'),
+        ccCard(t('التهديدات'), formatNum(cf.threats || 0), `${t('ذروة')} ${String(d.peak_day || '—')}`, 'cc-purple')),
+      el('div', { class: 'cc-panel-grid' },
+        el('div', { class: 'panel cc-panel' },
+          el('div', { class: 'panel-head' }, ico('trending', 'icon'), t('الطلبات اليومية (GraphQL)')),
+          chartHost,
+          el('div', { class: 'admin-chart-legend' },
+            el('span', null, series.length ? series[0].date : '—'),
+            el('span', null, series.length ? series[series.length - 1].date : '—')),
+          el('div', { class: 'cc-donut-row' },
+            donutSvg(Number(d.cache_hit_ratio || 0), t('كاش')),
+            el('div', { class: 'cc-donut-legend' },
+              el('div', null, `${t('مشاهدات الصفحات')}: ${formatNum(cf.page_views || 0)}`),
+              el('div', null, `${t('ذروة اليوم')}: ${formatNum(d.peak_requests || 0)}`),
+              el('div', null, `${t('أيام البيانات')}: ${formatNum(d.series_length || 0)}`)))),
+        diagnosticsPanel),
+      el('div', { class: 'panel cc-panel' },
+        el('div', { class: 'panel-head' }, ico('calendar', 'icon'), t('التفاصيل اليومية')),
+        tableWrap,
+        el('div', { class: 'hint' }, t('الأصفار تعني «لا بيانات» لا «خطأ»؛ استخدم التشخيص أعلاه لمعرفة السبب.'))),
+    );
+    rangeSel.addEventListener('change', async () => {
+      days = Number(rangeSel.value) || 7;
+      await load();
+      renderCloudflareCenter(body);
+    });
+  }
+
   async function renderDashboard(body) {
     liveRefreshTarget = body;
     body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
@@ -813,11 +1134,12 @@
     const maxDl = Math.max(1, ...chartRows.map((a) => Number(a.downloads || 0)));
     body.innerHTML = '';
 
-    const kpi = (icon, label, value, sub) => el('div', { class: 'admin-kpi' },
+    const kpi = (icon, label, value, sub, spark) => el('div', { class: 'admin-kpi' + (spark ? ' has-spark' : '') },
       el('div', { class: 'admin-kpi-top' }, el('span', { class: 'admin-kpi-icon' }, ico(icon, 'icon')),
         el('span', { class: 'admin-kpi-label' }, label)),
       el('div', { class: 'admin-kpi-value' }, value),
-      el('div', { class: 'admin-kpi-sub' }, sub || ''));
+      el('div', { class: 'admin-kpi-sub' }, sub || ''),
+      spark ? el('div', { class: 'admin-kpi-spark' }, sparklineSvg(spark)) : null);
 
     const quick = (icon, label, key) => el('button', {
       class: 'admin-quick', type: 'button', onclick: () => goTab(key),
@@ -852,6 +1174,8 @@
       { key: 'push', label: 'إشعارات FCM', url: '/api/admin/push/status' },
       { key: 'update', label: 'خدمة التحديث', url: '/api/app-update' },
       { key: 'cloudflare', label: 'Cloudflare Analytics', url: '/api/admin/push/cloudflare' },
+      { key: 'firebase', label: 'Firebase / FCM', url: '/api/admin/firebase/status' },
+      { key: 'graphql', label: 'GraphQL Analytics', url: '/api/admin/cloudflare/analytics?days=7' },
     ];
     healthSpec.forEach((h) => healthGrid.append(el('div', { class: 'admin-health-item', 'data-health': h.key },
       el('span', { class: 'admin-health-dot is-pending' }), el('span', null, h.label),
@@ -898,7 +1222,7 @@
     }, ico('refresh'), t('تحديث الإحصائيات'));
     const liveKpis = el('div', { class: 'admin-kpi-grid admin-kpi-grid-live' },
       kpi('users', t('إجمالي المستخدمين'), formatNum(stats.total_users || 0), t('معرفات حقيقية من D1')),
-      kpi('download', t('تنزيلات آخر 14 يوماً'), formatNum(seriesTotal), t('من سجل التنزيلات')),
+      kpi('download', t('تنزيلات آخر 14 يوماً'), formatNum(seriesTotal), t('من سجل التنزيلات'), series.map((d) => Number(d.count || 0))),
       kpi('flag', t('طلبات معلّقة'), formatNum(stats.pending_requests || 0), t('بانتظار المراجعة')),
       kpi('message', t('بلاغات حديثة'), formatNum(reports.length), t('مراجعات وتطبيقات')));
     const liveCharts = el('div', { class: 'admin-live-grid' },
@@ -935,7 +1259,46 @@
         el('div', { class: 'admin-live-actions' }, liveStamp, refreshBtn)),
       liveKpis, liveCharts, liveLists);
 
+    /* Command Center hero: live snapshot, service chips, one-click report. */
+    async function exportReport() {
+      let cf = null, fb = null;
+      try { cf = await api('/api/admin/cloudflare/analytics?days=7'); } catch (e) {}
+      try { fb = await api('/api/admin/firebase/status'); } catch (e) {}
+      const report = {
+        generated_at: new Date().toISOString(),
+        store: stats,
+        cloudflare: cf ? { derived: cf.derived, cloudflare: cf.cloudflare } : null,
+        firebase: fb ? fb.firebase : null,
+        note: 'Real aggregates only. No secrets are included in this report.',
+      };
+      try {
+        const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = el('a', { href: url, download: `goldenstore-report-${new Date().toISOString().slice(0, 10)}.json` });
+        document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        logAdminAction('تصدير تقرير لوحة القيادة');
+        toast(t('تم تصدير التقرير'), 'success');
+      } catch (e) { toast(t('تعذّر تصدير التقرير'), 'error'); }
+    }
+    const hero = el('div', { class: 'cc-hero' },
+      el('div', { class: 'cc-hero-main' },
+        el('div', { class: 'cc-hero-kicker' }, t('مركز القيادة')),
+        el('h1', null, t('مرحباً بك في لوحة تحكّم Golden Store')),
+        el('p', null, t('كل ما يهمّك في شاشة واحدة: المتجر، المستخدمون، الإشعارات، Firebase و Cloudflare.'))),
+      el('div', { class: 'cc-hero-side' },
+        ccPill(t('المتجر'), true, t('يعمل')),
+        ccPill(t('قاعدة البيانات'), true, 'D1'),
+        el('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: exportReport },
+          ico('download'), t('تصدير تقرير')),
+        el('div', { class: 'cc-hero-links' },
+          el('button', { class: 'btn btn-sm btn-secondary', type: 'button', onclick: () => goTab('firebase') },
+            ico('sparkle'), t('مركز Firebase')),
+          el('button', { class: 'btn btn-sm btn-secondary', type: 'button', onclick: () => goTab('cloudflare') },
+            ico('cloud'), t('Cloudflare Analytics')))));
+
     body.append(
+      hero,
       el('div', { class: 'admin-page-head' },
         el('div', null,
           el('h1', { class: 'admin-page-title' }, 'لوحة المعلومات'),

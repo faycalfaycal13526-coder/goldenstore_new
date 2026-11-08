@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
-import { verifyFirebaseToken, getAuthAdmin } from '../lib/firebase.js';
+import { verifyFirebaseToken, getAuthAdmin, getServiceAccountToken } from '../lib/firebase.js';
 import {
   broadcastPush, sendDirectPush, buildPushPayload, registerPushToken, setPushPreference,
   unregisterPushToken, ensurePushSchema, processPushJob, syncTopicSubscriptions,
@@ -13,7 +13,7 @@ import {
   cancelScheduledPush, processScheduledPushes, recordPushClick, pushHistory,
   followApp, unfollowApp, appFollowerCount, analyticsOverview, resolveAudience,
 } from '../lib/advanced-push.js';
-import { cloudflareUsage as cfUsage } from '../lib/usage.js';
+import { cloudflareUsage as cfUsage, firebaseUsage } from '../lib/usage.js';
 import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
@@ -2674,6 +2674,99 @@ app.get('/admin/push/history', async (c) =>
   c.json({ history: await pushHistory(c.env, Number(c.req.query('limit')) || 30) }));
 app.get('/admin/push/analytics', async (c) =>
   c.json({ ok: true, analytics: await analyticsOverview(c.env) }));
+
+/* =========================================================================
+   Command Center — Firebase + Cloudflare GraphQL Analytics (2026-11-08)
+   Admin-only (covered by /admin/* requireAdmin and the central write guard).
+   No secret is ever returned: only presence flags, masked tails and the
+   outcome of a real OAuth2 token exchange.
+   ========================================================================= */
+function maskEmail(v: unknown): string {
+  const s = String(v || '');
+  const at = s.indexOf('@');
+  return at > 2 ? `${s.slice(0, 2)}***@${s.slice(at + 1)}` : (s ? '***' : '');
+}
+function firebaseConfig(env: any) {
+  const project = String(env.FIREBASE_PROJECT_ID || '').trim();
+  const email = String(env.FIREBASE_CLIENT_EMAIL || '').trim();
+  const hasKey = !!(env.FIREBASE_PRIVATE_KEY || env.FIREBASE_PRIVATE_KEY_BASE64 || env.FIREBASE_SERVICE_ACCOUNT);
+  return {
+    project_id: project,
+    client_email_masked: maskEmail(email),
+    api_key_present: !!env.FIREBASE_API_KEY,
+    service_account_present: hasKey,
+    private_key_source: env.FIREBASE_PRIVATE_KEY ? 'FIREBASE_PRIVATE_KEY'
+      : env.FIREBASE_PRIVATE_KEY_BASE64 ? 'FIREBASE_PRIVATE_KEY_BASE64'
+        : env.FIREBASE_SERVICE_ACCOUNT ? 'FIREBASE_SERVICE_ACCOUNT' : null,
+    configured: !!project && !!email && hasKey,
+  };
+}
+
+app.get('/admin/firebase/status', async (c) => {
+  const env: any = c.env;
+  const [stats, unified, usage, registrations, logs] = await Promise.all([
+    pushTokenStats(env).catch(() => ({})),
+    notificationDiagnostics(env).catch(() => ({})),
+    firebaseUsage(env, 7).catch(() => []),
+    listPushRegistrations(env, 12).catch(() => []),
+    listPushLogs(env, 12).catch(() => []),
+  ]);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true, firebase: {
+    config: firebaseConfig(env),
+    fcm: stats, unified, usage, registrations, logs,
+    generated_at: nowSec(),
+  } });
+});
+
+/** REAL Firebase feature: exchange the service account for an OAuth2 access
+    token against Google. Proves the credentials, the private key and the
+    project are valid — without sending a message or exposing the secret. */
+app.post('/admin/firebase/test', async (c) => {
+  const env: any = c.env;
+  const config = firebaseConfig(env);
+  if (!config.configured) {
+    return c.json({ ok: false, connected: false, latency_ms: 0,
+      error: 'missing_firebase_credentials',
+      hint: 'Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (or *_BASE64 / FIREBASE_SERVICE_ACCOUNT) as Worker secrets.' });
+  }
+  const started = Date.now();
+  try {
+    const token = await getServiceAccountToken(env, 'https://www.googleapis.com/auth/firebase.messaging');
+    return c.json({ ok: true, connected: !!token, latency_ms: Date.now() - started,
+      project_id: config.project_id, scope: 'firebase.messaging',
+      note: 'Service-account OAuth2 token obtained; FCM v1 credentials are valid.' });
+  } catch (error: any) {
+    // Never leak the private key or the assertion. Only a short reason.
+    const raw = String(error?.message || error);
+    return c.json({ ok: false, connected: false, latency_ms: Date.now() - started,
+      error: raw.slice(0, 180),
+      hint: 'Verify FIREBASE_PRIVATE_KEY (PEM with real newlines) and that the service account has Firebase Messaging permissions.' });
+  }
+});
+
+/** Cloudflare GraphQL Analytics with a selectable 7/14/30-day window and
+    derived ratios the owner can act on. */
+app.get('/admin/cloudflare/analytics', async (c) => {
+  const days = Math.max(1, Math.min(Number(c.req.query('days')) || 7, 30));
+  try {
+    const cloudflare = await cfUsage(c.env, { debug: true, days });
+    const series = Array.isArray(cloudflare.series) ? cloudflare.series : [];
+    const totalRequests = Number(cloudflare.requests || 0);
+    const peak = series.reduce((a: any, b: any) =>
+      Number(b?.requests || 0) > Number(a?.requests || 0) ? b : a, { requests: 0, date: '' });
+    c.header('Cache-Control', 'no-store');
+    return c.json({ ok: true, cloudflare, derived: {
+      days,
+      cache_hit_ratio: totalRequests ? Math.round((Number(cloudflare.cached_requests || 0) / totalRequests) * 1000) / 10 : 0,
+      avg_bytes_per_request: totalRequests ? Math.round(Number(cloudflare.bytes || 0) / totalRequests) : 0,
+      peak_day: String(peak?.date || ''), peak_requests: Number(peak?.requests || 0),
+      series_length: series.length,
+    } });
+  } catch (error: any) {
+    return c.json({ ok: false, error: String(error?.message || error) });
+  }
+});
 
 // Live Cloudflare GraphQL diagnostic: shows config flags, HTTP status and
 // GraphQL errors WITHOUT exposing the token. Use this to debug "0 requests".

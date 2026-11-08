@@ -36,7 +36,7 @@ import { DEFAULT_CATEGORIES, APP_CATEGORIES, GAME_CATEGORIES, type App, type Cat
 import type { Env } from '../lib/env.js';
 import {
   ratingSnapshot, allVoteAggregates, mergeAggregate, appAliases,
-  recomputeAppRating, recomputeAllRatings,
+  recomputeAppRating, recomputeAllRatings, listAllReviewsForAdmin, purgeSilentVotes,
 } from '../lib/ratings.js';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
@@ -1197,8 +1197,9 @@ app.post('/apps/:slug/star-check', async (c) => {
 
   const snap = await ratingSnapshot(c.env, await appAliases(c.env, appData));
   const rating = snap.rating, rating_count = snap.count;
-  if (vote) return c.json({ voted: true, my_rating: vote.rating, my_comment: vote.comment, my_name: vote.name, my_photo: vote.photo_url, rating, rating_count });
-  return c.json({ voted: false, rating, rating_count });
+  const breakdown = { reviews_count: snap.reviews_count, silent_votes: Math.max(0, snap.count - snap.reviews_count) };
+  if (vote) return c.json({ voted: true, my_rating: vote.rating, my_comment: vote.comment, my_name: vote.name, my_photo: vote.photo_url, rating, rating_count, ...breakdown });
+  return c.json({ voted: false, rating, rating_count, ...breakdown });
 });
 
 /* ---------------------------- Reviews (public) ---------------------------- */
@@ -1234,9 +1235,11 @@ app.get('/apps/:slug/reviews', async (c) => {
   c.header('Cache-Control', 'private, no-store');
   // `rating_count` = real votes; `total`/`reviews_count` = written comments.
   // Both come from star_votes, never from stale `apps` counters.
+  const silent = Math.max(0, snap.count - snap.reviews_count);
   return c.json({ reviews, total, dist,
     rating: snap.rating, rating_count: snap.count,
-    votes_count: snap.count, reviews_count: snap.reviews_count });
+    votes_count: snap.count, reviews_count: snap.reviews_count, silent_votes: silent,
+    rating_breakdown: { votes: snap.count, comments: snap.reviews_count, silent } });
 });
 
 app.post('/apps/:slug/reviews/:reviewId/like', async (c) => {
@@ -1655,6 +1658,48 @@ app.delete('/admin/reviews/:reviewId', async (c) => {
 /* One-click repair of ratings left stale by comments deleted before the
    authoritative engine was deployed. Admin-only; idempotent; only rows that
    actually differ are written. */
+/* Every vote — including ratings given without a comment — with search,
+   a silent-only filter and pagination. This is what makes a leftover
+   star-only rating visible and removable instead of looking like a ghost
+   of a deleted review. */
+app.get('/admin/reviews', async (c) => {
+  const all = await listAllReviewsForAdmin(c.env, 2000);
+  const q = String(c.req.query('q') || '').trim().toLowerCase();
+  const silentOnly = c.req.query('silent') === '1';
+  const filtered = all.filter((r: any) => {
+    if (silentOnly && !r.silent) return false;
+    if (!q) return true;
+    return [r.id, r.app_name, r.app_slug, r.comment, r.author, r.uid].some((v) =>
+      String(v || '').toLowerCase().includes(q));
+  });
+  const page = Math.max(1, Math.floor(Number(c.req.query('page')) || 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(c.req.query('limit')) || 20)));
+  const pages = Math.max(1, Math.ceil(filtered.length / limit));
+  const safePage = Math.min(page, pages);
+  c.header('Cache-Control', 'no-store');
+  return c.json({
+    reviews: filtered.slice((safePage - 1) * limit, safePage * limit),
+    total: filtered.length, page: safePage, limit, pages,
+    silent_total: all.filter((r: any) => r.silent).length,
+    comments_total: all.filter((r: any) => !r.silent).length,
+  });
+});
+
+/* One explicit action: remove all star-only ratings and recompute. The rule
+   "silent votes count in the average" is untouched — these rows simply cease
+   to exist, so no trace of a deleted comment remains. */
+app.post('/admin/reviews/purge-silent', async (c) => {
+  try {
+    const result = await purgeSilentVotes(c.env);
+    await recordActivity(c.env, consoleActor(c),
+      `حذف التقييمات بلا تعليق (${result.deleted})`, 'maintenance').catch(() => {});
+    return c.json({ ok: true, ...result });
+  } catch (e: any) {
+    console.error('[admin/ratings] purge-silent failed:', e?.message || e);
+    return c.json({ error: 'purge_failed' }, 500);
+  }
+});
+
 app.post('/admin/recompute-ratings', async (c) => {
   try {
     const result = await recomputeAllRatings(c.env);

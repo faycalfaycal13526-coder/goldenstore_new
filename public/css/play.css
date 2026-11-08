@@ -3894,3 +3894,19 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
 @media (prefers-reduced-motion: reduce) {
   .gs-modal-btn { transition: none; }
 }
+
+/* Explicit rating breakdown: star-only votes are never mistaken for a ghost
+   of a deleted comment (2026-11-08). */
+.rate-breakdown { margin-top: 5px; font-size: 11.5px; color: var(--text-3); line-height: 1.6; }
+.reviews-empty-silent {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 15px; border-radius: 13px; text-align: center;
+  background: rgba(244,192,31,.055); border: 1px dashed rgba(244,192,31,.32);
+}
+.reviews-empty-silent strong { color: var(--text); font-size: 13px; }
+.reviews-empty-silent span { color: var(--gold, #f4c01f); font-size: 12.5px; }
+.reviews-empty-silent small { color: var(--text-3); font-size: 11px; line-height: 1.6; }
+@media (max-width: 560px) {
+  .rate-breakdown { font-size: 10.5px; }
+  .reviews-empty-silent { padding: 12px; }
+}

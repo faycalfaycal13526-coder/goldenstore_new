@@ -34,6 +34,10 @@ import { COOKIE_NAME, constantTimeEqual, signJwt, verifyJwt } from '../lib/auth.
 import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt, sha1Hex, sha256Hex, parseYouTubeUrl } from '../lib/utils.js';
 import { DEFAULT_CATEGORIES, APP_CATEGORIES, GAME_CATEGORIES, type App, type Category, type Screenshot } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
+import {
+  ratingSnapshot, allVoteAggregates, mergeAggregate, appAliases,
+  recomputeAppRating, recomputeAllRatings,
+} from '../lib/ratings.js';
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
@@ -1083,8 +1087,18 @@ app.get('/apps', async (c) => {
     const hidden = await hiddenSlugs(c.env);
     const visible = result.apps.filter(a => !hidden.has(String(a.slug)));
     const ordered = sort === 'recent' ? applyConsoleOrder(visible, await consoleOrder(c.env)) : visible;
-    const apps = ordered.map(a => ({ ...appPublic(a), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) }));
-    c.header('Cache-Control', 'public, max-age=300');
+    // Ratings are read from star_votes, not from the stored counters, so a
+    // deleted comment can never keep contributing to the average in the cards.
+    const aggMap = await allVoteAggregates(c.env);
+    const apps = ordered.map(a => {
+      const out: any = { ...appPublic(a), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) };
+      if (aggMap) {
+        const snap = mergeAggregate(aggMap, [String(a.id), String(a.slug || '')]);
+        out.rating = snap.rating; out.rating_count = snap.count; out.stars = snap.count;
+      }
+      return out;
+    });
+    c.header('Cache-Control', 'no-store');
     return c.json({ apps, total: Math.max(0, Number(result.total) - (result.apps.length - visible.length)) });
   } catch (e: any) { return c.json({ error: 'd1_error', message: e.message }, 500); }
 });
@@ -1100,7 +1114,14 @@ app.get('/apps/:slug', async (c) => {
   const screenshots = screenshotsData.map(s => ({ id: s.id, position: s.position, url: shot_url(s.r2_key, c.env) }));
   const videos = await videosFor(c.env, appData.id);
   
-  return c.json({ app: { ...appPublic(appData), icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env) }, screenshots, videos });
+  const detailAliases = await appAliases(c.env, appData);
+  const detailSnap = await ratingSnapshot(c.env, detailAliases);
+  const detailApp: any = { ...appPublic(appData),
+    icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env),
+    rating: detailSnap.rating, rating_count: detailSnap.count, stars: detailSnap.count,
+    reviews_count: detailSnap.reviews_count };
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ app: detailApp, screenshots, videos });
 });
 
 app.get('/apps/:slug/download', async (c) => {
@@ -1147,11 +1168,15 @@ app.post('/apps/:slug/star', async (c) => {
   await c.env.DB.prepare(`INSERT INTO star_votes (id, app_id, hash, server_hash, uid, rating, comment, name, photo_url, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(voteId, appData.id, voteHash, await sha256Hex(serverFingerprint(c)), uid||null, rating, sanitizeText(body.comment, 2000), sanitizeText(body.name, 60), sanitizeUrl(body.photo_url)||null, nowSec()).run();
 
-  const newCount = appData.rating_count + 1;
-  const newSum = appData.rating_sum + rating;
-  const newAvg = Math.round((newSum / newCount) * 10) / 10;
-  await c.env.DB.prepare('UPDATE apps SET rating = ?, rating_count = ?, rating_sum = ?, stars = ? WHERE id = ?')
-    .bind(newAvg, newCount, newSum, newCount, appData.id).run();
+  // Recompute from real rows: incremental `old + 1` arithmetic preserved any
+  // pre-existing drift forever (e.g. comments deleted before this fix).
+  let newCount = Number(appData.rating_count || 0) + 1;
+  let newSum = Number(appData.rating_sum || 0) + rating;
+  let newAvg = Math.round((newSum / newCount) * 10) / 10;
+  try {
+    const snap = await recomputeAppRating(c.env, { id: String(appData.id), slug: String(appData.slug || '') });
+    newCount = snap.count; newSum = snap.sum; newAvg = snap.rating;
+  } catch (e) { console.error('[ratings] recompute after vote failed:', (e as any)?.message || e); }
 
   const ts = nowSec();
   return c.json({
@@ -1170,8 +1195,10 @@ app.post('/apps/:slug/star-check', async (c) => {
   if (uid) vote = await c.env.DB.prepare('SELECT * FROM star_votes WHERE app_id = ? AND uid = ?').bind(appData.id, uid).first();
   else if (clientFp) vote = await c.env.DB.prepare('SELECT * FROM star_votes WHERE app_id = ? AND hash = ?').bind(appData.id, await sha256Hex(`${clientFp}::${serverFingerprint(c)}`)).first();
 
-  if (vote) return c.json({ voted: true, my_rating: vote.rating, my_comment: vote.comment, my_name: vote.name, my_photo: vote.photo_url, rating: appData.rating, rating_count: appData.rating_count });
-  return c.json({ voted: false, rating: appData.rating, rating_count: appData.rating_count });
+  const snap = await ratingSnapshot(c.env, await appAliases(c.env, appData));
+  const rating = snap.rating, rating_count = snap.count;
+  if (vote) return c.json({ voted: true, my_rating: vote.rating, my_comment: vote.comment, my_name: vote.name, my_photo: vote.photo_url, rating, rating_count });
+  return c.json({ voted: false, rating, rating_count });
 });
 
 /* ---------------------------- Reviews (public) ---------------------------- */
@@ -1185,10 +1212,12 @@ app.get('/apps/:slug/reviews', async (c) => {
   // so the response can carry their personal like state. Never cached publicly.
   const viewerId = sanitizeText(c.req.query('userId') || c.req.query('uid') || '', 128);
 
-  const [votes, dist, total] = await Promise.all([
-    listReviews(c.env, appData.id, limit, viewerId),
-    getRatingDistribution(c.env, appData.id),
-    countReviews(c.env, appData.id),
+  const aliases = await appAliases(c.env, appData);
+  const [votes, dist, total, snap] = await Promise.all([
+    listReviews(c.env, aliases, limit, viewerId),
+    getRatingDistribution(c.env, aliases),
+    countReviews(c.env, aliases),
+    ratingSnapshot(c.env, aliases),
   ]);
 
   const reviews = votes.map((v: any) => ({
@@ -1203,7 +1232,11 @@ app.get('/apps/:slug/reviews', async (c) => {
   }));
 
   c.header('Cache-Control', 'private, no-store');
-  return c.json({ reviews, total, dist, rating: appData.rating, rating_count: appData.rating_count });
+  // `rating_count` = real votes; `total`/`reviews_count` = written comments.
+  // Both come from star_votes, never from stale `apps` counters.
+  return c.json({ reviews, total, dist,
+    rating: snap.rating, rating_count: snap.count,
+    votes_count: snap.count, reviews_count: snap.reviews_count });
 });
 
 app.post('/apps/:slug/reviews/:reviewId/like', async (c) => {
@@ -1616,6 +1649,21 @@ app.delete('/admin/reviews/:reviewId', async (c) => {
   } catch (err: any) {
     console.error('[admin/reviews] delete failed:', err?.message || err);
     return c.json({ error: 'delete_review_failed' }, 500);
+  }
+});
+
+/* One-click repair of ratings left stale by comments deleted before the
+   authoritative engine was deployed. Admin-only; idempotent; only rows that
+   actually differ are written. */
+app.post('/admin/recompute-ratings', async (c) => {
+  try {
+    const result = await recomputeAllRatings(c.env);
+    await recordActivity(c.env, consoleActor(c),
+      `إعادة احتساب التقييمات (${result.changed} من ${result.apps} تطبيقاً)`, 'maintenance').catch(() => {});
+    return c.json({ ok: true, ...result });
+  } catch (e: any) {
+    console.error('[admin/ratings] recompute failed:', e?.message || e);
+    return c.json({ error: 'recompute_failed' }, 500);
   }
 });
 
@@ -2062,6 +2110,16 @@ app.get('/admin/stats', async (c) => {
   const apps_by_category = byCategory.map((r: any) => ({ key: String(r.k), count: Number(r.c || 0) }));
   const ratingRows = await safeAll(env,
     `SELECT rating, COUNT(*) AS c FROM star_votes GROUP BY rating`);
+  // Read-only drift detector: how many apps still carry a stale average left
+  // behind by comments deleted before this fix. The repair endpoint fixes it.
+  let ratings_drift = 0;
+  const driftMap = await allVoteAggregates(env);
+  if (driftMap) {
+    for (const a of await safeAll(env, 'SELECT id, slug, rating, rating_count FROM apps')) {
+      const m = mergeAggregate(driftMap, [String(a.id), String(a.slug || '')]);
+      if (Number(a.rating || 0) !== m.rating || Number(a.rating_count || 0) !== m.count) ratings_drift++;
+    }
+  }
   const rating_distribution = ratingRows.map((r: any) => ({
     rating: Number(r.rating || 0), count: Number(r.c || 0),
   }));
@@ -2072,7 +2130,7 @@ app.get('/admin/stats', async (c) => {
     total_apps, total_downloads, total_size_bytes, top_apps,
     // New live aggregates.
     total_users, recent_reports, pending_requests, pending_list,
-    downloads_series, apps_by_category, rating_distribution,
+    downloads_series, apps_by_category, rating_distribution, ratings_drift,
     generated_at: nowSec(),
     source: 'd1-live',
     note: 'All counters are real D1 aggregates. Users = distinct real ids across device/review/support tables; no estimates.',

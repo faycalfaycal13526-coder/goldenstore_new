@@ -774,6 +774,28 @@
   }
 
   // -------- dashboard --------
+  /* One-click repair of ratings left stale by comments deleted before the
+     authoritative engine existed. Shows the live drift counter from stats. */
+  function ratingsRepairPanel(stats, body) {
+    const note = el('div', { class: 'sub' },
+      t('إعادة احتساب متوسطات التقييم من سجل التقييمات الفعلي لإزالة أثر التعليقات المحذوفة.'),
+      stats && stats.ratings_drift
+        ? el('span', { class: 'admin-drift-badge' }, `${formatNum(stats.ratings_drift)} ${t('تطبيق يحتاج تصحيحاً')}`)
+        : el('span', { class: 'admin-drift-badge is-ok' }, t('الاحتساب مطابق للسجل')));
+    const button = el('button', { class: 'btn btn-secondary btn-sm', type: 'button',
+      onclick: async (e) => {
+        const btn = e.currentTarget; btn.disabled = true;
+        try {
+          const r = await api('/api/admin/recompute-ratings', { method: 'POST', body: {} });
+          logAdminAction('إعادة احتساب التقييمات');
+          toast(`${t('تم تصحيح')} ${formatNum(r.changed || 0)} / ${formatNum(r.apps || 0)} ${t('تطبيق')}`, 'success');
+          renderDashboard(body);
+        } catch { toast(t('تعذّر إعادة الاحتساب'), 'error'); }
+        btn.disabled = false;
+      } }, ico('refresh'), t('إعادة احتساب التقييمات'));
+    return el('div', { class: 'admin-ratings-repair' }, note, button);
+  }
+
   async function renderDashboard(body) {
     liveRefreshTarget = body;
     body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
@@ -982,6 +1004,7 @@
           } catch { toast('فشل التحديث', 'error'); }
           btn.disabled = false;
         } }, ico('check'), 'تعيين النوع للعناصر القديمة')),
+        ratingsRepairPanel(stats, body),
     );
   }
 
@@ -1635,12 +1658,13 @@
       );
     }
 
-    async function runDelete(path, successMsg, errorMsg) {
+    async function runDelete(path, successMsg, errorMsg, onSuccess) {
       const confirmBtn = actionsCell.querySelector('.btn-danger');
       if (confirmBtn) confirmBtn.disabled = true;
       try {
-        await api(path, { method: 'DELETE' });
+        const result = await api(path, { method: 'DELETE' });
         toast(successMsg, 'success');
+        if (typeof onSuccess === 'function') onSuccess(result);
         await refresh();
       } catch (e) {
         showDefault();
@@ -1658,6 +1682,14 @@
       return runDelete(
         `/api/admin/reviews/${encodeURIComponent(reviewId)}`,
         t('تم حذف التعليق'), t('تعذّر حذف التعليق'),
+        (res) => {
+          // The server returns the NEW authoritative average. Show it as a
+          // second toast so the admin can see the recomputation happened.
+          if (!res || typeof res.rating !== 'number') return;
+          toast(Number(res.rating_count) > 0
+            ? `${t('التقييم الآن')} ${Number(res.rating).toFixed(1)} / 5 (${formatNum(res.rating_count)} ${t('تقييم')})`
+            : t('لا تقييمات متبقية'), 'info');
+        },
       );
     }
 

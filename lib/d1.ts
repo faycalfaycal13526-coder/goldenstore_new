@@ -1,6 +1,9 @@
 import type { Env } from './env.js';
 import type { AppVideo } from './types.js';
 import { nowSec, randomId } from './utils.js';
+import {
+  ensureReviewTables, appAliases, recomputeAppRating, resolveRatingsApp,
+} from './ratings.js';
 
 export function rowToApp(row: any): any {
   let search_terms: any[] = [];
@@ -189,7 +192,9 @@ export async function getStoreSettings(env: Env): Promise<{ notify_new_publicati
 /** Public review rows for one app, newest first, with like counts and the
  *  current viewer's like state. Only rows that actually contain a comment
  *  are returned; internal fields (hash, server_hash, uid) are never exposed. */
-export async function listReviews(env: Env, app_id: string, limit: number, viewerId = ''): Promise<any[]> {
+export async function listReviews(env: Env, app_id: string | string[], limit: number, viewerId = ''): Promise<any[]> {
+  const aliases = Array.from(new Set((Array.isArray(app_id) ? app_id : [app_id]).map(String).filter(Boolean)));
+  if (!aliases.length) return [];
   const result = await env.DB.prepare(`
     SELECT
       v.id,
@@ -204,34 +209,40 @@ export async function listReviews(env: Env, app_id: string, limit: number, viewe
         0
       ) AS liked_by_me
     FROM star_votes v
-    WHERE v.app_id = ?
+    WHERE v.app_id IN (${aliases.map(() => '?').join(',')})
       AND v.comment IS NOT NULL
       AND TRIM(v.comment) <> ''
     ORDER BY v.ts DESC, v.id DESC
     LIMIT ?
-  `).bind(viewerId, app_id, limit).all();
+  `).bind(viewerId, ...aliases, limit).all();
   return result.results || [];
 }
 
 /** Total number of written reviews (independent of the page limit). */
-export async function countReviews(env: Env, app_id: string): Promise<number> {
+export async function countReviews(env: Env, app_id: string | string[]): Promise<number> {
+  const aliases = Array.from(new Set((Array.isArray(app_id) ? app_id : [app_id]).map(String).filter(Boolean)));
+  if (!aliases.length) return 0;
   const row: any = await env.DB.prepare(`
     SELECT COUNT(*) AS total
     FROM star_votes
-    WHERE app_id = ? AND comment IS NOT NULL AND TRIM(comment) <> ''
-  `).bind(app_id).first();
+    WHERE app_id IN (${aliases.map(() => '?').join(',')})
+      AND comment IS NOT NULL AND TRIM(comment) <> ''
+  `).bind(...aliases).first().catch(() => null);
   return Number(row?.total || 0);
 }
 
 /** Rating distribution across ALL votes (including votes without a comment). */
-export async function getRatingDistribution(env: Env, app_id: string): Promise<Record<string, number>> {
+export async function getRatingDistribution(env: Env, app_id: string | string[]): Promise<Record<string, number>> {
+  const aliases = Array.from(new Set((Array.isArray(app_id) ? app_id : [app_id]).map(String).filter(Boolean)));
+  const dist: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+  if (!aliases.length) return dist;
   const result = await env.DB.prepare(`
     SELECT rating, COUNT(*) AS total
     FROM star_votes
-    WHERE app_id = ?
+    WHERE rating BETWEEN 1 AND 5
+      AND app_id IN (${aliases.map(() => '?').join(',')})
     GROUP BY rating
-  `).bind(app_id).all();
-  const dist: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+  `).bind(...aliases).all().catch(() => ({ results: [] }));
   for (const row of (result.results || []) as any[]) {
     const key = String(Math.round(Number(row.rating) || 0));
     if (key in dist) dist[key] = Number(row.total || 0);
@@ -323,37 +334,62 @@ export async function deleteReport(env: Env, reportId: string): Promise<boolean>
   return Number(result?.meta?.changes || 0) > 0;
 }
 
-/** Delete a review (star_votes row) and every row that references it:
- *  review_likes and review_reports. Also recomputes the parent app's rating
- *  aggregates, since a star_votes row carries both the comment and its vote.
- *  All four writes are executed in one D1 batch (a single transaction). */
-export async function deleteReview(env: Env, reviewId: string): Promise<{ deleted: boolean; likes: number; reports: number }> {
-  const review: any = await env.DB.prepare('SELECT id, app_id FROM star_votes WHERE id = ?').bind(reviewId).first();
-  if (!review) return { deleted: false, likes: 0, reports: 0 };
+/** Delete a review (star_votes row) and every row that references it, then
+ *  AUTHORITATIVELY recompute the parent app's rating from the remaining votes.
+ *
+ *  Two deliberate changes (2026-11-08):
+ *  1. The app is resolved by id OR slug OR through review_reports, so legacy
+ *     rows whose app_id is a slug / an id of a re-created app still update the
+ *     correct `apps` row. Previously the UPDATE could match zero rows and the
+ *     average stayed frozen while the comment disappeared.
+ *  2. Deletion is its own transaction; recomputation is a separate, guarded
+ *     step. A problem with `apps` columns or a missing likes/reports table can
+ *     no longer leave the comment undeleted.
+ */
+export async function deleteReview(env: Env, reviewId: string): Promise<{
+  deleted: boolean; likes: number; reports: number;
+  app_id: string | null; rating: number | null; rating_count: number | null;
+  reviews_count: number | null; repaired: boolean;
+}> {
+  await ensureReviewTables(env);
+  const db: any = env.DB;
+  const review: any = await db.prepare('SELECT id, app_id FROM star_votes WHERE id = ?').bind(reviewId).first();
+  if (!review) {
+    return { deleted: false, likes: 0, reports: 0, app_id: null,
+      rating: null, rating_count: null, reviews_count: null, repaired: false };
+  }
 
-  // Count dependent rows and compute the app's aggregates AFTER the deletion,
-  // i.e. over the remaining votes of that app.
-  const [likesRow, reportsRow, aggRow]: any[] = await Promise.all([
-    env.DB.prepare('SELECT COUNT(*) AS n FROM review_likes WHERE review_id = ?').bind(reviewId).first(),
-    env.DB.prepare('SELECT COUNT(*) AS n FROM review_reports WHERE review_id = ?').bind(reviewId).first(),
-    env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(rating), 0) AS s FROM star_votes WHERE app_id = ? AND id <> ?')
-      .bind(review.app_id, reviewId).first(),
+  // Resolve BEFORE deleting reports: they are our only map from a legacy
+  // app_id back to the current app slug.
+  const app = await resolveRatingsApp(env, String(review.app_id || ''), reviewId);
+  const aliases = app ? await appAliases(env, app) : [String(review.app_id || '')];
+  const [likesRow, reportsRow]: any[] = await Promise.all([
+    db.prepare('SELECT COUNT(*) AS n FROM review_likes WHERE review_id = ?').bind(reviewId).first().catch(() => null),
+    db.prepare('SELECT COUNT(*) AS n FROM review_reports WHERE review_id = ?').bind(reviewId).first().catch(() => null),
   ]);
   const likes = Number(likesRow?.n || 0);
   const reports = Number(reportsRow?.n || 0);
-  const count = Number(aggRow?.n || 0);
-  const sum = Number(aggRow?.s || 0);
-  const rating = count > 0 ? Math.round((sum / count) * 10) / 10 : 0;
 
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM review_likes WHERE review_id = ?').bind(reviewId),
-    env.DB.prepare('DELETE FROM review_reports WHERE review_id = ?').bind(reviewId),
-    env.DB.prepare('DELETE FROM star_votes WHERE id = ?').bind(reviewId),
-    env.DB.prepare('UPDATE apps SET rating = ?, rating_count = ?, rating_sum = ?, stars = ? WHERE id = ?')
-      .bind(rating, count, sum, count, review.app_id),
+  // One atomic cascade. Nothing here depends on the apps table.
+  await db.batch([
+    db.prepare('DELETE FROM review_likes WHERE review_id = ?').bind(reviewId),
+    db.prepare('DELETE FROM review_reports WHERE review_id = ?').bind(reviewId),
+    db.prepare('DELETE FROM star_votes WHERE id = ?').bind(reviewId),
   ]);
 
-  return { deleted: true, likes, reports };
+  let snap: any = null;
+  if (app) {
+    try { snap = await recomputeAppRating(env, app, aliases); }
+    catch (e) { console.error('[ratings] recompute after delete failed:', (e as any)?.message || e); }
+  }
+  return {
+    deleted: true, likes, reports,
+    app_id: app?.id || null,
+    rating: snap ? snap.rating : null,
+    rating_count: snap ? snap.count : null,
+    reviews_count: snap ? snap.reviews_count : null,
+    repaired: !!snap,
+  };
 }
 
 /* =========================================================================

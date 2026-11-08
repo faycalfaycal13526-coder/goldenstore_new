@@ -1042,6 +1042,16 @@
     'معرفات حقيقية من سجل الأجهزة والتقييمات والدعم — بحث وترقيم صفحات، بلا بيانات مُخمّنة.': { en: 'Real ids from devices, reviews and support — searchable and paginated, with no estimated data.', fr: 'Identifiants réels des appareils, avis et support — recherche et pagination, sans données estimées.', es: 'Identificadores reales de dispositivos, reseñas y soporte — con búsqueda y paginación, sin datos estimados.' },
     'دليل المستخدمين': { en: 'User directory', fr: 'Annuaire des utilisateurs', es: 'Directorio de usuarios' },
     'مستخدم': { en: 'user', fr: 'utilisateur', es: 'usuario' },
+
+    // ---- Authoritative rating recomputation (2026-11-08) ----
+    'إعادة احتساب التقييمات': { en: 'Recompute ratings', fr: 'Recalculer les notes', es: 'Recalcular valoraciones' },
+    'إعادة احتساب متوسطات التقييم من سجل التقييمات الفعلي لإزالة أثر التعليقات المحذوفة.': { en: 'Rebuild rating averages from the real vote log to remove the effect of deleted comments.', fr: 'Reconstruire les moyennes depuis le journal réel des votes pour effacer les commentaires supprimés.', es: 'Reconstruir los promedios desde el registro real de votos para eliminar el efecto de comentarios borrados.' },
+    'تطبيق يحتاج تصحيحاً': { en: 'apps need repair', fr: 'applications à corriger', es: 'aplicaciones por corregir' },
+    'الاحتساب مطابق للسجل': { en: 'Averages match the vote log', fr: 'Moyennes conformes au journal', es: 'Promedios acordes al registro' },
+    'تم تصحيح': { en: 'Repaired', fr: 'Corrigé', es: 'Corregidas' },
+    'تعذّر إعادة الاحتساب': { en: 'Could not recompute ratings', fr: 'Recalcul impossible', es: 'No se pudo recalcular' },
+    'التقييم الآن': { en: 'Rating now', fr: 'Note actuelle', es: 'Valoración actual' },
+    'لا تقييمات متبقية': { en: 'No ratings left', fr: 'Aucune note restante', es: 'No quedan valoraciones' },
   };
 
   // Number/size unit labels per language.

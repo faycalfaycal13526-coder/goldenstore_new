@@ -18,6 +18,59 @@
 
   var _attemptedUid = null;   // uid we already ran registration for (per page)
   var _foregroundHooked = false; // onMessage listener is attached only once
+  var _lastToken = null;      // old FCM token, unregistered when it rotates
+
+  // A stable id for THIS physical device / browser profile. The server keeps
+  // exactly ONE active token per installation, so FCM token rotation no longer
+  // leaves three stale rows that each receive their own notification.
+  function gsInstallationId() {
+    try {
+      var v = localStorage.getItem('gs_device_id');
+      if (v) return v;
+      v = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+      localStorage.setItem('gs_device_id', v);
+      return v;
+    } catch (e) { return ''; }
+  }
+
+  // Client-side display dedupe: a foreground tab and the service worker can
+  // both observe the same FCM message. Only ONE of them may display it.
+  var SHOWN_KEY = 'gs_notif_shown_v1';
+  function shownIds() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(SHOWN_KEY) || '{}');
+      var cutoff = Date.now() - 24 * 3600 * 1000;
+      var out = {};
+      Object.keys(raw || {}).forEach(function (k) { if (raw[k] > cutoff) out[k] = raw[k]; });
+      return out;
+    } catch (e) { return {}; }
+  }
+  function claimShown(id) {
+    if (!id) return true;                 // unknown id: let `tag` handle it
+    try {
+      var ids = shownIds();
+      if (ids[id]) return false;          // already displayed → skip
+      ids[id] = Date.now();
+      localStorage.setItem(SHOWN_KEY, JSON.stringify(ids));
+      return true;
+    } catch (e) { return true; }
+  }
+  function reportReceipt(id, event) {
+    if (!id) return;
+    try {
+      fetch('/api/notifications/receipt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: id, channel: 'web', event: event }),
+        keepalive: true,
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  if (typeof window !== 'undefined') {
+    window.GSNotify = window.GSNotify || {};
+    window.GSNotify.installationId = gsInstallationId;
+    window.GSNotify.claimShown = claimShown;
+    window.GSNotify.report = reportReceipt;
+  }
 
   // ---------- runtime detection ----------
 
@@ -127,13 +180,27 @@
     // token expiry, clearing data). Re-register the new one immediately.
     try {
       if (typeof messaging.onTokenRefresh === 'function') {
-        messaging.onTokenRefresh(function () { registerWebPush(user); });
+        messaging.onTokenRefresh(function () {
+          if (_lastToken) {
+            try {
+              fetch('/api/notifications/unregister-token', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: _lastToken }), keepalive: true,
+              }).catch(function () {});
+            } catch (e) {}
+          }
+          _attemptedUid = null;
+          registerWebPush(user).catch(function () {});
+        });
       }
     } catch (e) {}
     messaging.onMessage(function (payload) {
       try {
         var data = (payload && payload.data) || {};
         var note = (payload && payload.notification) || {};
+        var nid = String(data.notification_id || '');
+        if (!nid && payload && payload.notification) return; // SDK auto-displayed it
+        if (!claimShown(nid)) return;                        // duplicate → skip
         var title = String(data.title || note.title || 'Golden Store');
         var body = String(data.body || note.body || '');
         var slug = String(data.app_slug || '');
@@ -147,7 +214,8 @@
               badge: LOGO_URL,
               dir: 'rtl',
               lang: 'ar',
-              tag: String(data.notification_id || 'goldenstore-notification'),
+              tag: nid || 'goldenstore-notification',
+              renotify: false,
               data: {
                 type: String(data.type || ''),
                 app_slug: slug,
@@ -155,7 +223,7 @@
                 click_url: String(data.click_url || ''),
                 url: String(data.click_url || '') || (slug ? '/app?slug=' + encodeURIComponent(slug) : '/'),
               },
-            });
+            }).then(function () { reportReceipt(nid, 'displayed'); });
           })
           .catch(function () {});
       } catch (e) {}
@@ -194,6 +262,7 @@
       serviceWorkerRegistration: registration,
     });
     if (!token) return;
+    _lastToken = token;
 
     hookForegroundMessages(messaging, user);
 
@@ -208,6 +277,7 @@
       },
       body: JSON.stringify({
         token: token,
+        installation_id: gsInstallationId(),
         platform: 'web',
         permission: 'granted',
         notifications_enabled: true,
@@ -222,8 +292,11 @@
   // ---------- entry point (bound to auth state) ----------
 
   function start() {
-    // Inside the Capacitor app, native push handles notifications — registering
-    // a web token there would conflict with the Capacitor Push plugin.
+    // Inside the Capacitor app the NATIVE FCM token is the single delivery
+    // channel. The APK registers it through window.GSNotify.registerNativeToken
+    // (see public/js/notification-hub.js + NATIVE_INTEGRATION.md), and the
+    // in-app notification hub is the always-on fallback. Registering a second
+    // Web Push token here would give the same phone two OS notifications.
     if (isCapacitorApp()) return;
     if (!isBrowserWithPushSupport()) return;
     if (!window.GAuth || typeof window.GAuth.onAuthChange !== 'function') return;

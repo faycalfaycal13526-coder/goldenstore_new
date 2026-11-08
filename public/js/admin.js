@@ -1573,6 +1573,19 @@
       const testBtn = el('button', { class: 'btn btn-secondary', type: 'button' }, ico('bell'), 'إشعار تجريبي');
       const syncBtn = el('button', { class: 'btn btn-secondary', type: 'button' }, ico('refresh'), 'مزامنة الاشتراكات');
       const pushInfo = el('div', { class: 'push-info', style: { fontSize: '13px', marginTop: '8px', lineHeight: '1.6' } });
+      // ONE screen for the whole unified system: normal + advanced features.
+      const segmentSelect = el('select', { class: 'input', 'aria-label': 'الجمهور المستهدف' },
+        el('option', { value: 'all' }, 'الجميع (متصفح + تطبيق)'),
+        el('option', { value: 'platform:android' }, 'تطبيق أندرويد فقط'),
+        el('option', { value: 'platform:web' }, 'المتصفح فقط'),
+        el('option', { value: 'active' }, 'النشطون آخر 7 أيام'),
+        el('option', { value: 'uid' }, 'مستخدم محدد (UID)'),
+      );
+      const segmentValue = el('input', { class: 'input', type: 'text', placeholder: 'UID (عند اختيار مستخدم محدد)', 'aria-label': 'UID' });
+      const imageInput = el('input', { class: 'input', type: 'url', placeholder: 'رابط صورة (اختياري)', 'aria-label': 'رابط صورة' });
+      const clickInput = el('input', { class: 'input', type: 'text', placeholder: 'رابط عند الضغط، مثلاً /app?slug=game', 'aria-label': 'رابط الضغط' });
+      const scheduleInput = el('input', { class: 'input', type: 'datetime-local', 'aria-label': 'جدولة الإرسال' });
+      const unifiedInfo = el('div', { class: 'push-info', style: { fontSize: '12px', marginTop: '6px', opacity: '.85', lineHeight: '1.7' } });
       const listWrap = el('div', { class: 'panel' });
       const list = el('div', { class: 'notif-list' });
 
@@ -1677,6 +1690,21 @@
           }
           pushInfo.textContent = txt;
         } catch (e) {}
+        try {
+          const u = await api('/api/admin/push/unified-status');
+          const d = (u && u.unified) || {};
+          const ch = d.channels || {};
+          unifiedInfo.textContent = 'النظام الموحّد ✓ • '
+            + `أجهزة: ${d.devices_total || 0} (مؤهّلة ${d.devices_eligible || 0}) • `
+            + `تطبيق: ${(ch.native && ch.native.eligible) || 0} • `
+            + `متصفح: ${(ch.web && ch.web.eligible) || 0} • `
+            + `تكرارات ممنوعة: ${d.installations_tracked || 0} تثبيت • `
+            + `سجل التسليم: ${JSON.stringify(d.delivery || {})} • `
+            + `وظائف قيد الانتظار: ${d.pending_jobs || 0}`
+            + ' — كل إشعار يُرسل مرة واحدة لكل جهاز عبر محرك واحد.';
+        } catch (e) {
+          unifiedInfo.textContent = 'النظام الموحّد: يتعذر قراءة الحالة الآن.';
+        }
       }
 
       testBtn.onclick = async () => {
@@ -1715,14 +1743,25 @@
         if (!title) { toast('أدخل عنوان الإشعار', 'error'); return; }
         publishBtn.disabled = true;
         try {
+          const raw = String(segmentSelect.value || 'all');
+          const [mode, platform] = raw.split(':');
+          const segment = { mode: mode === 'platform' ? 'platform' : mode };
+          if (platform) segment.platform = platform;
+          if (mode === 'uid') segment.uid = segmentValue.value.trim();
           const res = await api('/api/admin/notifications', {
             method: 'POST',
-            body: { title, body: bodyText },
+            body: {
+              title, body: bodyText,
+              segment,
+              image_url: imageInput.value.trim(),
+              click_url: clickInput.value.trim(),
+              scheduled_at: scheduleInput.value || undefined,
+            },
           });
           titleInput.value = '';
           bodyInput.value = '';
           showPush(res && res.push);
-          toast('تم نشر الإشعار', 'success');
+          toast(res.scheduled ? 'تمت جدولة الإشعار عبر النظام الموحّد' : 'تم نشر الإشعار عبر النظام الموحّد', 'success');
           await load();
         } catch (e) {
           toast(e.message || 'تعذر النشر', 'error');
@@ -1737,7 +1776,7 @@
       );
       body.append(
         el('div', { class: 'panel' },
-          el('div', { class: 'panel-head' }, ico('bell'), 'نشر إشعار جديد'),
+          el('div', { class: 'panel-head' }, ico('bell'), 'مركز الإشعارات الموحّد'),
           el('div', { class: 'form' },
             el('div', { class: 'field' },
               el('label', null, 'عنوان الإشعار'),
@@ -1747,8 +1786,29 @@
               el('label', null, 'النص'),
               bodyInput,
             ),
+            el('div', { class: 'field' },
+              el('label', null, 'الجمهور (النظام العادي + المتقدم في محرك واحد)'),
+              segmentSelect,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, 'معرّف المستخدم (للاستهداف الفردي)'),
+              segmentValue,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, 'صورة الإشعار (اختياري)'),
+              imageInput,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, 'الرابط عند الضغط (اختياري)'),
+              clickInput,
+            ),
+            el('div', { class: 'field' },
+              el('label', null, 'جدولة الإرسال (اتركه فارغاً للإرسال الفوري)'),
+              scheduleInput,
+            ),
             el('div', { class: 'btn-row', style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, publishBtn, testBtn, syncBtn),
             pushInfo,
+            unifiedInfo,
           ),
         ),
         listWrap,

@@ -53,21 +53,51 @@ function notificationTargetUrl(data) {
 messaging.onBackgroundMessage(function (payload) {
   var data = (payload && payload.data) || {};
   var title = String(data.title || 'Golden Store');
+  var nid = String(data.notification_id || '');
+  // One OS notification per published notification, even if an upstream
+  // retry delivers the same FCM message twice. `tag` also makes the OS
+  // REPLACE instead of stacking; getNotifications() closes the race where
+  // two messages arrive in the same event loop.
+  var tag = nid || 'goldenstore-notification';
   var options = {
     body: String(data.body || ''),
     icon: String(data.image || data.store_logo || FALLBACK_ICON),
     badge: FALLBACK_ICON,
     dir: 'rtl',
     lang: 'ar',
-    tag: String(data.notification_id || 'goldenstore-notification'),
+    tag: tag,
+    renotify: false,
     data: {
       type: String(data.type || ''),
       app_slug: String(data.app_slug || ''),
-      notification_id: String(data.notification_id || ''),
+      notification_id: nid,
       url: notificationTargetUrl(data),
     },
   };
-  return self.registration.showNotification(title, options);
+
+  function alreadyShown() {
+    try {
+      if (!self.registration.getNotifications) return Promise.resolve(false);
+      return self.registration.getNotifications({ tag: tag })
+        .then(function (list) { return !!(list && list.length); })
+        .catch(function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
+  }
+
+  return alreadyShown().then(function (shown) {
+    if (shown) return undefined;           // duplicate: do NOT display again
+    return self.registration.showNotification(title, options).then(function () {
+      if (!nid) return;
+      try {
+        fetch(SITE_ORIGIN + '/api/notifications/receipt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notification_id: nid, channel: 'web', event: 'displayed' }),
+          keepalive: true,
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  });
 });
 
 // Click handling: focus an already-open store tab (navigating it to the
@@ -80,6 +110,14 @@ self.addEventListener('notificationclick', function (event) {
   // Advanced push: record the click for the analytics dashboard.
   var notificationId = String(data.notification_id || '');
   if (notificationId) {
+    try {
+      event.waitUntil(fetch(SITE_ORIGIN + '/api/notifications/receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: notificationId, channel: 'web', event: 'clicked' }),
+        keepalive: true,
+      }).catch(function () {}));
+    } catch (e) {}
     try {
       event.waitUntil(fetch(SITE_ORIGIN + '/api/notifications/click', {
         method: 'POST',

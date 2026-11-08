@@ -1070,6 +1070,7 @@ export type FcmEntryPayload = {
 
 export async function sendFcmToEntries(
   env: Env, entries: FcmEntry[], payload: FcmEntryPayload,
+  meta: { notification_id?: string } = {},
 ): Promise<{ success: number; failure: number; invalid: string[];
   errors: string[]; error_counts: Record<string, number> }> {
   const result = { success: 0, failure: 0, invalid: [] as string[],
@@ -1078,15 +1079,36 @@ export async function sendFcmToEntries(
   const credentials = getCredentials(env);
   const accessToken = await getAccessToken(env, FCM_SCOPE);
   const endpoint = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}/messages:send`;
+  // A stable collapse key makes FCM replace a duplicate instead of stacking a
+  // second OS notification, even if an upstream retry sends the same message
+  // twice. Web Push `Topic` is limited to 32 ASCII characters.
+  const nid = String(meta.notification_id || payload.data?.notification_id || '');
+  const collapseKey = nid.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const webTopic = collapseKey.slice(0, 32);
 
   await mapWithConcurrency(entries, 20, async (entry) => {
     const message: Record<string, unknown> = { token: entry.token, data: payload.data };
     if (entry.channel === 'native') {
       message.notification = payload.notification;
-      message.android = payload.android;
+      const baseAndroid = (payload.android || {}) as Record<string, any>;
+      message.android = {
+        ...baseAndroid,
+        ...(collapseKey ? { collapse_key: collapseKey } : {}),
+        notification: {
+          ...(baseAndroid.notification || {}),
+          ...(collapseKey ? { tag: collapseKey } : {}),
+        },
+      };
     } else {
       // Data-only: firebase-messaging-sw.js renders it (icon, RTL, click URL).
-      message.webpush = { headers: { TTL: String(WEB_PUSH_TTL_SECONDS), Urgency: 'high' } };
+      // It NEVER sends a `notification` block to Web Push, so Chrome cannot
+      // auto-display a second notification on top of the SW-rendered one.
+      message.webpush = {
+        headers: {
+          TTL: String(WEB_PUSH_TTL_SECONDS), Urgency: 'high',
+          ...(webTopic ? { Topic: webTopic } : {}),
+        },
+      };
     }
     try {
       const response = await fetch(endpoint, {

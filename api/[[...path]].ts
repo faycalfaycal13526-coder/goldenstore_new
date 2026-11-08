@@ -5,6 +5,8 @@ import {
   broadcastPush, sendDirectPush, buildPushPayload, registerPushToken, setPushPreference,
   unregisterPushToken, ensurePushSchema, processPushJob, syncTopicSubscriptions,
   pushTokenStats, pushDiagnostics, listPushLogs, listPushRegistrations,
+  deliverNotification, notificationDiagnostics, recordPushReceipt,
+  drainDeliveryJobs, processDeliveryJob,
 } from '../lib/push.js';
 import {
   sendAdvancedPush, processAdvancedJob, schedulePush, listScheduledPushes,
@@ -382,9 +384,8 @@ async function addNotification(env: Env, data: any) {
     push = { skipped: 'quiet_hours', targeted: 0, success: 0, failure: 0 };
   } else {
     try {
-      push = data.segment && data.segment.mode && data.segment.mode !== 'all'
-        ? await sendAdvancedPush(env, rich, data.segment)
-        : await broadcastPush(env, rich);
+      // NORMAL + ADVANCED + AUTOMATED + SCHEDULED → the SAME unified engine.
+      push = await deliverNotification(env, rich, data.segment || { mode: 'all' });
     } catch (error: any) {
       console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
       push = { error: 'push_failed', message: String(error?.message || error), targeted: 0, success: 0, failure: 0 };
@@ -602,6 +603,8 @@ app.post('/notifications/register-token', async (c) => {
   // a separate field used only when building the broadcast audience.
   const res = await registerPushToken(c.env, {
     token, uid: user.uid, platform: String(body.platform || 'android'),
+    channel: 'native',
+    installation_id: String(body.installation_id || ''),
     permission: String(body.permission || 'granted'),
     enabled: body.notifications_enabled !== false,
   });
@@ -618,12 +621,51 @@ app.post('/notifications/register-web', async (c) => {
   if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
   // D1 is the single source of truth: sendWebPush() reads this exact table.
   const res = await registerPushToken(c.env, {
-    token, uid: user.uid, web: true,
+    token, uid: user.uid, web: true, channel: 'web',
+    installation_id: String(body.installation_id || ''),
     permission: String(body.permission || 'granted'),
     enabled: body.notifications_enabled !== false,
     userAgent: String(c.req.header('user-agent') || ''),
   });
   return c.json(res);
+});
+
+// Unified device registration. The APK calls this with channel:'native'
+// (real FCM device token); the WebView calls it with channel:'web'. A stable
+// installation_id lets the server keep exactly ONE active token per device.
+app.post('/notifications/register-device', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'register-device', 30, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const user = await requireFirebaseUser(c);
+  if (!user) return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  const token = String(body.token || '').trim();
+  if (!token || token.length > 4096) return c.json({ error: 'invalid_token' }, 400);
+  const channel = String(body.channel || 'native') === 'web' ? 'web' : 'native';
+  const res = await registerPushToken(c.env, {
+    token, uid: user.uid, channel,
+    web: channel === 'web',
+    installation_id: String(body.installation_id || ''),
+    platform: String(body.platform || (channel === 'web' ? 'web' : 'android')),
+    permission: String(body.permission || 'granted'),
+    enabled: body.notifications_enabled !== false,
+    userAgent: String(c.req.header('user-agent') || ''),
+  });
+  return c.json({ ok: true, engine: 'unified', ...res });
+});
+
+// Client-side display receipt: lets support prove whether a notification was
+// actually rendered on the device, without exposing tokens or user data.
+app.post('/notifications/receipt', async (c) => {
+  const ip = getClientIp(c);
+  if (!rateLimit(ip, 'push-receipt', 60, 60)) return c.json({ error: 'rate_limited' }, 429);
+  const body = await c.req.json().catch(() => ({}));
+  const id = String(body.notification_id || '').slice(0, 120);
+  if (!id) return c.json({ error: 'invalid' }, 400);
+  const user = await requireFirebaseUser(c).catch(() => null);
+  await recordPushReceipt(c.env, id, user?.uid || '', String(body.channel || ''),
+    String(body.event || 'displayed'));
+  return c.json({ ok: true });
 });
 
 app.post('/notifications/unregister-token', async (c) => {
@@ -651,11 +693,15 @@ app.post('/notifications/preference', async (c) => {
 
 app.post('/notifications/self-test', async (c) => {
   const user = await requireFirebaseUser(c); if (!user) return c.json({ error: 'unauthorized' }, 401);
-  const snaps = await c.env.DB.prepare('SELECT token FROM fcm_tokens WHERE uid = ?').bind(user.uid).all();
-  const tokens = (snaps.results || []).map(r => r.token as string).filter(Boolean);
-  if (!tokens.length) return c.json({ error: 'no_registered_devices' }, 400);
-  const note = { title: 'إشعار تجريبي', body: 'يعمل ✓', type: 'announcement', id: 'test' };
-  const push = await sendDirectPush(c.env, tokens, buildPushPayload(c.env, note));
+  // One uid → one unified delivery. Every device of that user receives at most
+  // ONE message, and never via both topic and direct paths.
+  const note = {
+    id: 'selftest-' + randomId(), title: 'إشعار تجريبي', body: 'يعمل ✓',
+    type: 'announcement',
+  };
+  const push = await deliverNotification(c.env, note,
+    { mode: 'uid', uid: user.uid }, { force: true });
+  if (!push.targeted) return c.json({ error: 'no_registered_devices' }, 400);
   return c.json({ ok: true, push });
 });
 
@@ -1781,6 +1827,21 @@ app.get('/admin/notifications', async (c) => c.json({ notifications: (await list
 app.post('/admin/notifications', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (!body.title) return c.json({ error: 'title_required' }, 400);
+  // ONE screen, ONE engine: segmentation / image / deep link / scheduling are
+  // all accepted here. A scheduled_at value routes to the Cron scheduler;
+  // everything else is delivered immediately by deliverNotification().
+  if (body.scheduled_at) {
+    const scheduledAt = Math.floor(new Date(body.scheduled_at).getTime() / 1000);
+    if (!Number.isFinite(scheduledAt) || scheduledAt <= 0) {
+      return c.json({ error: 'invalid_scheduled_at' }, 400);
+    }
+    const row = await schedulePush(c.env, {
+      title: String(body.title).slice(0, 200), body: sanitizeText(body.body, 1000),
+      image_url: body.image_url, click_url: body.click_url,
+      segment: body.segment || { mode: 'all' }, scheduled_at: body.scheduled_at,
+    });
+    return c.json({ ok: true, scheduled: true, ...row, push: { scheduled: row.id } });
+  }
   const res = await addNotification(c.env, { ...body, type: 'announcement', created_at: nowSec() });
   return c.json({ ok: true, id: res.id, push: res.push });
 });
@@ -1889,7 +1950,12 @@ app.get('/admin/push/status', async (c) => {
 app.post('/admin/push/test', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   try {
-    return c.json({ ok: true, push: await broadcastPush(c.env, { title: body.title || 'Test', body: body.body || 'Test', type: 'announcement', id: 'test' }) });
+    // A unique id per click keeps the exactly-once ledger from suppressing a
+    // legitimately repeated test, while every device still gets ONE message.
+    return c.json({ ok: true, push: await deliverNotification(c.env, {
+      title: body.title || 'Test', body: body.body || 'Test', type: 'announcement',
+      id: 'admintest-' + randomId(),
+    }, { mode: 'all' }, { force: true }) });
   } catch (error: any) {
     console.error('[fcm] test broadcast failed:', error?.message || error);
     return c.json({ ok: false, error: 'push_failed', message: String(error?.message || error) });
@@ -1924,13 +1990,19 @@ app.get('/admin/push/registrations', async (c) => {
   return c.json({ registrations: await listPushRegistrations(c.env, Number(c.req.query('limit')) || 30) });
 });
 
+// Unified status: one device per row, exactly-once ledger counts, channels.
+app.get('/admin/push/unified-status', async (c) =>
+  c.json({ ok: true, unified: await notificationDiagnostics(c.env) }));
+
 // Drain queued direct sends when a broadcast had more than one invocation's
-// worth of unsubscribed tokens. The admin UI calls this until pending === 0.
+// worth of devices. Handles BOTH legacy and unified jobs; an omitted job_id
+// drains all pending unified jobs (also done automatically by Cron).
 app.post('/admin/push/flush', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const jobId = String(body.job_id || '');
-  if (!jobId) return c.json({ error: 'job_id_required' }, 400);
-  return c.json({ ok: true, ...(await processPushJob(c.env, jobId, Number(body.limit) || 300)) });
+  if (!jobId) return c.json({ ok: true, ...(await drainDeliveryJobs(c.env, 12)) });
+  const chunk = await processDeliveryJob(c.env, jobId, Number(body.limit) || 300);
+  return c.json({ ok: true, ...chunk });
 });
 
 // Structured delivery history for troubleshooting failed notifications.
@@ -2299,9 +2371,11 @@ export async function scheduled(_controller: any, env: Env, ctx: any) {
   try {
     if (ctx && typeof ctx.waitUntil === 'function') {
       ctx.waitUntil(processScheduledPushes(env));
+      ctx.waitUntil(drainDeliveryJobs(env));
       ctx.waitUntil(publishDueApps(env));
     } else {
       await processScheduledPushes(env);
+      await drainDeliveryJobs(env);
       await publishDueApps(env);
     }
   } catch (error: any) {

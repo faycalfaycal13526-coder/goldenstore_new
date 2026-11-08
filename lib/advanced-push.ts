@@ -10,6 +10,7 @@ import { nowSec, randomId, sanitizeText } from './utils.js';
 import {
   ensurePushSchema, buildPushPayload, pushTokenStats, broadcastPush,
   recordPushLog, deleteDeadTokens, FCM_MAX_DIRECT_PER_SEND,
+  deliverNotification, resolveUnifiedAudience, processDeliveryJob,
 } from './push.js';
 import { sendFcmToEntries, type FcmEntry } from './firebase.js';
 import { firebaseUsage, cloudflareUsage, ensureUsageSchema } from './usage.js';
@@ -111,13 +112,15 @@ function safeUrl(raw: unknown): string {
     plus Android's native big-picture field. The service worker / mobile app
     read data.image and data.click_url (see ADVANCED_PUSH_PAYLOAD.md). */
 export function buildAdvancedPayload(env: Env, n: any) {
+  // SINGLE payload builder: an "advanced" send and a "normal" send now produce
+  // byte-identical FCM messages for the same notification.
+  const image = safeUrl(n.image_url || n.image);
+  const click = safeUrl(n.click_url || (n.app_slug ? `/app?slug=${encodeURIComponent(n.app_slug)}` : ''));
   const base = buildPushPayload(env, {
     id: n.id || randomId(), title: n.title, body: n.body,
     type: n.type || 'announcement', app_slug: n.app_slug || '',
-    image: n.image_url || n.image || '', data: n.data,
+    image_url: image, click_url: click, data: n.data,
   });
-  const image = safeUrl(n.image_url || n.image);
-  const click = safeUrl(n.click_url || (n.app_slug ? `/app?slug=${encodeURIComponent(n.app_slug)}` : ''));
   const data: Record<string, string> = { ...base.data };
   if (image) data.image = image;
   if (click) data.click_url = click;
@@ -135,94 +138,32 @@ export function buildAdvancedPayload(env: Env, n: any) {
 export async function resolveAudience(env: Env, segment: Segment): Promise<{
   entries: FcmEntry[]; native_count: number; web_count: number; targeted: number;
 }> {
-  await ensureAdvancedSchema(env);
-  const db: any = env.DB;
   const mode: SegmentMode = (['all', 'uid', 'token', 'platform', 'app', 'active'] as SegmentMode[])
     .includes(segment.mode) ? segment.mode : 'all';
-  let nWhere = ELIGIBLE, wWhere = ELIGIBLE;
-  const nArgs: any[] = [], wArgs: any[] = [];
-  const uid = sanitizeText(segment.uid, 128);
-  const token = sanitizeText(segment.token, 4096);
-  const platform = sanitizeText(segment.platform, 32).toLowerCase();
-  const appSlug = sanitizeText(segment.app_slug, 120);
-  const days = Math.max(1, Math.min(Number(segment.days) || 7, 90));
-  const since = nowSec() - days * 86400;
-
-  if (mode === 'uid') {
-    nWhere += ' AND uid = ?'; nArgs.push(uid);
-    wWhere += ' AND uid = ?'; wArgs.push(uid);
-  } else if (mode === 'token') {
-    nWhere += ' AND token = ?'; nArgs.push(token);
-    wWhere += ' AND token = ?'; wArgs.push(token);
-  } else if (mode === 'platform') {
-    if (platform === 'web') {
-      nWhere += ' AND 1 = 0';
-    } else {
-      nWhere += ' AND LOWER(COALESCE(platform, \'android\')) = ?'; nArgs.push(platform || 'android');
-      wWhere += ' AND 1 = 0';
-    }
-  } else if (mode === 'app') {
-    const sub = 'uid IN (SELECT uid FROM app_subscriptions WHERE app_slug = ?)';
-    nWhere += ` AND ${sub}`; nArgs.push(appSlug);
-    wWhere += ` AND ${sub}`; wArgs.push(appSlug);
-  } else if (mode === 'active') {
-    nWhere += ` AND ${ACTIVE_NATIVE}`; nArgs.push(since);
-    wWhere += ` AND ${ACTIVE_WEB}`; wArgs.push(since);
-  }
-
-  const native: any = await db.prepare(
-    `SELECT token FROM fcm_tokens WHERE ${nWhere} ORDER BY id`,
-  ).bind(...nArgs).all().catch(() => ({ results: [] }));
-  const web: any = await db.prepare(
-    `SELECT token FROM web_tokens WHERE ${wWhere} ORDER BY uid`,
-  ).bind(...wArgs).all().catch(() => ({ results: [] }));
-
-  const seen = new Set<string>();
-  const entries: FcmEntry[] = [];
-  for (const r of (native.results || []) as any[]) {
-    const t = String(r.token || '').trim();
-    if (!t || seen.has(t)) continue;
-    seen.add(t); entries.push({ token: t, channel: 'native' });
-  }
-  for (const r of (web.results || []) as any[]) {
-    const t = String(r.token || '').trim();
-    if (!t || seen.has(t)) continue;
-    seen.add(t); entries.push({ token: t, channel: 'web' });
-  }
-  return { entries, native_count: (native.results || []).length,
-    web_count: (web.results || []).length, targeted: entries.length };
+  // The unified registry is the single source of truth. It also collapses
+  // stale rotated tokens and cross-channel duplicates (the triple-notification
+  // bug) before any audience count is reported to the admin UI.
+  const unified = await resolveUnifiedAudience(env, { ...segment, mode });
+  const entries: FcmEntry[] = unified.entries.map((e) => ({
+    token: e.token, channel: e.channel,
+  }));
+  return {
+    entries,
+    native_count: unified.native_count,
+    web_count: unified.web_count,
+    targeted: unified.targeted,
+  };
 }
 
 /* -------------------------------------------------------------------------
    Segmented delivery + queue
    ------------------------------------------------------------------------- */
 export async function processAdvancedJob(env: Env, jobId: string, limit = FCM_MAX_DIRECT_PER_SEND): Promise<any> {
-  await ensureAdvancedSchema(env);
-  const db: any = env.DB;
-  const job: any = await db.prepare('SELECT * FROM push_jobs WHERE id = ?').bind(jobId).first();
-  if (!job || String(job.kind) !== 'advanced') {
-    return { processed: 0, success: 0, failure: 0, invalid_removed: 0, pending: 0, done: true, errors: ['job_not_found'] };
-  }
-  const entries: FcmEntry[] = JSON.parse(String(job.tokens || '[]'));
-  const payload = JSON.parse(String(job.payload));
-  const cap = Math.max(1, Math.min(Number(limit) || FCM_MAX_DIRECT_PER_SEND, FCM_MAX_DIRECT_PER_SEND));
-  const offset = Number(job.cursor || 0);
-  const slice = entries.slice(offset, offset + cap);
-  const sent = await sendFcmToEntries(env, slice, payload);
-  const invalidRemoved = sent.invalid.length ? await deleteDeadTokens(env, sent.invalid) : 0;
-  const next = offset + slice.length;
-  const pending = Math.max(0, entries.length - next);
-  await db.prepare('UPDATE push_jobs SET cursor = ?, done = ?, updated_at = ? WHERE id = ?')
-    .bind(String(next), pending > 0 ? 0 : 1, nowSec(), jobId).run();
-  return {
-    processed: slice.length, success: sent.success, failure: sent.failure,
-    invalid_removed: invalidRemoved, errors: sent.errors, error_counts: sent.error_counts,
-    pending, done: pending === 0,
-  };
+  // Both engines now share ONE processor + ONE delivery ledger.
+  return processDeliveryJob(env, jobId, limit);
 }
 
 export async function sendAdvancedPush(env: Env, note: any, segment: Segment): Promise<any> {
-  const started = Date.now();
   await ensureAdvancedSchema(env);
   const db: any = env.DB;
   const id = String(note.id || randomId());
@@ -237,45 +178,19 @@ export async function sendAdvancedPush(env: Env, note: any, segment: Segment): P
       JSON.stringify({ image_url: note.image_url || '', click_url: note.click_url || '', segment }),
       nowSec()).run().catch(() => {});
 
-  // "all" reuses the topic broadcast (one request for the whole audience).
-  if (segment.mode === 'all') {
-    const r: any = await broadcastPush(env, { ...note, id, image_url: note.image_url, click_url: note.click_url });
-    return { ...r, id, segment };
-  }
-
-  const audience = await resolveAudience(env, segment);
-  const payload = buildAdvancedPayload(env, { ...note, id });
-  const result: any = {
-    targeted: audience.targeted, topic_targeted: 0, direct_targeted: 0,
-    web_targeted: audience.web_count, success: 0, failure: 0,
-    invalid_removed: 0, pending: 0, topic_sent: false,
-    errors: [], error_counts: {}, job_id: null, duration_ms: 0,
-    id, segment, native_count: audience.native_count,
+  // "all" and every segment use the SAME unified engine. There are no longer
+  // two independent delivery paths that can each reach the same device.
+  const r: any = await deliverNotification(env, {
+    ...note, id, image_url: note.image_url, click_url: note.click_url,
+  }, segment);
+  const result = {
+    ...r, id, segment,
+    native_count: r.native_count ?? 0,
+    web_count: r.web_count ?? 0,
   };
-  if (!audience.entries.length) {
-    await recordPushLog(env, id, result);
-    return result;
-  }
-
-  const jobId = randomId();
-  await db.prepare(`INSERT INTO push_jobs
-      (id, notification_id, payload, cursor, done, created_at, updated_at, kind, tokens)
-      VALUES (?, ?, ?, '0', 0, ?, ?, 'advanced', ?)`)
-    .bind(jobId, id, JSON.stringify(payload), nowSec(), nowSec(), JSON.stringify(audience.entries)).run();
-  result.job_id = jobId;
-  const chunk = await processAdvancedJob(env, jobId, FCM_MAX_DIRECT_PER_SEND);
-  result.direct_targeted = chunk.processed;
-  result.success = chunk.success;
-  result.failure = chunk.failure;
-  result.invalid_removed = chunk.invalid_removed;
-  result.pending = chunk.pending;
-  result.errors = chunk.errors;
-  result.error_counts = chunk.error_counts || {};
-  result.duration_ms = Date.now() - started;
-  await recordPushLog(env, id, result);
   console.log(JSON.stringify({ level: 'info', event: 'push_segmented',
-    notification_id: id, mode: segment.mode, targeted: result.targeted,
-    native: audience.native_count, web: audience.web_count,
+    notification_id: id, mode: segment.mode, engine: 'unified',
+    targeted: result.targeted, native: result.native_count, web: result.web_count,
     success: result.success, failure: result.failure, pending: result.pending }));
   return result;
 }

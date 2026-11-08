@@ -16,8 +16,8 @@
 import type { Env } from './env.js';
 import { nowSec, randomId, sha256Hex } from './utils.js';
 import {
-  messaging, sendWebPush, subscribeTokenToTopic, unsubscribeTokenFromTopic,
-  mapWithConcurrency,
+  messaging, sendWebPush, sendFcmToEntries,
+  subscribeTokenToTopic, unsubscribeTokenFromTopic, mapWithConcurrency,
 } from './firebase.js';
 export { mapWithConcurrency, classifyFcmError, sendWebPush } from './firebase.js';
 
@@ -93,6 +93,46 @@ const PUSH_SCHEMA = [
      duration_ms INTEGER NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL
    )`,
+  /* ---- UNIFIED NOTIFICATION SYSTEM (single device registry + exactly-once
+     delivery ledger). These tables are the ONE source of truth for every
+     channel: browser Web Push AND native Android/iOS FCM. ---- */
+  `CREATE TABLE IF NOT EXISTS push_devices (
+     token TEXT PRIMARY KEY,
+     uid TEXT NOT NULL,
+     channel TEXT NOT NULL,
+     platform TEXT NOT NULL DEFAULT 'android',
+     installation_id TEXT NOT NULL DEFAULT '',
+     permission TEXT NOT NULL DEFAULT 'granted',
+     notifications_enabled INTEGER NOT NULL DEFAULT 1,
+     topic_subscribed INTEGER NOT NULL DEFAULT 0,
+     last_seen_at INTEGER NOT NULL DEFAULT 0,
+     updated_at INTEGER NOT NULL DEFAULT 0
+   )`,
+  `CREATE TABLE IF NOT EXISTS push_delivery (
+     notification_id TEXT NOT NULL,
+     token TEXT NOT NULL,
+     channel TEXT NOT NULL,
+     status TEXT NOT NULL DEFAULT 'pending',
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (notification_id, token)
+   )`,
+  `CREATE TABLE IF NOT EXISTS push_receipts (
+     id TEXT PRIMARY KEY,
+     notification_id TEXT NOT NULL,
+     uid_masked TEXT,
+     channel TEXT,
+     event TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   )`,
+  /* Shared by the segmentation engine; created here too so a pure push.ts
+     deployment never fails on an `app` segment. */
+  `CREATE TABLE IF NOT EXISTS app_subscriptions (
+     uid TEXT NOT NULL,
+     app_slug TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (uid, app_slug)
+   )`,
 ];
 // CREATE TABLE IF NOT EXISTS cannot add a column to an existing table. Each
 // ALTER is safe to fail with "duplicate column name".
@@ -102,6 +142,12 @@ const PUSH_UPGRADES = [
   `ALTER TABLE fcm_tokens ADD COLUMN topic_subscribed INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE web_tokens ADD COLUMN permission TEXT NOT NULL DEFAULT 'granted'`,
   `ALTER TABLE web_tokens ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE fcm_tokens ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE web_tokens ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE fcm_tokens ADD COLUMN installation_id TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE web_tokens ADD COLUMN installation_id TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE push_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'legacy'`,
+  `ALTER TABLE push_jobs ADD COLUMN tokens TEXT`,
 ];
 // Indexes MUST run AFTER the upgrades: on a legacy database the tables already
 // exist without the new columns, so CREATE INDEX referencing them fails with
@@ -115,6 +161,12 @@ const PUSH_INDEXES = [
      ON push_send_log(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_push_reg_log_created
      ON push_reg_log(created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_devices_uid
+     ON push_devices(uid, channel, notifications_enabled)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_devices_install
+     ON push_devices(uid, installation_id, channel, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_delivery_note
+     ON push_delivery(notification_id, status)`,
 ];
 const pushSchemaReady = new WeakSet<object>();
 
@@ -134,6 +186,74 @@ export async function ensurePushSchema(env: Env): Promise<void> {
     }
   }
   pushSchemaReady.add(db);
+  // Migrate pre-unification rows into the single device registry once per
+  // Worker isolate. Without this, existing installations would keep being
+  // addressed by two independent engines (the source of triple notifications).
+  await backfillDevices(env).catch((e: any) =>
+    console.warn('[notify] backfill skipped:', e?.message || String(e)));
+}
+
+/* -------------------------------------------------------------------------
+   Canonical device registry
+   -------------------------------------------------------------------------
+   Before the unified engine, a single physical device could be present in
+   `fcm_tokens` (topic + direct) AND `web_tokens` (Web Push), and token
+   rotation left several stale FCM rows for the same uid. A broadcast then
+   sent that user 2–3 separate FCM messages → 2–3 OS notifications.
+
+   `push_devices` is the ONE source of truth. `backfillDevices()` copies the
+   legacy rows into it, deletes cross-channel duplicates and unsubscribes the
+   removed native rows from the FCM topic, so a device can never be reached
+   by two delivery paths again.
+   ------------------------------------------------------------------------- */
+export async function backfillDevices(env: Env): Promise<any> {
+  const db: any = env.DB;
+  const summary: any = { native: 0, web: 0, overlap_removed: 0, unsubscribed: 0 };
+
+  // A token that is in BOTH tables is a browser token registered twice.
+  // Keep the Web Push row (data-only payload) and drop the native row, because
+  // sending an Android `notification` block to a Web Push endpoint is what
+  // makes Chrome display a second, SDK-generated notification.
+  const overlap: any = await db.prepare(
+    `SELECT f.token AS token FROM fcm_tokens f
+       INNER JOIN web_tokens w ON w.token = f.token`,
+  ).all().catch(() => ({ results: [] }));
+  const overlapTokens: string[] = (overlap.results || [])
+    .map((r: any) => String(r.token || '')).filter(Boolean);
+  if (overlapTokens.length) {
+    await mapWithConcurrency(overlapTokens, 10, async (token: string) => {
+      await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
+      await db.prepare('DELETE FROM push_devices WHERE token = ? AND channel = ?')
+        .bind(token, 'native').run().catch(() => {});
+      await unsubscribeTokenFromTopic(env, token, FCM_TOPIC).catch(() => {});
+      summary.overlap_removed++;
+      summary.unsubscribed++;
+    });
+  }
+
+  const n: any = await db.prepare(`INSERT OR IGNORE INTO push_devices
+      (token, uid, channel, platform, installation_id, permission,
+       notifications_enabled, topic_subscribed, last_seen_at, updated_at)
+    SELECT token, uid, 'native', COALESCE(platform, 'android'),
+      COALESCE(installation_id, ''), COALESCE(permission, 'granted'),
+      COALESCE(notifications_enabled, 1), COALESCE(topic_subscribed, 0),
+      COALESCE(NULLIF(last_seen_at, 0), updated_at, 0), COALESCE(updated_at, 0)
+    FROM fcm_tokens WHERE token != ''`).run().catch((e: any) => {
+      console.warn('[notify] native backfill skipped:', e?.message || String(e)); return null;
+    });
+  if (n) summary.native = Number(n.meta?.changes ?? n.changes ?? 0);
+
+  const w: any = await db.prepare(`INSERT OR IGNORE INTO push_devices
+      (token, uid, channel, platform, installation_id, permission,
+       notifications_enabled, topic_subscribed, last_seen_at, updated_at)
+    SELECT token, uid, 'web', 'web', COALESCE(installation_id, ''),
+      COALESCE(permission, 'granted'), COALESCE(notifications_enabled, 1), 0,
+      COALESCE(NULLIF(last_seen_at, 0), updatedAt, 0), COALESCE(updatedAt, 0)
+    FROM web_tokens WHERE token != ''`).run().catch((e: any) => {
+      console.warn('[notify] web backfill skipped:', e?.message || String(e)); return null;
+    });
+  if (w) summary.web = Number(w.meta?.changes ?? w.changes ?? 0);
+  return summary;
 }
 
 function normalizePermission(raw: unknown): string {
@@ -148,6 +268,8 @@ export type TokenRegistration = {
   token: string;
   uid: string;
   web?: boolean;
+  channel?: 'native' | 'web';   // unified-engine alias for `web`
+  installation_id?: string;     // stable id of the physical device / browser profile
   platform?: string;
   permission?: string;
   enabled?: boolean;
@@ -156,8 +278,12 @@ export type TokenRegistration = {
 
 export async function registerPushToken(env: Env, input: TokenRegistration): Promise<any> {
   await ensurePushSchema(env);
+  // Unified callers pass `channel`; legacy callers pass `web`. Normalise once
+  // so every registration goes through the exact same dedupe path.
+  if (input.channel === 'web' && !input.web) (input as any).web = true;
   const db: any = env.DB;
   const token = String(input.token || '').trim();
+  const installationId = String(input.installation_id || '').slice(0, 120);
   const permission = normalizePermission(input.permission);
   // The token is ALWAYS stored. Consent is a SEPARATE field used only when
   // building the audience — deleting a device because the user once tapped
@@ -167,6 +293,52 @@ export async function registerPushToken(env: Env, input: TokenRegistration): Pro
 
   const id = await sha256Hex(token);
   let topicSubscribed = false;
+  const channel: 'native' | 'web' = input.web ? 'web' : 'native';
+
+  /* ---- EXACTLY ONE DEVICE = ONE ACTIVE TOKEN -----------------------------
+     Two independent registrations used to run on the same page: the Web Push
+     client (/register-web) and the native bridge (/register-token). Both rows
+     stayed in D1 forever, and FCM token rotation added even more rows for the
+     same uid. Every row got its own FCM message → 3 identical notifications.
+
+     Here we (1) remove the same token from the opposite channel and (2) keep
+     only the newest token per (uid, installation_id, channel). Deleted native
+     rows are unsubscribed from the topic so they cannot receive a topic
+     message after being removed from our registry. */
+  if (input.web) {
+    const cross: any = await db.prepare('SELECT token FROM fcm_tokens WHERE token = ?')
+      .bind(token).first().catch(() => null);
+    if (cross) {
+      await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
+      await unsubscribeTokenFromTopic(env, token, FCM_TOPIC).catch(() => {});
+    }
+    await db.prepare('DELETE FROM push_devices WHERE token = ? AND channel = ?')
+      .bind(token, 'native').run().catch(() => {});
+  } else {
+    await db.prepare('DELETE FROM web_tokens WHERE token = ?').bind(token).run().catch(() => {});
+    await db.prepare('DELETE FROM push_devices WHERE token = ? AND channel = ?')
+      .bind(token, 'web').run().catch(() => {});
+  }
+  if (installationId) {
+    // Device-level exclusivity: a phone that has BOTH a native FCM token and a
+    // WebView Web Push token must keep only the newest one, otherwise the two
+    // channels would each display an OS notification for the same message.
+    const stale: any = await db.prepare(
+      `SELECT token, channel FROM push_devices
+        WHERE uid = ? AND installation_id = ? AND token != ?`,
+    ).bind(input.uid, installationId, token).all().catch(() => ({ results: [] }));
+    for (const old of (stale.results || []) as any[]) {
+      const oldToken = String(old.token || '');
+      if (!oldToken) continue;
+      await db.prepare('DELETE FROM push_devices WHERE token = ?').bind(oldToken).run().catch(() => {});
+      if (old.channel === 'native') {
+        await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(oldToken).run().catch(() => {});
+        await unsubscribeTokenFromTopic(env, oldToken, FCM_TOPIC).catch(() => {});
+      } else {
+        await db.prepare('DELETE FROM web_tokens WHERE token = ?').bind(oldToken).run().catch(() => {});
+      }
+    }
+  }
 
   if (input.web) {
     await db.prepare(`INSERT OR REPLACE INTO web_tokens
@@ -174,6 +346,8 @@ export async function registerPushToken(env: Env, input: TokenRegistration): Pro
         VALUES (?, ?, 'web', ?, ?, ?, ?)`)
       .bind(input.uid, token, String(input.userAgent || '').slice(0, 300),
         nowSec(), permission, enabled ? 1 : 0).run();
+    await db.prepare('UPDATE web_tokens SET installation_id = ? WHERE uid = ?')
+      .bind(installationId, input.uid).run().catch(() => {});
     await db.prepare('UPDATE web_tokens SET last_seen_at = ? WHERE uid = ?')
       .bind(nowSec(), input.uid).run().catch(() => {});
   } else {
@@ -208,9 +382,19 @@ export async function registerPushToken(env: Env, input: TokenRegistration): Pro
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(id, token, input.uid, platform, permission, enabled ? 1 : 0,
         topicSubscribed ? 1 : 0, nowSec()).run();
+    await db.prepare('UPDATE fcm_tokens SET installation_id = ? WHERE id = ?')
+      .bind(installationId, id).run().catch(() => {});
     await db.prepare('UPDATE fcm_tokens SET last_seen_at = ? WHERE id = ?')
       .bind(nowSec(), id).run().catch(() => {});
   }
+
+  // Canonical registry row — the unified delivery engine reads ONLY this.
+  await db.prepare(`INSERT OR REPLACE INTO push_devices
+      (token, uid, channel, platform, installation_id, permission,
+       notifications_enabled, topic_subscribed, last_seen_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(token, input.uid, channel, platform, installationId, permission,
+      enabled ? 1 : 0, topicSubscribed ? 1 : 0, nowSec(), nowSec()).run().catch(() => {});
 
   // Structured, privacy-safe registration log: visible in `wrangler tail` and
   // via /api/admin/push/registrations. Never logs the full FCM token.
@@ -242,6 +426,9 @@ export async function setPushPreference(
 
   // CRITICAL: a browser tab reporting permission "default" must NOT disable
   // the same user's Android device. Each platform owns its own consent state.
+  await db.prepare(`UPDATE push_devices SET permission = ?, notifications_enabled = ?,
+      last_seen_at = ? WHERE uid = ? AND channel = ?`)
+    .bind(permission, enabled, nowSec(), uid, isWeb ? 'web' : 'native').run().catch(() => {});
   if (isWeb) {
     await db.prepare('UPDATE web_tokens SET permission = ?, notifications_enabled = ?, last_seen_at = ? WHERE uid = ?')
       .bind(permission, enabled, nowSec(), uid).run().catch(() => {
@@ -268,10 +455,16 @@ export async function setPushPreference(
     if (!token) return;
     if (enabled) {
       const sub = await subscribeTokenToTopic(env, token, FCM_TOPIC).catch(() => null);
-      if (sub?.ok) await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 1 WHERE token = ?').bind(token).run().catch(() => {});
+      if (sub?.ok) {
+        await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 1 WHERE token = ?').bind(token).run().catch(() => {});
+        await db.prepare("UPDATE push_devices SET topic_subscribed = 1 WHERE token = ? AND channel = 'native'")
+          .bind(token).run().catch(() => {});
+      }
     } else {
       await unsubscribeTokenFromTopic(env, token, FCM_TOPIC).catch(() => {});
       await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 0 WHERE token = ?').bind(token).run().catch(() => {});
+      await db.prepare("UPDATE push_devices SET topic_subscribed = 0 WHERE token = ? AND channel = 'native'")
+        .bind(token).run().catch(() => {});
     }
   });
   return { ok: true, platform: 'android', permission, notifications_enabled: !!enabled };
@@ -283,6 +476,7 @@ export async function unregisterPushToken(env: Env, token: string): Promise<void
   await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
   await db.prepare('DELETE FROM fcm_tokens WHERE id = ?').bind(await sha256Hex(token)).run().catch(() => {});
   await db.prepare('DELETE FROM web_tokens WHERE token = ?').bind(token).run().catch(() => {});
+  await db.prepare('DELETE FROM push_devices WHERE token = ?').bind(token).run().catch(() => {});
   await unsubscribeTokenFromTopic(env, token, FCM_TOPIC).catch(() => {});
 }
 
@@ -293,9 +487,25 @@ function storeLogoUrl(env: Env): string {
   return env.STORE_LOGO_URL || `https://${env.STORE_DOMAIN || 'goldenstore.online'}/images/logo.png`;
 }
 
+/** Only same-origin relative paths and http(s) absolute URLs are allowed in
+    a push payload — never javascript:, data: or an external open redirect. */
+export function safeUrl(raw: unknown): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value.charAt(0) === '/' && value.charAt(1) !== '/') return value.slice(0, 2000);
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+    return u.toString().slice(0, 2000);
+  } catch { return ''; }
+}
+
+/** THE single payload builder. Both the "normal" and the "advanced" engines
+    now use this exact object, so a device gets one identical message no
+    matter which admin screen published it. */
 export function buildPushPayload(env: Env, n: any) {
-  const image = String(n.image_url || n.image || '').slice(0, 2000);
-  const click = String(n.click_url || (n.app_slug ? `/app?slug=${encodeURIComponent(n.app_slug)}` : '')).slice(0, 2000);
+  const image = safeUrl(n.image_url || n.image);
+  const click = safeUrl(n.click_url || (n.app_slug ? `/app?slug=${encodeURIComponent(n.app_slug)}` : ''));
   const data: Record<string, string> = {
     title: String(n.title || ''), body: String(n.body || ''),
     type: String(n.type || 'announcement'), app_slug: String(n.app_slug || ''),
@@ -373,12 +583,16 @@ export async function deleteDeadTokens(env: Env, tokens: string[]): Promise<numb
   const db: any = env.DB;
   const unique = Array.from(new Set(tokens));
   try {
-    await db.batch(unique.map((token) =>
-      db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token)));
+    await db.batch(unique.flatMap((token) => [
+      db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token),
+      db.prepare('DELETE FROM push_devices WHERE token = ?').bind(token),
+    ]));
   } catch {
     // Some D1 shims do not implement batch(); fall back to sequential deletes.
     for (const token of unique) {
       await db.prepare('DELETE FROM fcm_tokens WHERE token = ?').bind(token).run().catch(() => {});
+      await db.prepare('DELETE FROM web_tokens WHERE token = ?').bind(token).run().catch(() => {});
+      await db.prepare('DELETE FROM push_devices WHERE token = ?').bind(token).run().catch(() => {});
     }
   }
   console.warn('[fcm] pruned dead tokens', { count: unique.length });
@@ -471,6 +685,8 @@ export async function syncTopicSubscriptions(
       const sub = await subscribeTokenToTopic(env, token, FCM_TOPIC).catch(() => null);
       if (sub?.ok) {
         await db.prepare('UPDATE fcm_tokens SET topic_subscribed = 1 WHERE id = ?').bind(row.id).run().catch(() => {});
+        await db.prepare("UPDATE push_devices SET topic_subscribed = 1 WHERE token = ? AND channel = 'native'")
+          .bind(token).run().catch(() => {});
         subscribed++;
       } else if (sub?.permanent) {
         await db.prepare('DELETE FROM fcm_tokens WHERE id = ?').bind(row.id).run().catch(() => {});
@@ -601,8 +817,407 @@ export async function listPushLogs(env: Env, limit = 20): Promise<any[]> {
 }
 function safeJson(raw: any): any { try { return JSON.parse(raw || '[]'); } catch { return []; } }
 
+/* =========================================================================
+   UNIFIED NOTIFICATION ENGINE — the ONE delivery pipeline
+   -------------------------------------------------------------------------
+   Every publisher (normal notification, advanced/segmented send, scheduled
+   push, app upload, app update, admin self-test, Cron) goes through
+   `deliverNotification()`. There is exactly ONE audience resolver, ONE
+   payload builder, ONE delivery ledger and ONE queue processor.
+
+   Guarantees:
+   * one physical device = one active token (rotation + cross-channel dedupe)
+   * one notification = at most ONE FCM message per device (push_delivery PK)
+   * Web Push is ALWAYS data-only → no SDK auto-display + SW display double
+   * native messages carry a stable collapse_key/tag → OS replaces duplicates
+   * retries / Cron / manual flush are idempotent
+   * overflow is queued and drained automatically by the Cron trigger
+   ========================================================================= */
+export type DeliverySegment = {
+  mode?: 'all' | 'uid' | 'token' | 'platform' | 'app' | 'active';
+  uid?: string; token?: string; platform?: string; app_slug?: string; days?: number;
+};
+export type DeliveryOptions = {
+  force?: boolean;           // bypass the "already delivered" short-circuit
+  limit?: number;            // max direct sends in this Worker invocation
+  retry_failed?: boolean;    // re-send rows previously marked failed
+};
+export type DeliveryDevice = {
+  token: string; uid: string; channel: 'native' | 'web';
+  platform: string; installation_id: string; topic_subscribed: boolean;
+};
+
+export async function resolveUnifiedAudience(
+  env: Env, segment: DeliverySegment = { mode: 'all' },
+): Promise<{ entries: DeliveryDevice[]; native_count: number; web_count: number;
+  targeted: number; duplicates_suppressed: number }> {
+  await ensurePushSchema(env);
+  await backfillDevices(env);
+  const db: any = env.DB;
+  const modes = ['all', 'uid', 'token', 'platform', 'app', 'active'];
+  const mode = modes.includes(String(segment.mode || 'all')) ? String(segment.mode || 'all') : 'all';
+  let where = `COALESCE(notifications_enabled, 1) = 1
+    AND COALESCE(permission, 'granted') != 'denied' AND token != ''`;
+  const args: any[] = [];
+  if (mode === 'uid') { where += ' AND uid = ?'; args.push(String(segment.uid || '')); }
+  else if (mode === 'token') { where += ' AND token = ?'; args.push(String(segment.token || '')); }
+  else if (mode === 'platform') {
+    const pl = String(segment.platform || 'android').toLowerCase();
+    if (pl === 'web') where += " AND channel = 'web'";
+    else { where += " AND channel = 'native' AND LOWER(COALESCE(platform, 'android')) = ?"; args.push(pl); }
+  } else if (mode === 'app') {
+    where += ' AND uid IN (SELECT uid FROM app_subscriptions WHERE app_slug = ?)';
+    args.push(String(segment.app_slug || ''));
+  } else if (mode === 'active') {
+    const days = Math.max(1, Math.min(Number(segment.days) || 7, 90));
+    where += ' AND COALESCE(NULLIF(last_seen_at, 0), updated_at, 0) >= ?';
+    args.push(nowSec() - days * 86400);
+  }
+  const rows: any = await db.prepare(
+    `SELECT token, uid, channel, platform, installation_id, topic_subscribed,
+       updated_at, last_seen_at FROM push_devices
+      WHERE ${where} ORDER BY updated_at DESC, token`,
+  ).bind(...args).all().catch(() => ({ results: [] }));
+
+  const seenTokens = new Set<string>();
+  const seenInstall = new Set<string>();
+  const entries: DeliveryDevice[] = [];
+  let duplicates = 0;
+  for (const r of (rows.results || []) as any[]) {
+    const token = String(r.token || '').trim();
+    if (!token) continue;
+    const install = String(r.installation_id || '');
+    if (install) {
+      const key = `${r.uid}|${install}|${r.channel}`;
+      if (seenInstall.has(key)) { duplicates++; continue; }
+      seenInstall.add(key);
+    }
+    if (seenTokens.has(token)) { duplicates++; continue; }
+    seenTokens.add(token);
+    entries.push({
+      token, uid: String(r.uid || ''),
+      channel: String(r.channel) === 'web' ? 'web' : 'native',
+      platform: String(r.platform || 'android'), installation_id: install,
+      topic_subscribed: Number(r.topic_subscribed || 0) === 1,
+    });
+  }
+  return {
+    entries, targeted: entries.length,
+    native_count: entries.filter((e) => e.channel === 'native').length,
+    web_count: entries.filter((e) => e.channel === 'web').length,
+    duplicates_suppressed: duplicates,
+  };
+}
+
+/** Atomically reserve (notification_id, token) pairs. A token that is already
+    `sent` is never sent again — this is the exact-once guarantee behind
+    retries, Cron drains and the manual flush button. */
+async function reserveDelivery(
+  env: Env, notificationId: string, devices: DeliveryDevice[], retryFailed = false,
+): Promise<DeliveryDevice[]> {
+  if (!devices.length) return [];
+  const db: any = env.DB;
+  const now = nowSec();
+  const stmt = `INSERT OR IGNORE INTO push_delivery
+      (notification_id, token, channel, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'pending', ?, ?)`;
+  try {
+    await db.batch(devices.map((d) =>
+      db.prepare(stmt).bind(notificationId, d.token, d.channel, now, now)));
+  } catch {
+    for (const d of devices) {
+      await db.prepare(stmt).bind(notificationId, d.token, d.channel, now, now).run().catch(() => {});
+    }
+  }
+  const rows: any = await db.prepare(
+    'SELECT token, status FROM push_delivery WHERE notification_id = ?',
+  ).bind(notificationId).all().catch(() => ({ results: [] }));
+  const status = new Map<string, string>();
+  for (const r of (rows.results || []) as any[]) status.set(String(r.token), String(r.status));
+  return devices.filter((d) => {
+    const st = status.get(d.token);
+    return st !== 'sent' && (retryFailed || st === 'pending');
+  });
+}
+
+async function markDelivery(
+  env: Env, notificationId: string, tokens: string[], status: 'sent' | 'failed',
+): Promise<void> {
+  if (!tokens.length) return;
+  const db: any = env.DB;
+  const stmt = 'UPDATE push_delivery SET status = ?, updated_at = ? WHERE notification_id = ? AND token = ?';
+  try {
+    await db.batch(tokens.map((t) => db.prepare(stmt).bind(status, nowSec(), notificationId, t)));
+  } catch {
+    for (const t of tokens) {
+      await db.prepare(stmt).bind(status, nowSec(), notificationId, t).run().catch(() => {});
+    }
+  }
+}
+
+/** ONE queue processor for every kind of job (`unified` and legacy
+    `advanced`). Cursor + ledger together guarantee no device is skipped and
+    no device is sent twice. */
+export async function processDeliveryJob(
+  env: Env, jobId: string, limit = FCM_MAX_DIRECT_PER_SEND,
+): Promise<any> {
+  await ensurePushSchema(env);
+  const db: any = env.DB;
+  const job: any = await db.prepare('SELECT * FROM push_jobs WHERE id = ?').bind(jobId).first();
+  if (!job) {
+    return { processed: 0, success: 0, failure: 0, invalid_removed: 0,
+      pending: 0, done: true, errors: ['job_not_found'] };
+  }
+  let entries: DeliveryDevice[] = [];
+  try { entries = JSON.parse(String(job.tokens || '[]')); } catch { entries = []; }
+  // Legacy `push_jobs` rows store no token list; keep their original cursor
+  // behaviour so imported/old jobs still drain.
+  if (!entries.length) return processPushJob(env, jobId, limit);
+
+  let payload: any = {};
+  try { payload = JSON.parse(String(job.payload || '{}')); } catch { payload = {}; }
+  const notificationId = String(job.notification_id || payload?.data?.notification_id || jobId);
+  const cap = Math.max(1, Math.min(Number(limit) || FCM_MAX_DIRECT_PER_SEND, FCM_MAX_DIRECT_PER_SEND));
+  const offset = Number(job.cursor || 0);
+  const slice = entries.slice(offset, offset + cap);
+  const eligible = await reserveDelivery(env, notificationId, slice);
+  const duplicatesSuppressed = slice.length - eligible.length;
+  const sent = await sendFcmToEntries(
+    env,
+    eligible.map((e) => ({ token: e.token, channel: e.channel })),
+    payload, { notification_id: notificationId },
+  );
+  const invalid = new Set(sent.invalid);
+  await markDelivery(env, notificationId,
+    eligible.filter((e) => !invalid.has(e.token)).map((e) => e.token), 'sent');
+  if (invalid.size) {
+    await markDelivery(env, notificationId, Array.from(invalid), 'failed');
+  }
+  const invalidRemoved = invalid.size ? await deleteDeadTokens(env, Array.from(invalid)) : 0;
+  const next = offset + slice.length;
+  const pending = Math.max(0, entries.length - next);
+  await db.prepare('UPDATE push_jobs SET cursor = ?, done = ?, updated_at = ? WHERE id = ?')
+    .bind(String(next), pending > 0 ? 0 : 1, nowSec(), jobId).run();
+  return {
+    processed: slice.length, success: sent.success, failure: sent.failure,
+    invalid_removed: invalidRemoved, errors: sent.errors,
+    error_counts: sent.error_counts || {}, pending, done: pending === 0,
+    duplicates_suppressed: duplicatesSuppressed,
+  };
+}
+
+/** Drain every pending unified job — called by the Cron trigger so a large
+    audience finishes without the admin pressing "flush" manually. */
+export async function drainDeliveryJobs(env: Env, maxJobs = 6): Promise<any> {
+  await ensurePushSchema(env);
+  const db: any = env.DB;
+  const jobs: any = await db.prepare(
+    `SELECT id FROM push_jobs WHERE done = 0 AND COALESCE(kind, 'legacy') IN ('unified', 'advanced')
+       AND COALESCE(tokens, '') != '' ORDER BY created_at ASC LIMIT ?`,
+  ).bind(Math.max(1, Math.min(Number(maxJobs) || 6, 30))).all().catch(() => ({ results: [] }));
+  let processed = 0, done = 0;
+  for (const j of (jobs.results || []) as any[]) {
+    const r = await processDeliveryJob(env, String(j.id)).catch(() => null);
+    if (r) { processed += Number(r.processed || 0); if (r.done) done++; }
+  }
+  return { jobs: (jobs.results || []).length, processed, done };
+}
+
+export async function deliverNotification(
+  env: Env, note: any,
+  segment: DeliverySegment = { mode: 'all' },
+  options: DeliveryOptions = {},
+): Promise<any> {
+  const started = Date.now();
+  await ensurePushSchema(env);
+  await backfillDevices(env);
+  const db: any = env.DB;
+  const id = String(note.id || randomId());
+  const mode = String(segment?.mode || 'all');
+  const payload = buildPushPayload(env, { ...note, id });
+  const result: any = {
+    id, segment, channel: 'unified',
+    targeted: 0, topic_targeted: 0, direct_targeted: 0, web_targeted: 0,
+    success: 0, failure: 0, invalid_removed: 0, pending: 0, topic_sent: false,
+    errors: [], error_counts: {}, job_id: null, duration_ms: 0,
+    duplicates_suppressed: 0, native_count: 0, web_count: 0, logged: true,
+  };
+
+  // Idempotency short-circuit: a replayed webhook / double click / Cron retry
+  // must not publish the same notification twice.
+  if (!options.force) {
+    const prior: any = await db.prepare(
+      "SELECT COUNT(*) AS c FROM push_delivery WHERE notification_id = ? AND status = 'sent'",
+    ).bind(id).first().catch(() => ({ c: 0 }));
+    if (Number(prior?.c || 0) > 0) {
+      result.skipped = 'already_delivered';
+      result.duration_ms = Date.now() - started;
+      return result;
+    }
+  }
+
+  const audience = await resolveUnifiedAudience(env, segment);
+  result.duplicates_suppressed = audience.duplicates_suppressed;
+  result.native_count = audience.native_count;
+  result.web_count = audience.web_count;
+
+  // A) ONE topic message covers native devices already subscribed. Topic
+  //    membership is native-only, so browser tokens are NEVER in this path.
+  const topicAll = mode === 'all'
+    ? audience.entries.filter((e) => e.channel === 'native' && e.topic_subscribed)
+    : [];
+  const topicReserved = await reserveDelivery(env, id, topicAll, !!options.retry_failed);
+  result.topic_targeted = topicReserved.length;
+  if (topicReserved.length) {
+    try {
+      const msg = await messaging(env);
+      const collapseKey = id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+      const android: any = (payload.android || {}) as any;
+      await msg.send({
+        topic: FCM_TOPIC,
+        ...payload,
+        android: {
+          ...android,
+          collapse_key: collapseKey,
+          notification: { ...(android.notification || {}), tag: collapseKey },
+        },
+      });
+      result.topic_sent = true;
+      result.success += topicReserved.length;
+      await markDelivery(env, id, topicReserved.map((e) => e.token), 'sent');
+    } catch (error: any) {
+      result.failure += topicReserved.length;
+      const code = String(error?.code || 'topic_send_failed');
+      result.error_counts[code] = (result.error_counts[code] || 0) + 1;
+      result.errors.push(`topic_send_failed: ${error?.message || String(error)}`);
+      await markDelivery(env, id, topicReserved.map((e) => e.token), 'failed');
+      console.error('[notify] topic send failed', { code, message: error?.message });
+    }
+  }
+
+  // B) Everything else (native unsubscribed + ALL browser devices, plus every
+  //    segmented target) is delivered DIRECTLY. topicAll tokens are excluded
+  //    even when already delivered, so no device is ever on two paths.
+  const topicTokens = new Set(topicAll.map((e) => e.token));
+  const directAll = audience.entries.filter((e) => !topicTokens.has(e.token));
+  const direct = await reserveDelivery(env, id, directAll, !!options.retry_failed);
+  result.duplicates_suppressed += directAll.length - direct.length;
+  const nativeDirect = direct.filter((e) => e.channel === 'native');
+  const webDirect = direct.filter((e) => e.channel === 'web');
+  result.direct_targeted = nativeDirect.length;
+  result.web_targeted = webDirect.length;
+
+  const cap = Math.max(1, Math.min(Number(options.limit) || FCM_MAX_DIRECT_PER_SEND,
+    FCM_MAX_DIRECT_PER_SEND));
+  if (direct.length > cap) {
+    const jobId = randomId();
+    await db.prepare(`INSERT INTO push_jobs
+        (id, notification_id, payload, cursor, done, created_at, updated_at, kind, tokens)
+        VALUES (?, ?, ?, '0', 0, ?, ?, 'unified', ?)`)
+      .bind(jobId, id, JSON.stringify(payload), nowSec(), nowSec(), JSON.stringify(direct)).run();
+    result.job_id = jobId;
+    const chunk: any = await processDeliveryJob(env, jobId, cap);
+    // Only the chunk processed in THIS invocation counts as targeted now;
+    // the rest is reported as `pending`. Otherwise targeted would count the
+    // same device twice (once in web_targeted and once in pending).
+    const processedSlice = direct.slice(0, cap);
+    result.direct_targeted = processedSlice.filter((e) => e.channel === 'native').length;
+    result.web_targeted = processedSlice.filter((e) => e.channel === 'web').length;
+    result.success += chunk.success;
+    result.failure += chunk.failure;
+    result.invalid_removed += chunk.invalid_removed;
+    result.pending = chunk.pending;
+    result.errors.push(...chunk.errors);
+    for (const [code, count] of Object.entries(chunk.error_counts || {})) {
+      result.error_counts[code] = (result.error_counts[code] || 0) + Number(count);
+    }
+  } else if (direct.length) {
+    const sent = await sendFcmToEntries(
+      env, direct.map((e) => ({ token: e.token, channel: e.channel })),
+      payload, { notification_id: id },
+    );
+    result.success += sent.success;
+    result.failure += sent.failure;
+    result.errors.push(...sent.errors);
+    for (const [code, count] of Object.entries(sent.error_counts || {})) {
+      result.error_counts[code] = (result.error_counts[code] || 0) + Number(count);
+    }
+    const invalid = new Set(sent.invalid);
+    await markDelivery(env, id, direct.filter((e) => !invalid.has(e.token))
+      .map((e) => e.token), 'sent');
+    if (invalid.size) {
+      await markDelivery(env, id, Array.from(invalid), 'failed');
+      result.invalid_removed = await deleteDeadTokens(env, Array.from(invalid));
+    }
+  }
+
+  result.targeted = result.topic_targeted + result.direct_targeted
+    + result.web_targeted + result.pending;
+  result.duration_ms = Date.now() - started;
+  await recordPushLog(env, id, result);
+  console.log(JSON.stringify({
+    level: 'info', event: 'notify_delivery', notification_id: id, mode,
+    targeted: result.targeted, topic_targeted: result.topic_targeted,
+    direct_targeted: result.direct_targeted, web_targeted: result.web_targeted,
+    success: result.success, failure: result.failure,
+    duplicates_suppressed: result.duplicates_suppressed,
+    pending: result.pending, duration_ms: result.duration_ms,
+  }));
+  return result;
+}
+
+/** Unified status used by the admin Notification Center and support. */
+export async function notificationDiagnostics(env: Env): Promise<any> {
+  await ensurePushSchema(env);
+  await backfillDevices(env);
+  const db: any = env.DB;
+  const byChannel: any = await db.prepare(
+    `SELECT channel, COUNT(*) AS total,
+       SUM(CASE WHEN COALESCE(notifications_enabled,1)=1
+         AND COALESCE(permission,'granted') != 'denied' THEN 1 ELSE 0 END) AS eligible
+       FROM push_devices GROUP BY channel`,
+  ).all().catch(() => ({ results: [] }));
+  const dupes: any = await db.prepare(
+    `SELECT COUNT(*) AS c FROM push_devices WHERE installation_id != ''`,
+  ).first().catch(() => ({ c: 0 }));
+  const delivery: any = await db.prepare(
+    `SELECT status, COUNT(*) AS c FROM push_delivery GROUP BY status`,
+  ).all().catch(() => ({ results: [] }));
+  const jobs: any = await db.prepare(
+    `SELECT COUNT(*) AS c FROM push_jobs WHERE done = 0 AND COALESCE(kind,'legacy') = 'unified'`,
+  ).first().catch(() => ({ c: 0 }));
+  const stats = await pushTokenStats(env);
+  const channels: Record<string, any> = {};
+  for (const r of (byChannel.results || []) as any[]) {
+    channels[String(r.channel)] = { total: Number(r.total || 0), eligible: Number(r.eligible || 0) };
+  }
+  return {
+    ok: true, engine: 'unified',
+    channels,
+    devices_total: (channels.native?.total || 0) + (channels.web?.total || 0),
+    devices_eligible: (channels.native?.eligible || 0) + (channels.web?.eligible || 0),
+    installations_tracked: Number(dupes?.c || 0),
+    delivery: Object.fromEntries((delivery.results || []).map((r: any) =>
+      [String(r.status), Number(r.c || 0)])),
+    pending_jobs: Number(jobs?.c || 0),
+    legacy: stats,
+    note: 'A device is present once in push_devices; push_delivery guarantees one FCM message per notification per device.',
+  };
+}
+
+/** Client receipt (displayed / clicked / dismissed) for real diagnostics. */
+export async function recordPushReceipt(
+  env: Env, notificationId: string, uid = '', channel = '', event = 'displayed',
+): Promise<void> {
+  await ensurePushSchema(env);
+  await env.DB.prepare(`INSERT INTO push_receipts
+      (id, notification_id, uid_masked, channel, event, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+    .bind(randomId(), String(notificationId).slice(0, 120), String(uid).slice(0, 8),
+      String(channel).slice(0, 20), String(event).slice(0, 30), nowSec()).run().catch(() => {});
+}
+
 /* -------------------------------------------------------------------------
-   Broadcast — the single entry point used by addNotification and admin routes.
+   Compatibility wrappers — "normal" and "advanced" are now the SAME engine.
    ------------------------------------------------------------------------- */
 export type BroadcastResult = {
   targeted: number; topic_targeted: number; direct_targeted: number; web_targeted: number;
@@ -610,78 +1225,11 @@ export type BroadcastResult = {
   topic_sent: boolean; errors: string[]; error_counts: Record<string, number>;
   job_id: string | null; duration_ms: number;
 };
-
 export async function broadcastPush(env: Env, n: any): Promise<BroadcastResult> {
-  const started = Date.now();
-  await ensurePushSchema(env);
-  const db: any = env.DB;
-  const payload = buildPushPayload(env, n);
-  const result: BroadcastResult = {
-    targeted: 0, topic_targeted: 0, direct_targeted: 0, web_targeted: 0,
-    success: 0, failure: 0, invalid_removed: 0, pending: 0,
-    topic_sent: false, errors: [], error_counts: {}, job_id: null,
-    duration_ms: 0,
-  };
-
-  const stats = await pushTokenStats(env);
-  result.topic_targeted = stats.native_subscribed;
-  result.web_targeted = stats.web_eligible;
-  result.targeted = stats.native_eligible + stats.web_eligible;
-
-  // A) ONE topic message covers every subscribed native device. This is the
-  //    only path that scales to a large audience without subrequest limits.
-  if (stats.native_subscribed > 0) {
-    try {
-      const msg = await messaging(env);
-      await msg.send({ topic: FCM_TOPIC, ...payload });
-      result.topic_sent = true;
-      result.success += stats.native_subscribed; // topic = 1 request, no per-device receipt
-    } catch (error: any) {
-      result.failure += stats.native_subscribed;
-      const code = String(error?.code || 'topic_send_failed');
-      result.error_counts[code] = (result.error_counts[code] || 0) + 1;
-      result.errors.push(`topic_send_failed: ${error?.message || String(error)}`);
-      console.error('[fcm] topic send failed', { code, message: error?.message, httpStatus: error?.httpStatus });
-    }
-  }
-
-  // B) Tokens not yet subscribed are sent DIRECTLY in 500-token batches.
-  //    Overflow goes to a D1 job so no eligible device is skipped.
-  if (stats.native_unsubscribed > 0) {
-    const jobId = randomId();
-    await db.prepare(`INSERT INTO push_jobs
-        (id, notification_id, payload, cursor, done, created_at, updated_at)
-        VALUES (?, ?, ?, '', 0, ?, ?)`)
-      .bind(jobId, String(n.id || ''), JSON.stringify(payload), nowSec(), nowSec()).run();
-    result.job_id = jobId;
-    const chunk = await processPushJob(env, jobId, FCM_MAX_DIRECT_PER_SEND);
-    result.direct_targeted = chunk.processed;
-    result.success += chunk.success;
-    result.failure += chunk.failure;
-    result.invalid_removed += chunk.invalid_removed;
-    result.pending = chunk.pending;
-    result.errors.push(...chunk.errors);
-  }
-
-  // C) Browser subscribers — now read from the SAME D1 table they are written
-  //    to, with dead-token pruning and bounded concurrency.
-  try {
-    const web = await sendWebPush(env, String(n.title || ''), String(n.body || ''), payload.data);
-    result.web_targeted = web.targeted;
-    result.targeted = result.topic_targeted + result.direct_targeted + web.targeted + result.pending;
-    result.success += web.success;
-    result.failure += web.failure;
-    result.invalid_removed += web.invalid_removed;
-    result.errors.push(...web.errors);
-    for (const [code, count] of Object.entries(web.error_counts)) {
-      result.error_counts[code] = (result.error_counts[code] || 0) + Number(count);
-    }
-  } catch (error: any) {
-    result.errors.push('web_push_failed: ' + (error?.message || String(error)));
-    console.error('[fcm] web push failed:', error?.message || error);
-  }
-
-  result.duration_ms = Date.now() - started;
-  await recordPushLog(env, String(n.id || ''), result);
-  return result;
+  const r = await deliverNotification(env, n, { mode: 'all' });
+  return r as BroadcastResult;
 }
+
+
+/** Unified alias used by /api/notifications/register-device. */
+export const registerDevice = registerPushToken;

@@ -1880,75 +1880,49 @@ function onActiveDownloadsChange(fn) {
 })();
 
 (function pushBridge() {
-  var currentToken = null;
-  var registeredToken = null;
-
-  function getStoredReg() {
-    try { return JSON.parse(localStorage.getItem('__gs_push_reg')); } catch (e) { return null; }
-  }
-  function setStoredReg(token, uid) {
-    try { localStorage.setItem('__gs_push_reg', JSON.stringify({ token: token, uid: uid, ts: Date.now() })); } catch (e) {}
-  }
-  function clearStoredReg() {
-    try { localStorage.removeItem('__gs_push_reg'); } catch (e) {}
-  }
-
-  function currentUid() {
-    try { return window.Store && window.Store.getUser && window.Store.getUser().uid; } catch (e) { return null; }
-  }
-
-  async function registerIfPossible() {
-    if (!currentToken) return;
-    if (registeredToken === currentToken) return;
-    if (!window.Store || !window.Store.isLoggedIn || !window.Store.isLoggedIn()) return;
-    var uid = currentUid();
-    if (!uid || String(uid).indexOf('gs_') === 0) return;
-    var stored = getStoredReg();
-    if (stored && stored.token === currentToken && stored.uid === uid) {
-      registeredToken = currentToken;
-      return;
-    }
+  /* Unified native bridge.
+     The APK historically called window.__gsRegisterPushToken(token) which
+     posted to the OLD native registration path, while the Web
+     Push client used a different table. That is exactly why one device ended
+     up with several registrations (and several notifications). Both paths now
+     converge on GSNotify.registerNativeToken() → the unified device registry.
+     The function name is kept so existing APK builds keep working. */
+  function call(token, extra) {
     try {
-      await authedApi('/api/notifications/register-token', {
-        method: 'POST',
-        body: JSON.stringify({ token: currentToken, platform: 'android' }),
-      });
-      registeredToken = currentToken;
-      setStoredReg(currentToken, uid);
-      console.log('[pushBridge] token registered', currentToken.slice(0, 16));
-    } catch (e) {
-      console.error('[pushBridge] register token failed', e);
-      try { toast(t('فشل تفعيل الإشعارات: ') + (e && e.message ? e.message : 'unknown'), 'error', 4000); } catch (t) {}
-    }
+      if (window.GSNotify && typeof window.GSNotify.registerNativeToken === 'function') {
+        return window.GSNotify.registerNativeToken(token, extra || {});
+      }
+    } catch (e) {}
+    // Fallback for a page where the hub has not loaded yet.
+    return new Promise(function (resolve) {
+      setTimeout(function () {
+        try {
+          if (window.GSNotify && typeof window.GSNotify.registerNativeToken === 'function') {
+            resolve(window.GSNotify.registerNativeToken(token, extra || {}));
+          } else resolve({ ok: false, error: 'hub_unavailable' });
+        } catch (e) { resolve({ ok: false, error: String(e) }); }
+      }, 300);
+    });
   }
 
-  window.__gsRegisterPushToken = function (token) {
+  window.__gsRegisterPushToken = function (token, installationId) {
     if (!token || typeof token !== 'string') return;
-    currentToken = token;
-    registerIfPossible();
+    var extra = { platform: 'android' };
+    if (installationId) extra.installation_id = String(installationId);
+    call(token, extra).catch(function () {});
   };
 
   window.__gsUnregisterPushToken = function (token) {
-    var tok = token || currentToken;
-    if (!tok) return;
-    registeredToken = null;
-    clearStoredReg();
+    if (!token) return;
     try {
-      api('/api/notifications/unregister-token', {
+      fetch('/api/notifications/unregister-token', {
         method: 'POST',
-        body: JSON.stringify({ token: tok }),
-      });
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token }),
+        keepalive: true,
+      }).catch(function () {});
     } catch (e) {}
   };
-
-  try {
-    if (window.GAuth && window.GAuth.onAuthChange) {
-      window.GAuth.onAuthChange(function (user) {
-        if (user) registerIfPossible();
-        else if (currentToken) window.__gsUnregisterPushToken(currentToken);
-      });
-    }
-  } catch (e) {}
 })();
 
 window.Store = {

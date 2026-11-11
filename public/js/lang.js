@@ -992,6 +992,12 @@
     'ينتهي في': { en: 'Ends at', fr: 'Se termine à', es: 'Termina a las' },
     'لا يمكن متابعة التصفح حتى انتهاء الصيانة': { en: 'Browsing is unavailable until maintenance ends', fr: 'La navigation est indisponible jusqu’à la fin de la maintenance', es: 'No se puede navegar hasta que finalice el mantenimiento' },
     'انتهت الصيانة، نعود الآن…': { en: 'Maintenance is over, reloading…', fr: 'Maintenance terminée, rechargement…', es: 'Mantenimiento finalizado, recargando…' },
+    'دخول المتجر أثناء الصيانة': { en: 'Enter store during maintenance', fr: 'Accéder à la boutique pendant la maintenance', es: 'Entrar a la tienda durante el mantenimiento' },
+    'إنهاء معاينة المدير': { en: 'End admin preview', fr: 'Terminer l’aperçu admin', es: 'Finalizar vista de administrador' },
+    'معاينة المدير مفعّلة': { en: 'Admin preview is active', fr: 'Aperçu administrateur activé', es: 'Vista de administrador activada' },
+    'تم إنهاء معاينة المدير': { en: 'Admin preview ended', fr: 'Aperçu administrateur terminé', es: 'Vista de administrador finalizada' },
+    'تعذّر فتح معاينة المدير': { en: 'Could not open admin preview', fr: 'Impossible d’ouvrir l’aperçu admin', es: 'No se pudo abrir la vista de administrador' },
+    'تعذّر إنهاء معاينة المدير': { en: 'Could not end admin preview', fr: 'Impossible de terminer l’aperçu admin', es: 'No se pudo finalizar la vista de administrador' },
     'المتجر تحت الصيانة، نعود قريباً.': { en: 'The store is under maintenance, we will be back soon.', fr: 'La boutique est en maintenance, nous revenons bientôt.', es: 'La tienda está en mantenimiento, volvemos pronto.' },
     // ---- Update dialog: snooze + shared modal actions ----
     'تحديث لاحقاً': { en: 'Update later', fr: 'Mettre à jour plus tard', es: 'Actualizar más tarde' },

@@ -639,6 +639,29 @@
     return el('span', { class: 'admin-lang-switch' });
   }
 
+  /* Explicit, short-lived admin preview: visitors remain locked. The new tab
+     is opened synchronously (popup-safe), then the signed cookie is issued
+     before navigating it to the storefront. */
+  async function openStorePreview() {
+    const win = window.open('about:blank', '_blank');
+    if (win) { try { win.opener = null; } catch (e) {} }
+    try {
+      await api('/api/admin/maintenance-preview', { method: 'POST' });
+      if (win && !win.closed) win.location.replace('/');
+      else window.open('/', '_blank', 'noopener');
+      toast(t('معاينة المدير مفعّلة'), 'success');
+    } catch (e) {
+      if (win && !win.closed) { try { win.close(); } catch (e2) {} }
+      toast(t('تعذّر فتح معاينة المدير'), 'error');
+    }
+  }
+  async function endStorePreview() {
+    try {
+      await api('/api/admin/maintenance-preview/end', { method: 'POST' });
+      toast(t('تم إنهاء معاينة المدير'), 'success');
+    } catch (e) { toast(t('تعذّر إنهاء معاينة المدير'), 'error'); }
+  }
+
   function renderTopbar() {
     const themeBtn = themeToggleBtn();
     themeBtn.classList.remove('tab');
@@ -657,9 +680,10 @@
     }, ico('search', 'icon'),
       el('span', { class: 'admin-search-trigger-label' }, t('ابحث في الأقسام والتطبيقات')),
       el('kbd', { class: 'admin-kbd' }, 'Ctrl K'));
-    const storeLink = el('a', {
-      class: 'icon-btn', href: '/', target: '_blank', rel: 'noopener',
-      'aria-label': t('عرض المتجر'), title: t('عرض المتجر'),
+    const storeLink = el('button', {
+      class: 'icon-btn admin-preview-site-icon', type: 'button',
+      'aria-label': t('دخول المتجر أثناء الصيانة'), title: t('دخول المتجر أثناء الصيانة'),
+      onclick: () => openStorePreview(),
     }, ico('external'));
     const pinBtn = el('button', {
       class: 'icon-btn admin-pin-btn' + (readPinned().includes(activeTab) ? ' admin-density-btn is-on' : ''),
@@ -1643,8 +1667,16 @@
       recs.length ? el('ul', { class: 'admin-recs' }, ...recs.map((r) => el('li', null, ico('check', 'icon'), r)))
         : el('div', { class: 'hint' }, t('لا توجد مشاكل')));
 
+    const previewBtn = el('button', {
+      class: 'btn btn-secondary btn-sm admin-preview-site', type: 'button',
+      onclick: () => openStorePreview(),
+    }, ico('external', 'icon'), t('دخول المتجر أثناء الصيانة'));
+    const endPreviewBtn = el('button', {
+      class: 'btn btn-secondary btn-sm admin-preview-end', type: 'button',
+      onclick: () => endStorePreview(),
+    }, ico('close', 'icon'), t('إنهاء معاينة المدير'));
     const toolbar = el('div', { class: 'admin-settings-toolbar' },
-      search, dirtyBadge, exportBtn, importBtn, importFile, resetBtn,
+      search, dirtyBadge, previewBtn, endPreviewBtn, exportBtn, importBtn, importFile, resetBtn,
       el('kbd', { class: 'admin-kbd' }, 'Ctrl S'));
     const previewPanel = el('div', { class: 'panel' },
       el('div', { class: 'panel-head' }, ico('eye', 'icon'), t('معاينة مباشرة')), preview);

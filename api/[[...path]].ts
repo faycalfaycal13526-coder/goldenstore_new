@@ -233,6 +233,22 @@ async function hasAdminSession(c: any): Promise<boolean> {
     return !!payload && payload.role === 'admin';
   } catch { return false; }
 }
+/* Explicit, time-limited admin preview. It is a SEPARATE cookie with a
+   dedicated scope: it can never be used as an admin session cookie, and an
+   admin session alone does not unlock the website without clicking the
+   console's preview button. */
+const PREVIEW_COOKIE_NAME = 'gs_admin_preview';
+const MAINTENANCE_PREVIEW_TTL = 10 * 60;
+async function hasMaintenancePreview(c: any): Promise<boolean> {
+  try {
+    const secret = c.env.JWT_SECRET;
+    if (!secret) return false;
+    const token = getCookie(c, PREVIEW_COOKIE_NAME);
+    if (!token) return false;
+    const payload = await verifyJwt(token, secret);
+    return !!payload && payload.role === 'admin' && payload.scope === 'maintenance_preview';
+  } catch { return false; }
+}
 async function maintenanceConfig(c: any): Promise<Record<string, string>> {
   const t = Date.now();
   if (maintenanceCache.data && t - maintenanceCache.ts < MAINTENANCE_CACHE_TTL) return maintenanceCache.data;
@@ -1396,6 +1412,34 @@ app.post('/support/threads/:id/read', async (c) => {
 app.use('/admin/*', requireAdmin);
 
 
+/* One-click, short-lived «Enter the site during maintenance» for the OWNER.
+   The console is already reachable; this button explicitly grants only this
+   browser a 10-minute signed preview. Visitors keep receiving 503 + the
+   centered maintenance screen. The preview cookie is httpOnly and scoped. */
+app.post('/admin/maintenance-preview', async (c) => {
+  const secret = c.env.JWT_SECRET;
+  if (!secret) return c.json({ error: 'server_misconfigured' }, 500);
+  const token = await signJwt({
+    sub: 'maintenance-preview', role: 'admin', scope: 'maintenance_preview', jti: randomId(),
+  }, secret, MAINTENANCE_PREVIEW_TTL);
+  setCookie(c, PREVIEW_COOKIE_NAME, token, {
+    httpOnly: true, secure: isSecureRequest(c), sameSite: 'Lax', path: '/',
+    maxAge: MAINTENANCE_PREVIEW_TTL,
+  });
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true, expires_in: MAINTENANCE_PREVIEW_TTL,
+    expires_at: nowSec() + MAINTENANCE_PREVIEW_TTL });
+});
+
+app.post('/admin/maintenance-preview/end', (c) => {
+  setCookie(c, PREVIEW_COOKIE_NAME, '', {
+    httpOnly: true, secure: isSecureRequest(c), sameSite: 'Lax', path: '/', maxAge: 0,
+  });
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true });
+});
+
+
 /* ---------------- Admin Console — Phase 2 routes ---------------------- */
 app.get('/admin/console/state', async (c) => {
   await ensureConsoleTables(c.env.DB);
@@ -1783,6 +1827,7 @@ app.get('/settings', async (c) => {
     server_time: now,
     maintenance_active: maintenanceActive(settings, now),
     maintenance_bypass: await hasAdminSession(c),
+    maintenance_preview: await hasMaintenancePreview(c),
     maintenance_end_at: Number(settings.maintenance_end_at || 0),
     maintenance_remaining: maintenanceRemaining(settings, now),
   });

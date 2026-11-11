@@ -1718,3 +1718,16 @@ body.admin-compact .admin-kpi { padding: 10px; }
   .admin-kpi-value { font-size: 16px; }
   .admin-quick-grid { gap: 5px; }
 }
+
+/* Explicit, short-lived owner preview during maintenance (2026-11-05). */
+.admin-preview-site, .admin-preview-end { white-space: nowrap; }
+.admin-preview-site {
+  color: var(--gold) !important;
+  border-color: rgba(244,192,31,.55) !important;
+  background: rgba(244,192,31,.08) !important;
+}
+.admin-preview-site:hover { filter: brightness(1.12); }
+.admin-preview-site-icon { color: var(--gold); }
+@media (max-width: 760px) {
+  .admin-preview-site, .admin-preview-end { font-size: 10px; padding-inline: 7px; }
+}

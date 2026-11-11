@@ -73,6 +73,13 @@
       return /\/maintenance(?:\.html)?(?:\/|$)/i.test(window.location.pathname || '');
     } catch (e) { return false; }
   }
+  /* /download remains usable during maintenance by explicit owner request. */
+  function isDownloadPage() {
+    try {
+      if (document.body && document.body.getAttribute('data-page') === 'download') return true;
+      return /\/download(?:\.html)?(?:\/|$)/i.test(window.location.pathname || '');
+    } catch (e) { return false; }
+  }
   function isAdminConsole() {
     try {
       if (document.body && document.body.getAttribute('data-page') === 'admin') return true;
@@ -384,6 +391,9 @@
     // The standalone /maintenance page IS the maintenance screen: never put a
     // second overlay on top of it.
     if (isMaintenancePage()) { hideBlocking(); return; }
+    // The Golden Store APK download page is deliberately exempt: the owner
+    // wants install links to keep working even while the store is locked.
+    if (isDownloadPage()) { hideBlocking(); return; }
     var msg = get('maintenance_message') || tr('المتجر تحت الصيانة، نعود قريباً.');
     // The console is the ONLY page that is never locked: the admin must be able
     // to sign in (or turn maintenance off) even before a session cookie exists.
@@ -396,7 +406,7 @@
 
   function applyLanguage() {
     try {
-      if (isActive() && !isAdminConsole()) return;   // never reload a locked maintenance screen
+      if (isActive() && !isAdminConsole() && !isDownloadPage()) return;   // never reload a locked maintenance screen
       if (localStorage.getItem('gs_lang')) return;                 // explicit user choice wins
       var want = get('default_language', 'ar');
       if (!want || want === 'ar') return;
@@ -481,6 +491,9 @@
      ------------------------------------------------------------------ */
   function forceFromMaintenanceResponse(m) {
     if (m && m.active === false) return;
+    // Never re-lock the exempt download page because another /api/* call
+    // (notifications, apps, ...) returned 503.
+    if (isDownloadPage()) return;
     if (!values) values = {};
     if (!meta) meta = {};
     meta.maintenance_active = true;
@@ -502,7 +515,7 @@
       if (!p || typeof p.then !== 'function') return p;
       return p.then(function (res) {
         try {
-          if (res && res.status === 503) {
+          if (res && res.status === 503 && !isDownloadPage()) {
             var raw = String((args[0] && args[0].url) || args[0] || '');
             if (raw.indexOf('/api/') !== -1 && typeof res.clone === 'function') {
               res.clone().json().then(function (d) {

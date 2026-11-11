@@ -204,7 +204,11 @@ app.use('*', async (c, next) => {
    directly: every public endpoint returns 503 while maintenance is active.
    Only the admin session (verified JWT) and a tiny allowlist pass through.
    ========================================================================= */
-const MAINTENANCE_ALLOWLIST = ['/api/settings', '/api/login', '/api/logout', '/api/me'];
+/* The owner explicitly asked for the Golden Store download page to keep
+   working during maintenance. These two read-only download endpoints are the
+   only public APIs exempted; every other public route stays 503. */
+const MAINTENANCE_ALLOWLIST = ['/api/settings', '/api/login', '/api/logout', '/api/me',
+  '/api/app-update', '/api/app-update/download'];
 const maintenanceCache: { data: Record<string, string> | null; ts: number } = { data: null, ts: 0 };
 const MAINTENANCE_CACHE_TTL = 3000;
 function invalidateMaintenanceCache() { maintenanceCache.data = null; maintenanceCache.ts = 0; }

@@ -71,6 +71,10 @@
             "destination": "/offline.html"
         },
         {
+            "source": "/maintenance",
+            "destination": "/maintenance.html"
+        },
+        {
             "source": "/api/:path*",
             "destination": "https://api.goldenstore.online/api/:path*"
         },

@@ -69,6 +69,12 @@
     return !(end > 0 && end <= serverNow());
   }
   function isBypass() { return !!(meta && meta.maintenance_bypass === true); }
+  function isMaintenancePage() {
+    try {
+      if (document.body && document.body.getAttribute('data-page') === 'maintenance') return true;
+      return /\/maintenance(?:\.html)?(?:\/|$)/i.test(window.location.pathname || '');
+    } catch (e) { return false; }
+  }
   function isAdminConsole() {
     try {
       if (document.body && document.body.getAttribute('data-page') === 'admin') return true;
@@ -400,6 +406,9 @@
     if (legacy && legacy.id === 'gs-maintenance-bar' && !legacy.classList.contains('gs-maintenance-admin')) legacy.remove();
     document.body.classList.remove('has-maintenance-bar');
     if (!isActive()) { hideBlocking(); hideAdminPill(); return; }
+    // The standalone /maintenance page IS the maintenance screen: never put a
+    // second overlay on top of it.
+    if (isMaintenancePage()) { hideBlocking(); hideAdminPill(); return; }
     var msg = get('maintenance_message') || tr('المتجر تحت الصيانة، نعود قريباً.');
     // The console is the ONLY page that is never locked: the admin must be able
     // to sign in (or turn maintenance off) even before a session cookie exists.
@@ -489,10 +498,61 @@
     try { window.dispatchEvent(new CustomEvent('gs-settings-applied', { detail: values })); } catch (e) {}
     appliedOnce = true;
   }
+  /* ------------------------------------------------------------------
+     Resilient website delivery. On the website the settings request may be
+     stale-cached or proxied while the native app still gets the Worker 503.
+     Any /api/* 503 with error:'maintenance' is therefore enough to show the
+     exact same full-screen screen, even without a successful settings read.
+     ------------------------------------------------------------------ */
+  function forceFromMaintenanceResponse(m) {
+    if (m && m.active === false) return;
+    if (!values) values = {};
+    if (!meta) meta = {};
+    meta.maintenance_active = true;
+    meta.maintenance_end_at = Number((m && m.end_at) || meta.maintenance_end_at || 0);
+    meta.maintenance_remaining = Number((m && m.remaining) || 0);
+    meta.server_time = Number((m && m.server_time) || 0);
+    if (m && m.message) values.maintenance_message = m.message;
+    fetchedAt = Date.now();
+    try { maintenance(); } catch (e) {}
+  }
+  function installFetchGuard() {
+    if (typeof window.fetch !== 'function' || window.__gsMaintFetchGuard) return;
+    window.__gsMaintFetchGuard = true;
+    var original = window.fetch;
+    window.fetch = function () {
+      var args = arguments;
+      var p;
+      try { p = original.apply(window, args); } catch (e) { return Promise.reject(e); }
+      if (!p || typeof p.then !== 'function') return p;
+      return p.then(function (res) {
+        try {
+          if (res && res.status === 503) {
+            var raw = String((args[0] && args[0].url) || args[0] || '');
+            if (raw.indexOf('/api/') !== -1 && typeof res.clone === 'function') {
+              res.clone().json().then(function (d) {
+                if (d && d.error === 'maintenance') forceFromMaintenanceResponse(d.maintenance || {});
+              }).catch(function () {});
+            }
+          }
+        } catch (e2) {}
+        return res;
+      });
+    };
+  }
   function load() {
     if (!pending) {
       pending = fetch('/api/settings?_=' + Date.now(), { cache: 'no-store' })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('settings_unavailable')); })
+        .catch(function () {
+          // Retry with an absolute origin: some website deployments proxy /api
+          // differently from the native WebView. Never leave the site unlocked.
+          try {
+            return fetch(location.origin + '/api/settings?_=' + Date.now(), { cache: 'no-store' })
+              .then(function (r2) { return r2.ok ? r2.json() : null; })
+              .catch(function () { return null; });
+          } catch (e) { return null; }
+        })
         .then(function (d) {
           values = (d && d.settings) || {};
           meta = d || {};
@@ -525,5 +585,6 @@
     isApplied: function () { return appliedOnce; },
     maintenanceActive: isActive,
   };
+  installFetchGuard();
   load();
 })();

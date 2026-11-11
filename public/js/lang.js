@@ -1169,6 +1169,16 @@
     'مشاركة عبر النظام': { en: 'Share via your device', fr: 'Partager via l’appareil', es: 'Compartir desde el dispositivo' },
     'نسخ الرابط': { en: 'Copy link', fr: 'Copier le lien', es: 'Copiar enlace' },
     'الرابط عام وآمن، ويمكن مشاركته مع أي شخص.': { en: 'The link is public and safe to share with anyone.', fr: 'Le lien est public et peut être partagé avec tous en toute sécurité.', es: 'El enlace es público y seguro para compartir con cualquiera.' },
+    // ---- Publish sheet: download link, promo text, other destinations ----
+    'حمّل تطبيق Golden Store الآن واستمتع بأفضل التطبيقات والألعاب': { en: 'Download the Golden Store app now and enjoy the best apps and games', fr: 'Téléchargez l’application Golden Store maintenant et profitez des meilleures applications et jeux', es: 'Descarga la app Golden Store ahora y disfruta de las mejores apps y juegos' },
+    'حمّل التطبيق الآن من Golden Store': { en: 'Download the app now from Golden Store', fr: 'Téléchargez l’application maintenant depuis Golden Store', es: 'Descarga la app ahora desde Golden Store' },
+    'نشر ومشاركة': { en: 'Publish & share', fr: 'Publier et partager', es: 'Publicar y compartir' },
+    'شارك رابط التنزيل مع نص يدعو للتثبيت': { en: 'Share the download link with a message that invites installing', fr: 'Partagez le lien de téléchargement avec un message invitant à installer', es: 'Comparte el enlace de descarga con un texto que invite a instalar' },
+    'رابط التنزيل': { en: 'Download link', fr: 'Lien de téléchargement', es: 'Enlace de descarga' },
+    'نص المشاركة': { en: 'Share message', fr: 'Message de partage', es: 'Texto para compartir' },
+    'نسخ النص': { en: 'Copy text', fr: 'Copier le texte', es: 'Copiar texto' },
+    'فتح رابط التنزيل': { en: 'Open download link', fr: 'Ouvrir le lien de téléchargement', es: 'Abrir enlace de descarga' },
+    'مواقع أخرى للنشر': { en: 'Other places to publish', fr: 'Autres destinations de publication', es: 'Otros sitios para publicar' },
   };
 
   // Number/size unit labels per language.

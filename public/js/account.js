@@ -442,10 +442,12 @@
 
   function shareStore() {
     const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
-    const url = origin || 'https://goldenstore.online';
+    // Sharing the STORE now points at the official download page, with a text
+    // that invites people to install the app.
+    const url = (origin || 'https://goldenstore.online') + '/download';
     const payload = {
       title: 'Golden Store',
-      text: t('شارك رابط المتجر مع أصدقائك ليعرفوا تطبيقاتنا وألعابنا'),
+      text: t('حمّل تطبيق Golden Store الآن واستمتع بأفضل التطبيقات والألعاب'),
       url, icon: '/images/logo.png', kind: 'store',
     };
     if (window.GSShare && typeof window.GSShare.open === 'function') window.GSShare.open(payload);

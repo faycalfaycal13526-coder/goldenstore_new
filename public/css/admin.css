@@ -1678,3 +1678,43 @@ body.admin-compact .admin-kpi { padding: 10px; }
   .admin-brand span, .admin-brand b { font-size: 12px; }
   .admin-lang-flag { font-size: 22px; }
 }
+
+/* ==========================================================================
+   Phone sizing: the owner reported the admin buttons were far too large.
+   Compact controls on small screens without touching desktop presets.
+   ========================================================================== */
+@media (max-width: 760px) {
+  .admin-topbar .icon-btn,
+  .admin-lang-switch .lang-btn { width: 32px !important; height: 32px !important; min-width: 32px; }
+  .admin-topbar .icon-btn .icon,
+  .admin-lang-switch .lang-btn .icon { width: 16px; height: 16px; }
+  .admin-topbar .admin-actions { gap: 4px; }
+  .admin-tabs .tab { padding: 6px 10px; font-size: 11px; gap: 5px; min-height: 32px; }
+  .admin-tabs .tab .icon { width: 15px; height: 15px; }
+  .admin-shell .btn,
+  .admin-palette .btn,
+  .admin-preview-card .btn { padding: 6px 10px; font-size: 11.5px; min-height: 32px; }
+  .admin-shell .btn-sm,
+  .admin-head-actions .btn-sm { padding: 5px 8px; font-size: 10.5px; min-height: 28px; }
+  .admin-quick { padding: 7px 9px; font-size: 11px; }
+  .admin-pager-btn { min-width: 28px; height: 28px; font-size: 11px; }
+  .admin-kpi { padding: 10px; }
+  .admin-kpi-value { font-size: 18px; }
+  .admin-page-title { font-size: 17px; }
+  .admin-head-actions { gap: 5px; }
+  .admin-head-actions .btn { flex: 0 1 auto; white-space: nowrap; }
+  .cc-card { padding: 11px; }
+  .cc-card-value { font-size: 18px; }
+  .cc-actions .btn, .admin-ratings-repair .btn { font-size: 10.5px; padding: 6px 9px; }
+  .admin-lang-card { padding: 10px; }
+  .admin-table-toolbar .input { font-size: 11.5px; padding: 7px 9px; }
+  .admin-palette-input { font-size: 13px; }
+}
+@media (max-width: 420px) {
+  .admin-topbar .icon-btn,
+  .admin-lang-switch .lang-btn { width: 30px !important; height: 30px !important; min-width: 30px; }
+  .admin-tabs .tab { padding: 5px 8px; font-size: 10.5px; }
+  .admin-shell .btn { font-size: 10.5px; padding: 5px 8px; }
+  .admin-kpi-value { font-size: 16px; }
+  .admin-quick-grid { gap: 5px; }
+}

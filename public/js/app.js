@@ -634,13 +634,18 @@
     // safe "open link" action. Built lazily so it never touches page load.
     function share(a) {
       const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
+      const slugValue = (a && a.slug) ? a.slug : slug;
+      // The shared link is a real DOWNLOAD link, not the detail page.
       const url = origin
-        ? `${origin}/app?slug=${encodeURIComponent(a && a.slug ? a.slug : slug)}`
+        ? `${origin}/api/apps/${encodeURIComponent(slugValue)}/download`
         : location.href;
+      const pageUrl = origin ? `${origin}/app?slug=${encodeURIComponent(slugValue)}` : '';
+      const name = (a && a.name) || 'Golden Store';
       const payload = {
-        title: (a && a.name) || 'Golden Store',
-        text: (a && (a.short_description || a.description || '')) || '',
-        url, icon: (a && a.icon_url) || '',
+        title: name,
+        // Promotional text that invites people to install the app.
+        text: `${t('حمّل التطبيق الآن من Golden Store')} — ${name}`,
+        url, pageUrl, icon: (a && a.icon_url) || '',
         kind: (a && a.type === 'game') ? 'game' : 'app',
       };
       if (window.GSShare && typeof window.GSShare.open === 'function') {

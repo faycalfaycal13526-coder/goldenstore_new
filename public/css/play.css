@@ -3998,3 +3998,50 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
 @media (max-width: 420px) {
   .share-store-card { padding: 10px; margin-top: 10px; }
 }
+
+/* Publish sheet: promotional text + external destinations (2026-11-08) */
+.gs-share-text {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 66px;
+  padding: 10px 11px; border-radius: 11px; font-size: 11.5px; line-height: 1.7;
+  color: var(--text, #f5f5f5); background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.12);
+}
+.gs-share-text-actions { display: flex; justify-content: flex-end; margin: 6px 0 12px; }
+.gs-share-targets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 12px; }
+.gs-share-target {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 6px; border-radius: 10px; font-size: 11px; font-weight: 800;
+  text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.035);
+  transition: filter .18s ease, transform .18s ease;
+}
+.gs-share-target:hover { filter: brightness(1.2); transform: translateY(-1px); }
+.gs-share-target-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; background: currentColor; }
+.gs-share-target[data-net="wa"] { color: #5fd28a; }
+.gs-share-target[data-net="tg"] { color: #56b8ec; }
+.gs-share-target[data-net="fb"] { color: #7ea6ff; }
+.gs-share-target[data-net="x"] { color: #d8d8de; }
+.gs-share-target[data-net="mail"] { color: #f4c01f; }
+@media (max-width: 620px) {
+  .gs-share-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ==========================================================================
+   Website maintenance = a real full-screen page, identical to the app screen
+   (2026-11-08). Keeps the existing overlay semantics but removes every trace
+   of the store behind it and uses a fully opaque background.
+   ========================================================================== */
+html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { visibility: hidden !important; }
+.gs-maintenance-overlay {
+  background: radial-gradient(circle at 50% 26%, rgba(244,192,31,.12), transparent 62%), #050507 !important;
+}
+.gs-maint-page {
+  position: fixed; inset: 0; z-index: 2147483647;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; overflow: auto; overscroll-behavior: contain;
+  background: radial-gradient(circle at 50% 26%, rgba(244,192,31,.12), transparent 62%), #050507;
+}
+.gs-maint-page .gs-maintenance-card { position: relative; z-index: 1; }
+@media (max-width: 540px) {
+  .gs-maint-page { padding: 14px; }
+}

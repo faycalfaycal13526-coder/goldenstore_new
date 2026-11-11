@@ -178,6 +178,7 @@
       { key: 'backup', icon: 'storage', label: t('النسخ الاحتياطي') },
       { key: 'preview', icon: 'external', label: t('معاينة الأجهزة') },
       { key: 'settings', icon: 'settings', label: 'إعدادات المتجر' },
+      { key: 'languages', icon: 'globe', label: t('اللغات') },
     ] },
   ];
   function groupForTab(key) {
@@ -625,6 +626,19 @@
     setTimeout(() => passInput.focus(), 0);
   }
 
+  /* Language switcher in the admin console. Reuses the storefront's
+     self-contained GSI18N component (curated dictionary, no API calls). */
+  function adminLangSwitcher() {
+    try {
+      if (window.GSI18N && typeof window.GSI18N.switcherEl === 'function') {
+        const n = window.GSI18N.switcherEl();
+        n.classList.add('admin-lang-switch');
+        return n;
+      }
+    } catch (e) {}
+    return el('span', { class: 'admin-lang-switch' });
+  }
+
   function renderTopbar() {
     const themeBtn = themeToggleBtn();
     themeBtn.classList.remove('tab');
@@ -671,7 +685,7 @@
         crumb,
         el('div', { class: 'spacer' }),
         el('div', { class: 'admin-title' }, 'لوحة التحكم'),
-        el('div', { class: 'admin-actions' }, widthSelect(), searchTrigger, pinnedBar(), pinBtn, helpBtn, storeLink, themeBtn, logoutBtn),
+        el('div', { class: 'admin-actions' }, adminLangSwitcher(), widthSelect(), searchTrigger, pinnedBar(), pinBtn, helpBtn, storeLink, themeBtn, logoutBtn),
       ),
     );
   }
@@ -797,6 +811,7 @@
     else if (activeTab === 'insights') await renderInsights(body);
     else if (activeTab === 'firebase') await renderFirebaseCenter(body);
     else if (activeTab === 'cloudflare') await renderCloudflareCenter(body);
+    else if (activeTab === 'languages') await renderLanguages(body);
     else if (activeTab === 'analytics') {
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderAnalytics(body);
       else body.innerHTML = '<div class="hint">تعذّر تحميل وحدة الإحصائيات — أعد تحميل الصفحة.</div>';
@@ -1115,6 +1130,53 @@
       await load();
       renderCloudflareCenter(body);
     });
+  }
+
+
+  /* ---------------- Languages: switch + curated dictionary overview -------- */
+  async function renderLanguages(body) {
+    const current = (window.GSI18N && window.GSI18N.lang) || 'ar';
+    const langs = [
+      { code: 'ar', name: t('العربية'), native: 'العربية', dir: 'RTL', flag: '🇩🇿' },
+      { code: 'en', name: t('الإنجليزية'), native: 'English', dir: 'LTR', flag: '🇬🇧' },
+      { code: 'fr', name: t('الفرنسية'), native: 'Français', dir: 'LTR', flag: '🇫🇷' },
+      { code: 'es', name: t('الإسبانية'), native: 'Español', dir: 'LTR', flag: '🇪🇸' },
+    ];
+    body.innerHTML = '';
+    function activate(code) {
+      try {
+        if (window.GSI18N && typeof window.GSI18N.setLang === 'function') {
+          window.GSI18N.setLang(code);   // persists + reloads the whole console
+        } else { localStorage.setItem('gs_lang', code); location.reload(); }
+      } catch (e) { toast(t('تعذّر تغيير اللغة'), 'error'); }
+    }
+    const cards = langs.map((l) => el('div', {
+      class: 'admin-lang-card' + (l.code === current ? ' is-active' : ''),
+    },
+      el('div', { class: 'admin-lang-flag' }, l.flag),
+      el('div', { class: 'admin-lang-info' },
+        el('strong', null, l.native),
+        el('span', null, `${l.name} • ${l.dir} • ${l.code.toUpperCase()}`)),
+      l.code === current
+        ? el('span', { class: 'admin-lang-badge' }, t('اللغة الحالية'))
+        : el('button', { class: 'btn btn-sm btn-primary', type: 'button',
+          onclick: () => activate(l.code) }, t('تفعيل'))));
+    body.append(
+      el('div', { class: 'admin-page-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, t('اللغات')),
+          el('p', { class: 'admin-page-sub' }, t('بدّل لغة لوحة التحكم والمتجر من مكان واحد. أربع لغات مترجمة يدوياً، فورية وبلا خدمة ترجمة خارجية.'))),
+        el('div', { class: 'admin-head-actions' }, adminLangSwitcher())),
+      el('div', { class: 'admin-lang-grid' }, ...cards),
+      el('div', { class: 'panel cc-panel' },
+        el('div', { class: 'panel-head' }, ico('globe', 'icon'), t('كيف تعمل الترجمة')),
+        el('div', { class: 'cc-config-list' },
+          el('div', { class: 'cc-config-row' }, el('span', null, t('المصدر')), el('strong', null, 'public/js/lang.js'), el('i', { class: 'cc-config-dot is-ok' })),
+          el('div', { class: 'cc-config-row' }, el('span', null, t('اللغات المدعومة')), el('strong', null, 'AR · EN · FR · ES'), el('i', { class: 'cc-config-dot is-ok' })),
+          el('div', { class: 'cc-config-row' }, el('span', null, t('الاتجاه')), el('strong', null, t('عربي من اليمين لليسار، والباقي من اليسار لليمين')), el('i', { class: 'cc-config-dot is-ok' })),
+          el('div', { class: 'cc-config-row' }, el('span', null, t('الاعتماد على الشبكة')), el('strong', null, t('لا يوجد')), el('i', { class: 'cc-config-dot is-ok' }))),
+        el('div', { class: 'hint' }, t('كل نصوص الواجهة مترجمة يدوياً بقاموس ثابت؛ لا تُستخدم خدمة ترجمة آلية للواجهة.'))),
+    );
   }
 
   async function renderDashboard(body) {

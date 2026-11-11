@@ -418,7 +418,32 @@
         ico('telegram', 'icon'),
         el('span', { class: 'telegram-cta-label' }, t('انضم الى المجموعة')),
       ),
+      // Directly below the Telegram button: let users spread the store link.
+      // A <button> (never an external <a>) keeps the Telegram invite the only
+      // external link on this page. The share sheet mounts lazily on click.
+      el('button', {
+        class: 'share-store-cta', type: 'button',
+        'aria-label': t('مشاركة المتجر'),
+        onclick: shareStore,
+      },
+        ico('share', 'icon'),
+        el('span', null, t('مشاركة المتجر')),
+      ),
+      el('p', { class: 'share-store-hint' }, t('شارك رابط المتجر مع أصدقائك ليعرفوا تطبيقاتنا وألعابنا')),
     );
+  }
+
+  function shareStore() {
+    const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
+    const url = origin || 'https://goldenstore.online';
+    const payload = {
+      title: 'Golden Store',
+      text: t('شارك رابط المتجر مع أصدقائك ليعرفوا تطبيقاتنا وألعابنا'),
+      url, icon: '/images/logo.png', kind: 'store',
+    };
+    if (window.GSShare && typeof window.GSShare.open === 'function') window.GSShare.open(payload);
+    else if (navigator.share) navigator.share({ title: 'Golden Store', url }).catch(() => {});
+    else if (navigator.clipboard) { navigator.clipboard.writeText(url); toast(t('تم نسخ الرابط'), 'success'); }
   }
 
   function langSettingItem() {

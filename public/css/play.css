@@ -3894,3 +3894,96 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
 @media (prefers-reduced-motion: reduce) {
   .gs-modal-btn { transition: none; }
 }
+
+/* ==========================================================================
+   Professional share sheet + "Share the store" CTA (2026-11-08)
+   Bottom sheet on phones, centred dialog on desktop. No external libraries.
+   ========================================================================== */
+.gs-share-overlay {
+  position: fixed; inset: 0; z-index: 9999; display: flex;
+  align-items: center; justify-content: center; padding: 18px;
+  background: rgba(0,0,0,.62); backdrop-filter: blur(6px);
+  opacity: 0; transition: opacity .18s ease;
+}
+.gs-share-overlay.is-open { opacity: 1; }
+.gs-share-sheet {
+  width: min(440px, 100%); max-height: min(88vh, 680px); overflow-y: auto;
+  border-radius: 20px; padding: 18px;
+  background: var(--surface, #17171a); color: var(--text, #f5f5f5);
+  border: 1px solid rgba(244,192,31,.28);
+  box-shadow: 0 24px 70px rgba(0,0,0,.55);
+  transform: translateY(14px) scale(.98); transition: transform .2s ease;
+}
+.gs-share-overlay.is-open .gs-share-sheet { transform: translateY(0) scale(1); }
+.gs-share-grip { display: none; }
+.gs-share-head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+.gs-share-head-icon {
+  width: 40px; height: 40px; border-radius: 13px; flex: 0 0 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #111; background: linear-gradient(135deg, #ffd34d, #f4c01f);
+}
+.gs-share-head-icon .icon { width: 21px; height: 21px; }
+.gs-share-head-text { flex: 1 1 auto; min-width: 0; }
+.gs-share-head-text h2 { margin: 0; font-size: 16px; font-weight: 800; }
+.gs-share-head-text p { margin: 2px 0 0; font-size: 11.5px; color: var(--text-2, #a9a9b0); }
+.gs-share-close { flex: 0 0 auto; }
+.gs-share-preview {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  border-radius: 14px; margin-bottom: 14px;
+  background: rgba(244,192,31,.06); border: 1px solid rgba(244,192,31,.2);
+}
+.gs-share-preview-icon { width: 48px; height: 48px; border-radius: 12px; object-fit: cover; flex: 0 0 48px; }
+.gs-share-preview-icon.is-fallback {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.07); color: var(--gold, #f4c01f);
+}
+.gs-share-preview-icon.is-fallback .icon { width: 24px; height: 24px; }
+.gs-share-preview-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.gs-share-preview-text strong { font-size: 13px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-share-preview-text span { font-size: 11px; color: var(--text-2, #a9a9b0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+.gs-share-label { display: block; font-size: 11px; font-weight: 800; color: var(--text-2, #a9a9b0); margin-bottom: 6px; }
+.gs-share-url-row { display: flex; gap: 7px; margin-bottom: 14px; }
+.gs-share-url-input {
+  flex: 1 1 auto; min-width: 0; direction: ltr; text-align: start;
+  padding: 10px 11px; border-radius: 11px; font: 600 11.5px ui-monospace, Menlo, monospace;
+  color: var(--text, #f5f5f5); background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.12);
+}
+.gs-share-copy { flex: 0 0 auto; white-space: nowrap; }
+.gs-share-copy.is-copied { color: #8ee0a8; border-color: rgba(64,190,110,.45); }
+.gs-share-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gs-share-actions .btn-block { width: 100%; justify-content: center; }
+.gs-share-actions .btn-primary { grid-column: 1 / -1; }
+.gs-share-foot { margin: 14px 0 0; font-size: 10.5px; line-height: 1.7; color: var(--text-2, #a9a9b0); text-align: center; }
+
+/* Share-the-store button directly below the Telegram CTA on the account page */
+.share-store-cta {
+  width: 100%; margin-top: 10px; padding: 12px 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  border-radius: 12px; font-size: 13.5px; font-weight: 800; cursor: pointer;
+  color: var(--gold, #f4c01f); background: rgba(244,192,31,.08);
+  border: 1px solid rgba(244,192,31,.38);
+  transition: filter .18s ease, transform .18s ease;
+}
+.share-store-cta:hover { filter: brightness(1.09); }
+.share-store-cta:active { transform: scale(.99); }
+.share-store-cta .icon { width: 19px; height: 19px; }
+.share-store-hint { margin: 8px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--text-2, #a9a9b0); text-align: center; }
+
+@media (max-width: 620px) {
+  .gs-share-overlay { align-items: flex-end; padding: 0; }
+  .gs-share-sheet {
+    width: 100%; max-width: 100%; border-radius: 22px 22px 0 0;
+    padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+  }
+  .gs-share-overlay.is-open .gs-share-sheet { transform: translateY(0); }
+  .gs-share-grip {
+    display: block; width: 42px; height: 4px; border-radius: 99px;
+    background: rgba(255,255,255,.22); margin: 2px auto 12px;
+  }
+  .gs-share-actions { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gs-share-overlay, .gs-share-sheet { transition: none; }
+}

@@ -1596,3 +1596,85 @@ body.admin-compact .admin-kpi { padding: 10px; }
   .cc-grid { grid-template-columns: minmax(0, 1fr); }
   .cc-donut { width: 92px; height: 92px; flex-basis: 92px; }
 }
+
+/* ==========================================================================
+   Language switcher + Languages screen + phone/desktop responsiveness
+   (2026-11-08). Appended only: earlier cascade rules stay untouched.
+   ========================================================================== */
+.admin-lang-switch { flex: 0 0 auto; }
+.admin-lang-switch .lang-btn { width: 40px; height: 40px; }
+.admin-lang-switch .lang-code { font-size: 9px; font-weight: 800; }
+.admin-lang-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.admin-lang-card {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 14px; border-radius: 15px; min-width: 0;
+  background: var(--surface, #17171a); border: 1px solid rgba(255,255,255,.09);
+  transition: border-color .18s ease, transform .18s ease;
+}
+.admin-lang-card:hover { transform: translateY(-2px); border-color: rgba(244,192,31,.4); }
+.admin-lang-card.is-active { border-color: rgba(244,192,31,.55); background: rgba(244,192,31,.07); }
+.admin-lang-flag { font-size: 26px; line-height: 1; flex: 0 0 auto; }
+.admin-lang-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 90px; }
+.admin-lang-info strong { font-size: 13.5px; font-weight: 800; }
+.admin-lang-info span { font-size: 10.5px; color: var(--text-2); }
+.admin-lang-badge {
+  flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; font-size: 10px; font-weight: 800;
+  color: #8ee0a8; background: rgba(64,190,110,.1); border: 1px solid rgba(64,190,110,.4);
+}
+
+/* Desktop: keep the owner's width presets but never let grids overflow. */
+@media (min-width: 1201px) {
+  .admin-shell, .admin-topbar-inner { max-width: var(--admin-content-max, 1440px); }
+  .admin-dash-grid, .admin-live-grid, .cc-panel-grid,
+  .admin-kpi-grid, .cc-grid, .admin-lang-grid { min-width: 0; }
+  .admin-lang-card, .cc-card, .admin-kpi { min-width: 0; }
+}
+@media (max-width: 1200px) {
+  .admin-lang-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .admin-topbar { padding: 8px 12px; }
+  .admin-topbar-inner { flex-wrap: wrap; height: auto; gap: 8px; }
+  .admin-breadcrumb { order: 3; flex: 1 1 100%; font-size: 10.5px; }
+  .admin-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .admin-width-select, .admin-search-trigger-label, .admin-kbd { display: none; }
+  .admin-search-trigger { width: 40px; padding: 0; justify-content: center; }
+  .admin-palette { width: min(560px, calc(100% - 24px)); }
+  .admin-preview-card { width: min(420px, calc(100% - 24px)); }
+}
+@media (max-width: 760px) {
+  .admin-title, .admin-breadcrumb { display: none; }
+  .admin-actions { justify-content: flex-start; }
+  .admin-topbar .icon-btn { width: 36px; height: 36px; }
+  .admin-topbar .icon-btn .icon { width: 19px; height: 19px; }
+  .admin-kpi-grid, .admin-kpi-grid-live, .cc-grid, .admin-lang-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .admin-kpi { padding: 12px; }
+  .admin-kpi-value { font-size: 20px; }
+  .admin-page-head { flex-direction: column; align-items: stretch; gap: 8px; }
+  .admin-head-actions { flex-wrap: wrap; }
+  .admin-table-toolbar .input { width: 100%; }
+  .admin-dash-grid, .admin-live-grid, .cc-panel-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-activity, .admin-update-summary { min-width: 0; }
+  /* Generic admin tables become labelled cards instead of horizontal scroll */
+  .admin-table thead { display: none; }
+  .admin-table tr {
+    display: block; padding: 9px 10px; margin-bottom: 8px;
+    border: 1px solid rgba(255,255,255,.09); border-radius: 12px;
+  }
+  .admin-table td {
+    display: flex; justify-content: space-between; gap: 10px;
+    border: 0; padding: 4px 0; text-align: start;
+  }
+  .admin-table td::before {
+    content: attr(data-label); font-size: 10.5px; font-weight: 800;
+    color: var(--text-2); white-space: nowrap;
+  }
+  .admin-table .cell-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .admin-pager { gap: 4px; }
+  .admin-pager-btn { min-width: 30px; height: 30px; padding: 0 6px; }
+}
+@media (max-width: 380px) {
+  .admin-kpi-grid, .admin-kpi-grid-live, .cc-grid, .admin-lang-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-brand span, .admin-brand b { font-size: 12px; }
+  .admin-lang-flag { font-size: 22px; }
+}

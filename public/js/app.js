@@ -630,13 +630,26 @@
     root.append(content);
     content.append(S.skeletonDetail());
 
+    // Professional share sheet: preview, copyable link, native OS share and a
+    // safe "open link" action. Built lazily so it never touches page load.
     function share(a) {
       const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
       const url = origin
         ? `${origin}/app?slug=${encodeURIComponent(a && a.slug ? a.slug : slug)}`
         : location.href;
-      if (navigator.share) navigator.share({ title: (a && a.name) || 'Golden Store', url }).catch(() => {});
-      else { navigator.clipboard && navigator.clipboard.writeText(url); toast(t('تم نسخ الرابط'), 'success'); }
+      const payload = {
+        title: (a && a.name) || 'Golden Store',
+        text: (a && (a.short_description || a.description || '')) || '',
+        url, icon: (a && a.icon_url) || '',
+        kind: (a && a.type === 'game') ? 'game' : 'app',
+      };
+      if (window.GSShare && typeof window.GSShare.open === 'function') {
+        window.GSShare.open(payload);
+      } else if (navigator.share) {
+        navigator.share({ title: payload.title, text: payload.text, url }).catch(() => {});
+      } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(url); toast(t('تم نسخ الرابط'), 'success');
+      }
     }
 
     if (!slug) { content.innerHTML = ''; content.append(S.emptyState(t('لا يوجد تطبيق محدد'), t('الرابط غير صحيح.'), 'info')); return; }

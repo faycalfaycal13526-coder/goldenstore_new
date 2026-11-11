@@ -401,7 +401,7 @@
   // One button, no social-media list: invite users to the Telegram channel.
   // Copy invites users to join the channel only.
   function telegramCard() {
-    return el('section', { class: 'telegram-card', 'aria-label': t('انضموا إلى قناتنا على تليجرام') },
+    const card = el('section', { class: 'telegram-card', 'aria-label': t('انضموا إلى قناتنا على تليجرام') },
       el('div', { class: 'telegram-card-head' },
         el('span', { class: 'telegram-card-icon' }, ico('telegram', 'icon')),
         el('h3', null, t('انضموا إلى قناتنا على تليجرام')),
@@ -418,9 +418,13 @@
         ico('telegram', 'icon'),
         el('span', { class: 'telegram-cta-label' }, t('انضم الى المجموعة')),
       ),
-      // Directly below the Telegram button: let users spread the store link.
-      // A <button> (never an external <a>) keeps the Telegram invite the only
-      // external link on this page. The share sheet mounts lazily on click.
+    );
+
+    // The share button is now STANDALONE: its own section, directly below the
+    // Telegram card, containing nothing but the button itself. A DocumentFragment
+    // keeps the two sections as siblings without adding a wrapper <div>, so the
+    // Telegram card stays exactly as it was and supportEntry() still follows.
+    const shareCard = el('section', { class: 'share-store-card', 'aria-label': t('مشاركة المتجر') },
       el('button', {
         class: 'share-store-cta', type: 'button',
         'aria-label': t('مشاركة المتجر'),
@@ -429,8 +433,11 @@
         ico('share', 'icon'),
         el('span', null, t('مشاركة المتجر')),
       ),
-      el('p', { class: 'share-store-hint' }, t('شارك رابط المتجر مع أصدقائك ليعرفوا تطبيقاتنا وألعابنا')),
     );
+    const group = document.createDocumentFragment();
+    group.appendChild(card);
+    group.appendChild(shareCard);
+    return group;
   }
 
   function shareStore() {

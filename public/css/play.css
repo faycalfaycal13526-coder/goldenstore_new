@@ -3987,3 +3987,14 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
 @media (prefers-reduced-motion: reduce) {
   .gs-share-overlay, .gs-share-sheet { transition: none; }
 }
+
+/* Standalone "Share the store" section — the button is alone, directly below
+   the Telegram card (2026-11-08). No wrapper text or extra links. */
+.share-store-card {
+  margin-top: 12px; padding: 12px; border-radius: 14px;
+  background: rgba(244,192,31,.05); border: 1px solid rgba(244,192,31,.26);
+}
+.share-store-card .share-store-cta { margin-top: 0; }
+@media (max-width: 420px) {
+  .share-store-card { padding: 10px; margin-top: 10px; }
+}

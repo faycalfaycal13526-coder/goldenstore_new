@@ -246,7 +246,8 @@ async function hasMaintenancePreview(c: any): Promise<boolean> {
     const token = getCookie(c, PREVIEW_COOKIE_NAME);
     if (!token) return false;
     const payload = await verifyJwt(token, secret);
-    return !!payload && payload.role === 'admin' && payload.scope === 'maintenance_preview';
+    return !!payload && payload.role === 'maintenance_preview'
+      && payload.scope === 'maintenance_preview';
   } catch { return false; }
 }
 async function maintenanceConfig(c: any): Promise<Record<string, string>> {
@@ -1420,7 +1421,8 @@ app.post('/admin/maintenance-preview', async (c) => {
   const secret = c.env.JWT_SECRET;
   if (!secret) return c.json({ error: 'server_misconfigured' }, 500);
   const token = await signJwt({
-    sub: 'maintenance-preview', role: 'admin', scope: 'maintenance_preview', jti: randomId(),
+    sub: 'maintenance-preview', role: 'maintenance_preview',
+    scope: 'maintenance_preview', jti: randomId(),
   }, secret, MAINTENANCE_PREVIEW_TTL);
   setCookie(c, PREVIEW_COOKIE_NAME, token, {
     httpOnly: true, secure: isSecureRequest(c), sameSite: 'Lax', path: '/',

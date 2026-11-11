@@ -90,7 +90,7 @@
     if (!end || end <= 0) return '';
     try {
       return new Date(end * 1000).toLocaleString(document.documentElement.lang || 'ar',
-        { dateStyle: 'medium', timeStyle: 'short' });
+        { dateStyle: 'medium', timeStyle: 'short', numberingSystem: 'latn' });
     } catch (e) { return ''; }
   }
   function node(tag, cls, text) {

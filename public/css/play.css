@@ -4045,3 +4045,97 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { visibility: h
 @media (max-width: 540px) {
   .gs-maint-page { padding: 14px; }
 }
+
+/* ==========================================================================
+   App-identical maintenance card (2026-11-05): the native app shows a warm
+   cream card on an opaque black/gold backdrop, regardless of the store theme.
+   These late, higher-specificity rules make BOTH the website overlay and the
+   standalone /maintenance page match that screen exactly.
+   ========================================================================== */
+:root[data-theme] .gs-maintenance-card,
+.gs-maintenance-card {
+  color: #17140a;
+  background: linear-gradient(180deg, #fffdf7 0%, #fbf4e4 100%);
+  border: 1px solid rgba(244,192,31,.58);
+  box-shadow: 0 30px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(244,192,31,.12) inset,
+              0 0 60px rgba(244,192,31,.12);
+}
+:root[data-theme] .gs-maintenance-logo,
+.gs-maintenance-logo {
+  background: #fffaf0;
+  border: 2px solid #f4c01f;
+  box-shadow: 0 0 0 8px rgba(244,192,31,.09), 0 0 30px rgba(244,192,31,.28);
+}
+:root[data-theme] .gs-maintenance-badge,
+.gs-maintenance-badge {
+  color: #5a4300;
+  background: #fff7df;
+  border: 1px solid rgba(244,192,31,.65);
+}
+:root[data-theme] .gs-maintenance-dot,
+.gs-maintenance-dot { background: #f4c01f; }
+:root[data-theme] .gs-maintenance-title,
+.gs-maintenance-title { color: #17140a; }
+:root[data-theme] .gs-maintenance-desc,
+.gs-maintenance-desc { color: #3c382c; }
+:root[data-theme] .gs-maintenance-clock,
+.gs-maintenance-clock {
+  background: #fff8e8;
+  border: 1px solid rgba(244,192,31,.45);
+}
+:root[data-theme] .gs-maintenance-clock-label,
+.gs-maintenance-clock-label,
+:root[data-theme] .gs-maintenance-end,
+.gs-maintenance-end { color: #514a35; }
+:root[data-theme] .gs-maintenance-countdown,
+.gs-maintenance-countdown { color: #e5a900; }
+:root[data-theme] .gs-maintenance-end b,
+.gs-maintenance-end b { color: #c89000; }
+:root[data-theme] .gs-maintenance-track,
+.gs-maintenance-track { background: rgba(244,192,31,.16); }
+:root[data-theme] .gs-maintenance-fill,
+.gs-maintenance-fill { background: linear-gradient(90deg, #f4c01f, #ffe9a8); }
+:root[data-theme] .gs-maintenance-foot,
+.gs-maintenance-foot { color: #5c5542; }
+.gs-maintenance-card .gs-modal-btn {
+  color: #a87800;
+  background: #fff8e6;
+  border: 1px solid rgba(244,192,31,.65);
+}
+.gs-maintenance-card .gs-modal-btn .icon { color: #d5a000; }
+.gs-maintenance-card .gs-modal-lang-code { color: #8a6400; }
+:root[data-theme] .gs-maintenance-card .gs-modal-lang-menu,
+.gs-maintenance-card .gs-modal-lang-menu {
+  background: #fffdf7;
+  border: 1px solid rgba(244,192,31,.55);
+}
+.gs-maintenance-card .gs-modal-lang-item { color: #3c382c; }
+.gs-maintenance-card .gs-modal-lang-item:hover,
+.gs-maintenance-card .gs-modal-lang-item.is-on {
+  background: rgba(244,192,31,.16);
+  color: #8a6400;
+}
+
+/* Nothing from the store/login/download/admin chrome may bleed through. */
+html.gs-maintenance-locked,
+html.gs-maintenance-locked body { background: #050507 !important; }
+html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay),
+html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) * {
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+.gs-maintenance-overlay {
+  background: radial-gradient(circle at 50% 22%, rgba(244,192,31,.14), transparent 62%), #050507 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  touch-action: none !important;
+}
+.gs-maint-page {
+  background: radial-gradient(circle at 50% 22%, rgba(244,192,31,.14), transparent 62%), #050507 !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  touch-action: none !important;
+}
+body[data-page="maintenance"] { background: #050507 !important; overflow: hidden !important; }

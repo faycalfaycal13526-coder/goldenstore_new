@@ -20,7 +20,10 @@
   }
   function endLabel(ts) {
     if (!ts) return '—';
-    try { return new Date(ts * 1000).toLocaleString((window.GSI18N && window.GSI18N.lang) || 'ar', { numberingSystem: 'latn' }); }
+    try {
+      return new Date(ts * 1000).toLocaleString((window.GSI18N && window.GSI18N.lang) || 'ar',
+        { dateStyle: 'medium', timeStyle: 'short', numberingSystem: 'latn' });
+    }
     catch (e) { return String(ts); }
   }
   function build(meta) {

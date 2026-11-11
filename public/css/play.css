@@ -3818,22 +3818,6 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
   .gs-maintenance-countdown { font-size: 29px; }
 }
 
-/* Admin preview pill: visible but NEVER blocks the administrator. */
-.gs-maintenance-bar.gs-maintenance-admin {
-  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-  z-index: 9998; width: auto; max-width: calc(100vw - 24px);
-  display: flex; align-items: center; justify-content: center; gap: 9px;
-  padding: 8px 14px; border-radius: 999px; font-size: 11.5px; font-weight: 800;
-  color: #1a1400; background: linear-gradient(90deg, #f4c01f, #ffe9a8, #f4c01f);
-  box-shadow: 0 8px 28px rgba(0,0,0,.35); white-space: nowrap;
-}
-.gs-maintenance-admin-dot { width: 7px; height: 7px; border-radius: 50%; background: #1a1400; flex: 0 0 auto; }
-.gs-maintenance-admin b { direction: ltr; font-variant-numeric: tabular-nums; }
-.gs-maintenance-admin a { color: #1a1400; text-decoration: underline; font-weight: 800; }
-@media (max-width: 540px) {
-  .gs-maintenance-bar.gs-maintenance-admin { gap: 6px; font-size: 10px; padding: 7px 10px; }
-  .gs-maintenance-bar.gs-maintenance-admin a { display: none; }
-}
 @media (prefers-reduced-motion: reduce) {
   .gs-maintenance-logo, .gs-maintenance-dot { animation: none; }
   .gs-maintenance-fill { transition: none; }

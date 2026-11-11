@@ -47,7 +47,6 @@
   /* Centered, non-bypassable maintenance modal                          */
   /* ------------------------------------------------------------------ */
   var activeOverlay = null;
-  var adminPill = null;
   var guardObserver = null;
   var guardTimer = null;
   var tickTimer = null;
@@ -68,7 +67,6 @@
     var end = endAt();
     return !(end > 0 && end <= serverNow());
   }
-  function isBypass() { return !!(meta && meta.maintenance_bypass === true); }
   function isMaintenancePage() {
     try {
       if (document.body && document.body.getAttribute('data-page') === 'maintenance') return true;
@@ -367,61 +365,38 @@
     stopGuards();
     unlockPage();
   }
-  function showAdminPill() {
-    var existing = document.getElementById('gs-maintenance-admin');
-    if (!existing) {
-      existing = node('div', 'gs-maintenance-bar gs-maintenance-admin');
-      existing.id = 'gs-maintenance-admin';
-      existing.setAttribute('role', 'status');
-      existing.setAttribute('data-noi18n', '');
-      existing.appendChild(node('span', 'gs-maintenance-admin-dot'));
-      existing.appendChild(node('strong', 'gs-maintenance-admin-label',
-        tr(isBypass() ? 'وضع الصيانة مفعّل — معاينة المدير' : 'وضع الصيانة مفعّل — الزوار محجوبون')));
-      var cd = node('b', 'gs-maintenance-admin-countdown', '--:--:--');
-      cd.setAttribute('dir', 'ltr');
-      existing.appendChild(cd);
-      if (!isAdminConsole()) {
-        var a = node('a', null, tr('لوحة التحكم'));
-        a.setAttribute('href', '/gs-admin-c0d982f8.html');
-        existing.appendChild(a);
-      }
-      document.body.appendChild(existing);
-    }
-    adminPill = existing;
-    var label = adminPill.querySelector('.gs-maintenance-admin-label');
-    if (label) label.textContent = tr(isBypass()
-      ? 'وضع الصيانة مفعّل — معاينة المدير' : 'وضع الصيانة مفعّل — الزوار محجوبون');
-    var rem = endAt() > 0 ? endAt() - serverNow() : 0;
-    var b = adminPill.querySelector('.gs-maintenance-admin-countdown');
-    if (b) b.textContent = endAt() > 0 ? fmtRemaining(rem) : '—';
-  }
-  function hideAdminPill() {
-    if (adminPill) { try { adminPill.remove(); } catch (e) {} adminPill = null; }
-    var existing = document.getElementById('gs-maintenance-admin');
-    if (existing) existing.remove();
+  /* The old admin preview top bar is gone. Keep only a defensive cleanup for
+     stale cached builds; the admin console stays reachable WITHOUT any bar. */
+  function removeLegacyAdminPill() {
+    try {
+      var existing = document.getElementById('gs-maintenance-admin');
+      if (existing) existing.remove();
+      var legacy = document.getElementById('gs-maintenance-bar');
+      if (legacy) legacy.remove();
+      document.body.classList.remove('has-maintenance-bar');
+    } catch (e) {}
   }
   function maintenance() {
-    // Remove the legacy top banner from older cached builds.
-    var legacy = document.getElementById('gs-maintenance-bar');
-    if (legacy && legacy.id === 'gs-maintenance-bar' && !legacy.classList.contains('gs-maintenance-admin')) legacy.remove();
-    document.body.classList.remove('has-maintenance-bar');
-    if (!isActive()) { hideBlocking(); hideAdminPill(); return; }
+    // Remove any top bar from older cached builds; the user explicitly asked
+    // for the maintenance SCREEN instead of «وضع الصيانة مفعّل — معاينة المدير».
+    removeLegacyAdminPill();
+    if (!isActive()) { hideBlocking(); return; }
     // The standalone /maintenance page IS the maintenance screen: never put a
     // second overlay on top of it.
-    if (isMaintenancePage()) { hideBlocking(); hideAdminPill(); return; }
+    if (isMaintenancePage()) { hideBlocking(); return; }
     var msg = get('maintenance_message') || tr('المتجر تحت الصيانة، نعود قريباً.');
     // The console is the ONLY page that is never locked: the admin must be able
     // to sign in (or turn maintenance off) even before a session cookie exists.
-    // Visitors still cannot read anything: every /api/admin/* route is 401 and
-    // every public API route is 503 without a verified admin session.
-    if (isBypass() || isAdminConsole()) { hideBlocking(); showAdminPill(); return; }
-    hideAdminPill();
+    // An admin session no longer gets a preview pill on public pages — it gets
+    // the exact same centered maintenance screen as every other visitor.
+    // Server-side /api/admin/* remains 401 and public API remains 503.
+    if (isAdminConsole()) { hideBlocking(); return; }
     showBlocking(msg);
   }
 
   function applyLanguage() {
     try {
-      if (isActive() && !isBypass()) return;   // never reload a locked maintenance screen
+      if (isActive() && !isAdminConsole()) return;   // never reload a locked maintenance screen
       if (localStorage.getItem('gs_lang')) return;                 // explicit user choice wins
       var want = get('default_language', 'ar');
       if (!want || want === 'ar') return;

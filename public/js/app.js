@@ -276,9 +276,23 @@
   }
 
   const apkStateHandlers = Object.create(null);
+  /* Set while the Android system installer («هل تريد تثبيت التطبيق؟») is open.
+     On decline we must NOT let the store hub delete the downloaded APK state. */
+  const installPromptBySlug = Object.create(null);
+  function markInstallPrompt(slug, filename) { if (slug) installPromptBySlug[slug] = filename || ''; }
+  function clearInstallPrompt(slug) { if (slug) delete installPromptBySlug[slug]; }
+  function hasInstallPrompt(slug) { return !!(slug && Object.prototype.hasOwnProperty.call(installPromptBySlug, slug)); }
+  function installPromptFilename(slug) { return hasInstallPrompt(slug) ? installPromptBySlug[slug] : ''; }
+
   const storeApkHandler = window.__gsApkDownloadUpdate;
   window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
-    if (typeof storeApkHandler === 'function') storeApkHandler(slug, status, progress, message);
+    let hubStatus = status, hubProgress = progress;
+    // A declined/failed INSTALL is not a cancelled DOWNLOAD: keep the file.
+    if (slug && slug !== 'app-update' && hasInstallPrompt(slug)
+        && (status === 'cancelled' || status === 'failed')) {
+      hubStatus = 'downloaded'; hubProgress = 1;
+    }
+    if (typeof storeApkHandler === 'function') storeApkHandler(slug, hubStatus, hubProgress, message);
     const h = apkStateHandlers[slug];
     if (h) h(status, (typeof progress === 'number' ? progress : -1), message);
   };
@@ -986,6 +1000,7 @@
       if (cancelBtn.disabled || cancelBtn.classList.contains('hidden')) return;
       cancelBtn.disabled = true;
       cancelRequested = true;
+      clearInstallPrompt(app.slug);
       cancelBtn.classList.add('hidden');
       // Abort ONLY this slug's controller/reader; other concurrent downloads
       // (other apps/games, other tabs) are untouched.
@@ -1013,6 +1028,7 @@
       fill.style.width = '0%';
     }
     function showInstalled(mode) {
+      removeInstalledActions();
       setCancelVisible(false);
       resetBar();
       btn.disabled = false;
@@ -1062,9 +1078,16 @@
     function openDownloadedApk(a, filename) {
       if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.openDownloadedApk === 'function') {
         try {
+          // Immediately show ONLY the downloaded-actions bar (no big split
+          // button behind the system dialog), and remember we are in the prompt.
+          markInstallPrompt(a.slug, filename || '');
+          showDownloadedActions(a, filename);
           window.GSAndroid.openDownloadedApk(filename || '', a.slug || '', a.package_name || '');
           toast(t('جارٍ فتح مثبّت النظام…'), 'info');
-        } catch (e) { toast(t('تعذّر فتح الملف'), 'error'); }
+        } catch (e) {
+          clearInstallPrompt(a.slug);
+          toast(t('تعذّر فتح الملف'), 'error');
+        }
         return;
       }
       toast(t('غير متاح في هذا المتصفح'), 'info');
@@ -1110,15 +1133,20 @@
       } else {
         document.querySelector('.detail').prepend(bar);
       }
+      const det = document.querySelector('.detail');
+      if (det) det.classList.add('gs-downloaded-mode');
     }
     function removeInstalledActions() {
       const existing = document.getElementById('gs-installed-actions');
       if (existing) existing.remove();
+      const det = document.querySelector('.detail');
+      if (det) det.classList.remove('gs-downloaded-mode');
       setCancelVisible(false);
       const anchor = document.querySelector('.detail .d-actions');
       if (anchor) anchor.style.display = '';
     }
     function showIdle(skipAnchorRestore) {
+      removeInstalledActions();
       setCancelVisible(false);
       resetBar();
       btn.classList.remove('installed');
@@ -1126,11 +1154,39 @@
       label.textContent = t('تثبيت');
     }
 
+    /* One deterministic state after a declined install: the APK is still
+       downloaded, the big button is hidden, and only Install/Delete shows. */
+    function restoreReadyToInstall(fn, opts) {
+      const file = fn || installPromptFilename(app.slug)
+        || (S.getApkState(app.slug) || {}).filename || filename;
+      const now = Math.floor(Date.now() / 1000);
+      S.setApkState(app.slug, {
+        slug: app.slug, status: 'downloaded', progress: 1,
+        filename: file, updated_at: now,
+      });
+      S.removeActiveDownload(app.slug);
+      clearInstallPrompt(app.slug);
+      setCancelVisible(false);
+      btn.classList.remove('installing', 'indeterminate');
+      btn.disabled = false;
+      setProgress(1);
+      label.textContent = t('جاهز للتثبيت');
+      showDownloadedActions(app, file);
+      try { window.dispatchEvent(new CustomEvent('gs-apk-state', {
+        detail: { slug: app.slug, status: 'downloaded', progress: 1, message: file },
+      })); } catch (e) {}
+      if (opts && opts.toast) toast(opts.toast, opts.kind || 'info');
+    }
+
     apkStateHandlers[app.slug] = function (status, progress, message) {
       if (status === 'downloaded' || status === 'installed'
           || status === 'cancelled' || status === 'failed') {
         nativeDownloadFinished = true;
         clearNativeLeaveHandler();
+      }
+      if (status === 'downloading' || status === 'downloaded'
+          || status === 'installed' || status === 'uninstalled') {
+        clearInstallPrompt(app.slug);
       }
       const errMap = {
         signature_mismatch: t('تعارض توقيع الحزمة: ألغِ التطبيق المثبت ثم ثبّت النسخة الجديدة.'),
@@ -1198,6 +1254,11 @@
         return;
       }
       if (status === 'cancelled') {
+        if (hasInstallPrompt(app.slug)) {
+          const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
+          restoreReadyToInstall(fn, { toast: t('تم إلغاء التثبيت، الملف جاهز للتثبيت') });
+          return;
+        }
         const alreadyNotified = cancelRequested;
         cancelRequested = false;
         S.removeActiveDownload(app.slug);
@@ -1218,6 +1279,12 @@
         return;
       }
       if (status === 'failed') {
+        if (hasInstallPrompt(app.slug)) {
+          const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
+          restoreReadyToInstall(fn, { toast: errMap[message] || t('تعذّر التثبيت، الملف جاهز لإعادة المحاولة'), kind: 'error' });
+          return;
+        }
+        clearInstallPrompt(app.slug);
         const isInstalled = (S.installedVersionOnDevice && S.installedVersionOnDevice(realPackage(app))) || (S.isSlugInstalled && S.isSlugInstalled(app.slug));
         if (isInstalled) {
           return;
@@ -1453,19 +1520,11 @@
         else setIndeterminate();
         return;
       }
-      if (live && live.status === 'installing') {
-        btn.classList.add('installing');
-        btn.disabled = true;
-        setProgress(1);
-        label.textContent = t('جارٍ التثبيت…');
-        return;
-      }
-      if (live && live.status === 'downloaded') {
-        setProgress(1);
-        btn.classList.remove('installing');
-        btn.disabled = false;
-        label.textContent = t('جاهز للتثبيت');
-        showDownloadedActions(app, live.filename || filename);
+      if (live && (live.status === 'installing' || live.status === 'downloaded')) {
+        // Returning from the system installer without an «installed» event
+        // means the user declined. Restore the final UI IMMEDIATELY (no
+        // heartbeat wait, no stuck «جارٍ التثبيت…», no duplicate big button).
+        restoreReadyToInstall(live.filename || filename);
         return;
       }
       showIdle();
@@ -1482,8 +1541,10 @@
       if (isNativeApp()) resolveInstallState();
     };
     document.addEventListener('visibilitychange', onAppRevisit);
+    document.addEventListener('resume', onAppRevisit);
     window.addEventListener('focus', onAppRevisit);
     window.addEventListener('pageshow', onAppRevisit);
+    window.addEventListener('gs-app-resume', onAppRevisit);
 
     if (isNativeApp()) {
       resolveInstallState();

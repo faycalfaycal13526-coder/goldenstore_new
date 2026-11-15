@@ -563,6 +563,9 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .d-stat .l { font-size: 11px; color: var(--text-2); margin-top: 4px; }
 
 .d-actions { margin-top: 18px; display: flex; align-items: stretch; gap: 12px; }
+/* Declined system installer: ONLY the «تثبيت / حذف الملف» bar is visible.
+   The big split «جاهز للتثبيت» button must never coexist with it (no glitch). */
+.detail.gs-downloaded-mode > .d-actions { display: none !important; }
 .d-actions .btn { flex: 1; }
 .download-cancel-btn.btn {
   flex: 0 0 auto; padding-inline: 12px; white-space: nowrap;

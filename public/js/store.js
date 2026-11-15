@@ -1688,7 +1688,7 @@ const recentInstalledAt = Object.create(null);
 function applyInstalled(slug, resolvedPkg) {
   if (!slug) return;
   const now = Date.now();
-  if (now - (recentInstalledAt[slug] || 0) < 3000) return;
+  if (now - (recentInstalledAt[slug] || 0) < 500) return;
   recentInstalledAt[slug] = now;
   if (resolvedPkg) rememberResolvedPackage(slug, resolvedPkg);
   markInstalledStored(slug);
@@ -1706,7 +1706,8 @@ function registerInstallWatch(slug, packageName) {
 }
 function startHeartbeat() {
   if (heartbeatTimer || !isNativeBridge()) return;
-  heartbeatTimer = setInterval(heartbeatTick, 1500);
+  heartbeatTimer = setInterval(heartbeatTick, 400);
+  heartbeatTick();
   const onVisible = () => { if (!document.hidden) heartbeatTick(); };
   document.addEventListener('visibilitychange', onVisible);
   window.addEventListener('focus', onVisible);

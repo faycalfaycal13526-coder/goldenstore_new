@@ -595,6 +595,8 @@
     'تعذّر تسجيل الدخول. حاول مجدداً.': { en: 'Sign-in failed. Try again.', fr: 'Échec de connexion. Réessayez.', es: 'Error al iniciar sesión. Inténtalo de nuevo.' },
     'تعذّر فتح الملف': { en: 'Could not open the file', fr: 'Impossible d’ouvrir le fichier', es: 'No se pudo abrir el archivo' },
     'تم إلغاء التنزيل': { en: 'Download cancelled', fr: 'Téléchargement annulé', es: 'Descarga cancelada' },
+    'تم إلغاء التثبيت، الملف جاهز للتثبيت': { en: 'Install cancelled, the file is ready to install', fr: 'Installation annulée, le fichier est prêt à installer', es: 'Instalación cancelada, el archivo está listo para instalar' },
+    'تعذّر التثبيت، الملف جاهز لإعادة المحاولة': { en: 'Install failed, the file is ready to retry', fr: 'Échec de l’installation, le fichier est prêt pour une nouvelle tentative', es: 'Falló la instalación, el archivo está listo para reintentar' },
     'تم التنزيل — جاهز للتثبيت': { en: 'Downloaded — ready to install', fr: 'Téléchargé — prêt à installer', es: 'Descargado — listo para instalar' },
     'تم تثبيت التطبيق بنجاح': { en: 'App installed successfully', fr: 'Application installée avec succès', es: 'Aplicación instalada correctamente' },
     'تم حذف ملف التحميل': { en: 'Downloaded file deleted', fr: 'Fichier téléchargé supprimé', es: 'Archivo descargado eliminado' },

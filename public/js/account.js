@@ -26,8 +26,8 @@
       return;
     }
     root.innerHTML = '';
-    root.append(S.topbarSearch(user));
-
+    // Owner request: the store topbar must NOT appear on «أنت» nor «مكتبتي».
+    // Both views are rendered by this same file, so we simply do not mount it.
     const content = el('div', { class: 'acct-page' });
     root.append(content);
 

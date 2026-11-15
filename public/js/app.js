@@ -968,6 +968,11 @@
 
     // تعريف group و cancelBtn أولاً لتجنب الخطأ
     const group = el('div', { class: 'install-group' }, btn);
+    // Local, stable anchor: resolveInstallState() may run BEFORE this wrapper
+    // is attached to .detail. Never use .detail.prepend() as a fallback —
+    // that put the «تثبيت / حذف الملف» bar above the app icon (the glitch).
+    const actionsWrap = el('div', { class: 'd-actions' }, group);
+    let pendingActionsBar = null;
     const cancelBtn = el('button', {
       class: 'btn btn-secondary btn-lg download-cancel-btn hidden',
       type: 'button',
@@ -1097,6 +1102,27 @@
         try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
       }
     }
+    /* Place the secondary bar exactly where the main install button lives.
+       If the wrapper is not in the DOM yet (synchronous resolveInstallState),
+       defer by one microtask instead of prepending to .detail. */
+    function placeActionsBar(bar, after) {
+      pendingActionsBar = bar;
+      const insert = () => {
+        if (pendingActionsBar !== bar) return;
+        const parent = actionsWrap.parentNode;
+        if (!parent) return;
+        actionsWrap.style.display = 'none';
+        if (after) parent.insertBefore(bar, actionsWrap.nextSibling);
+        else parent.insertBefore(bar, actionsWrap);
+        pendingActionsBar = null;
+        if (!after) {
+          const det = document.querySelector('.detail');
+          if (det) det.classList.add('gs-downloaded-mode');
+        }
+      };
+      if (actionsWrap.parentNode) insert();
+      else Promise.resolve().then(insert);
+    }
     function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
       removeInstalledActions();
@@ -1107,14 +1133,7 @@
         el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
           ico('trash', 'icon'), t('إلغاء التثبيت')),
       );
-      const anchor = document.querySelector('.detail .d-actions');
-      if (anchor && anchor.parentNode) {
-        anchor.style.display = 'none';
-        anchor.parentNode.insertBefore(bar, anchor.nextSibling);
-      } else {
-        const det = document.querySelector('.detail');
-        if (det) det.prepend(bar);
-      }
+      placeActionsBar(bar, true);
     }
     function showDownloadedActions(a, filename) {
       setCancelVisible(false);
@@ -1126,24 +1145,16 @@
         el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => { deleteDownloadedApk(a, filename); S.removeApkState(a.slug); S.removeActiveDownload(a.slug); removeInstalledActions(); showIdle(true); toast(t('تم حذف ملف التحميل'), 'info'); } },
           ico('trash', 'icon'), t('حذف الملف')),
       );
-      const anchor = document.querySelector('.detail .d-actions');
-      if (anchor) {
-        anchor.style.display = 'none';
-        anchor.parentNode.insertBefore(bar, anchor);
-      } else {
-        document.querySelector('.detail').prepend(bar);
-      }
-      const det = document.querySelector('.detail');
-      if (det) det.classList.add('gs-downloaded-mode');
+      placeActionsBar(bar, false);
     }
     function removeInstalledActions() {
       const existing = document.getElementById('gs-installed-actions');
       if (existing) existing.remove();
+      pendingActionsBar = null;
       const det = document.querySelector('.detail');
       if (det) det.classList.remove('gs-downloaded-mode');
       setCancelVisible(false);
-      const anchor = document.querySelector('.detail .d-actions');
-      if (anchor) anchor.style.display = '';
+      actionsWrap.style.display = '';
     }
     function showIdle(skipAnchorRestore) {
       removeInstalledActions();
@@ -1615,7 +1626,7 @@
     caret.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
     document.addEventListener('click', (e) => { if (!group.contains(e.target)) toggleMenu(false); });
 
-    return el('div', { class: 'd-actions' }, group);
+    return actionsWrap;
   }
 
   function ratingSection(app) {

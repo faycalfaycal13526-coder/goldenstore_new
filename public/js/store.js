@@ -637,6 +637,15 @@ function topbarSearch(user) {
     title: t('بحث'),
     onclick: () => { location.href = '/search'; },
   }, ico('search'));
+  /* My Library: exact same .icon-btn circle/size as the notifications button,
+     placed immediately BEFORE it on every page that uses topbarSearch(). */
+  const libraryBtn = el('button', {
+    class: 'icon-btn library-btn',
+    type: 'button',
+    'aria-label': t('مكتبتي'),
+    title: t('مكتبتي'),
+    onclick: () => { try { location.href = '/account?tab=library'; } catch (e) {} },
+  }, ico('download'));
   const bellBtn = el('button', {
     class: 'bell-btn icon-btn',
     type: 'button',
@@ -649,6 +658,7 @@ function topbarSearch(user) {
     el('div', { class: 'topbar-home' },
       el('a', { href: '/', class: 'brand', 'aria-label': 'Golden Store' }, el('img', { src: '/images/logo.png', alt: 'Golden Store' })),
       el('div', { class: 'tb-spacer' }),
+      libraryBtn,
       bellBtn,
       searchBtn,
     ),

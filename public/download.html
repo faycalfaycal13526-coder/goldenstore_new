@@ -206,12 +206,15 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
 .dl-feature h3 { font-size: 14.5px; font-weight: 800; margin-bottom: 5px; }
 .dl-feature p { font-size: 12.5px; color: var(--text-2); line-height: 1.65; }
 
-/* ---- footer ---- */
+/* ---- footer: links centred in the middle, copyright centred below ---- */
 .dl-footer { border-top: 1px solid var(--line); padding: 24px 0 34px; margin-top: 10px; }
-.dl-footer-inner { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.dl-footer-links { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); }
+.dl-footer-inner {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; text-align: center;
+}
+.dl-footer-links { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); }
 .dl-footer-links a:hover { color: var(--gold); }
-.dl-footer-copy { flex: 1; text-align: end; font-size: 11.5px; color: var(--text-3); }
+.dl-footer-copy { width: 100%; text-align: center; font-size: 11.5px; color: var(--text-3); }
 
 :focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
 @media (max-width: 760px) {
@@ -221,7 +224,8 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
   .dl-visual-inner { width: 190px; border-radius: 30px; }
   .dl-visual-ring { inset: -10px; border-radius: 40px; }
   .dl-features { grid-template-columns: repeat(2, 1fr); }
-  .dl-footer-copy { text-align: start; width: 100%; }
+  .dl-footer-copy { text-align: center; width: 100%; }
+  .dl-footer-links { gap: 12px; }
 }
 @media (max-width: 380px) {
   .dl-features { grid-template-columns: 1fr; }
@@ -329,10 +333,10 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261108o"></script>
-<script src="/js/store-settings.js?v=20261108o"></script>
-  <script src="/js/lang.js?v=20261108o"></script>
-<script src="/js/download.js?v=20261108o"></script>
-  <script src="/js/notification-hub.js?v=20261108o"></script>
+<script src="/js/icons.js?v=20261108p"></script>
+<script src="/js/store-settings.js?v=20261108p"></script>
+  <script src="/js/lang.js?v=20261108p"></script>
+<script src="/js/download.js?v=20261108p"></script>
+  <script src="/js/notification-hub.js?v=20261108p"></script>
 </body>
 </html>

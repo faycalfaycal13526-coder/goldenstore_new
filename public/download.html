@@ -30,13 +30,14 @@
   --gold: #c79a06; --gold-2: #f4c01f; --shadow: 0 24px 70px rgba(0,0,0,.12);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-/* Shared icon geometry — without these rules the inline SVGs render as
-   unclear black blobs (no stroke, no fill control). */
+/* Shared icon geometry. Real <img> icons use the same size hooks; the
+   stroke/fill rules are harmless on images and keep legacy inline icons sane. */
 .icon {
   display: inline-block; width: 24px; height: 24px; flex: 0 0 auto;
   vertical-align: middle; stroke: currentColor; fill: none;
   stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
 }
+.icon.dl-img-icon { object-fit: contain; }
 html, body { min-height: 100%; }
 body {
   background: var(--bg); color: var(--text);
@@ -193,6 +194,7 @@ a { color: inherit; text-decoration: none; }
   background: rgba(244,192,31,.12); border: 1px solid rgba(244,192,31,.28);
 }
 .dl-feature-ico .icon { width: 28px; height: 28px; }
+.dl-feature-ico .icon.dl-img-icon { width: 40px; height: 40px; }
 /* No-ads badge: clean prohibition mark (red ring + bar, dark ADS text),
    same box geometry as the other feature icons. */
 .dl-feature-ico.is-noads { background: rgba(225,29,46,.08); border-color: rgba(225,29,46,.38); }
@@ -236,7 +238,7 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
       <img src="/images/logo.png" alt="Golden Store"> Golden<b>Store</b>
     </a>
     <span class="dl-spacer"></span>
-    <a class="dl-home" href="/"><span class="icon" data-icon="home"></span><span data-i18n="الصفحة الرئيسية">الصفحة الرئيسية</span></a>
+    <a class="dl-home" href="/"><img class="icon dl-img-icon" src="/images/home.svg" alt="" width="18" height="18"><span data-i18n="الصفحة الرئيسية">الصفحة الرئيسية</span></a>
     <span id="languageSwitcher"></span>
   </div>
 </header>
@@ -249,11 +251,11 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
         <h1 class="dl-title" dir="ltr">Golden<b>Store</b></h1>
         <p class="dl-lead" data-i18n="حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي، بتصميم عصري وتحديثات مستمرة.">حمّل أحدث إصدار من Golden Store بأمان ومجاناً. متجر التطبيقات والألعاب العربي، بتصميم عصري وتحديثات مستمرة.</p>
         <div class="dl-version-row">
-          <span class="dl-pill"><span class="icon" data-icon="shieldCheck"></span><span data-i18n="الإصدار">الإصدار</span> <strong id="currentVersion">—</strong></span>
-          <span class="dl-pill"><span class="icon" data-icon="android"></span>Android</span>
+          <span class="dl-pill"><img class="icon dl-img-icon" src="/images/shield-check.svg" alt="" width="17" height="17"><span data-i18n="الإصدار">الإصدار</span> <strong id="currentVersion">—</strong></span>
+          <span class="dl-pill"><img class="icon dl-img-icon" src="/images/android.svg" alt="" width="17" height="17">Android</span>
         </div>
         <section id="downloadCounter" class="dl-counter" role="status" aria-live="polite" aria-atomic="true">
-          <span class="dl-counter-icon" aria-hidden="true"><span class="icon" data-icon="downloadCount"></span></span>
+          <span class="dl-counter-icon" aria-hidden="true"><img class="icon dl-img-icon" src="/images/download-count.svg" alt="" width="26" height="26"></span>
           <div class="dl-counter-copy">
             <strong id="downloadCount" class="dl-counter-number" data-count="0">—</strong>
             <span id="downloadCountLabel" class="dl-counter-label" data-i18n="إجمالي التنزيلات">إجمالي التنزيلات</span>
@@ -261,10 +263,10 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
         </section>
         <div class="dl-actions">
           <a id="downloadBtn" class="dl-btn is-disabled" href="#" aria-disabled="true">
-            <span class="icon" data-icon="download"></span><span id="downloadBtnLabel" data-i18n="تحميل الآن">تحميل الآن</span>
+            <img class="icon dl-img-icon" src="/images/download.svg" alt="" width="22" height="22"><span id="downloadBtnLabel" data-i18n="تحميل الآن">تحميل الآن</span>
           </a>
           <button id="checkUpdatesBtn" class="dl-btn-secondary" type="button">
-            <span class="icon" data-icon="refresh"></span><span data-i18n="التحقق من وجود تحديثات">التحقق من وجود تحديثات</span>
+            <img class="icon dl-img-icon" src="/images/refresh.svg" alt="" width="18" height="18"><span data-i18n="التحقق من وجود تحديثات">التحقق من وجود تحديثات</span>
           </button>
           <p id="downloadHelp" class="dl-help"></p>
           <p id="updateStatus" class="dl-check-status" role="status" aria-live="polite"></p>
@@ -284,17 +286,17 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
       </div>
       <div class="dl-features">
         <article class="dl-feature">
-          <div class="dl-feature-ico"><span class="icon" data-icon="gift"></span></div>
+          <div class="dl-feature-ico"><img class="icon dl-img-icon" src="/images/gift.svg" alt="" width="40" height="40"></div>
           <h3 data-i18n="مجاني بالكامل">مجاني بالكامل</h3>
           <p data-i18n="كل التطبيقات والألعاب متاحة دون أي رسوم أو اشتراكات.">كل التطبيقات والألعاب متاحة دون أي رسوم أو اشتراكات.</p>
         </article>
         <article class="dl-feature">
-          <div class="dl-feature-ico"><span class="icon" data-icon="shieldCheck"></span></div>
+          <div class="dl-feature-ico"><img class="icon dl-img-icon" src="/images/shield-check.svg" alt="" width="40" height="40"></div>
           <h3 data-i18n="تحميل مباشر وآمن">تحميل مباشر وآمن</h3>
           <p data-i18n="الملفات تُحمّل من الخادم الرسمي عبر رابط مباشر وموثوق.">الملفات تُحمّل من الخادم الرسمي عبر رابط مباشر وموثوق.</p>
         </article>
         <article class="dl-feature">
-          <div class="dl-feature-ico"><span class="icon" data-icon="refresh"></span></div>
+          <div class="dl-feature-ico"><img class="icon dl-img-icon" src="/images/refresh.svg" alt="" width="40" height="40"></div>
           <h3 data-i18n="تحديثات مستمرة">تحديثات مستمرة</h3>
           <p data-i18n="إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.">إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.</p>
         </article>
@@ -306,7 +308,7 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
       </div>
       <div class="dl-support-wrap">
         <a class="dl-feature dl-support-card" href="/support">
-          <div class="dl-feature-ico"><span class="icon" data-icon="message"></span></div>
+          <div class="dl-feature-ico"><img class="icon dl-img-icon" src="/images/message.svg" alt="" width="40" height="40"></div>
           <h3 data-i18n="الدعم">الدعم</h3>
           <p data-i18n="تحتاج مساعدة؟ تواصل مع فريق الدعم.">تحتاج مساعدة؟ تواصل مع فريق الدعم.</p>
         </a>
@@ -322,16 +324,15 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
       <a href="/about" data-i18n="من نحن">من نحن</a>
       <a href="/privacy" data-i18n="سياسة الخصوصية">سياسة الخصوصية</a>
       <a href="/terms" data-i18n="الشروط والأحكام">الشروط والأحكام</a>
-      <a href="/support" data-i18n="الدعم">الدعم</a>
     </div>
     <span class="dl-footer-copy" data-i18n="© Golden Store — جميع الحقوق محفوظة">© Golden Store — جميع الحقوق محفوظة</span>
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261108n"></script>
-<script src="/js/store-settings.js?v=20261108n"></script>
-  <script src="/js/lang.js?v=20261108n"></script>
-<script src="/js/download.js?v=20261108n"></script>
-  <script src="/js/notification-hub.js?v=20261108n"></script>
+<script src="/js/icons.js?v=20261108o"></script>
+<script src="/js/store-settings.js?v=20261108o"></script>
+  <script src="/js/lang.js?v=20261108o"></script>
+<script src="/js/download.js?v=20261108o"></script>
+  <script src="/js/notification-hub.js?v=20261108o"></script>
 </body>
 </html>

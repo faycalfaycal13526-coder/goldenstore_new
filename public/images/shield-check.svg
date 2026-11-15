@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Secure shield">
+  <circle cx="48" cy="48" r="45" fill="#ffffff"/>
+  <circle cx="48" cy="48" r="41" fill="none" stroke="#f4c01f" stroke-width="2" opacity=".35"/>
+  <path d="M48 16 L74 27 V47 C74 63 62 73 48 80 C34 73 22 63 22 47 V27 Z" fill="#fff7df" stroke="#f4c01f" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M36 49 L45 58 L62 38" fill="none" stroke="#141414" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+</svg>

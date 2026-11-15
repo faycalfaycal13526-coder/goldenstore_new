@@ -88,11 +88,11 @@
     var u = encodeURIComponent(url);
     var body = encodeURIComponent(text + '\n' + url);
     return [
-      { net: 'wa', label: 'WhatsApp', href: 'https://wa.me/?text=' + body },
-      { net: 'tg', label: 'Telegram', href: 'https://t.me/share/url?url=' + u + '&text=' + encodeURIComponent(text) },
-      { net: 'fb', label: 'Facebook', href: 'https://www.facebook.com/sharer/sharer.php?u=' + u },
-      { net: 'x', label: 'X', href: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) + '&url=' + u },
-      { net: 'mail', label: 'Email', href: 'mailto:?subject=' + encodeURIComponent(title) + '&body=' + body },
+      { net: 'wa', label: 'WhatsApp', icon: '/images/share-whatsapp.svg', href: 'https://wa.me/?text=' + body },
+      { net: 'tg', label: 'Telegram', icon: '/images/share-telegram.svg', href: 'https://t.me/share/url?url=' + u + '&text=' + encodeURIComponent(text) },
+      { net: 'fb', label: 'Facebook', icon: '/images/share-facebook.svg', href: 'https://www.facebook.com/sharer/sharer.php?u=' + u },
+      { net: 'x', label: 'X', icon: '/images/share-x.svg', href: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) + '&url=' + u },
+      { net: 'mail', label: 'Email', icon: '/images/share-email.svg', href: 'mailto:?subject=' + encodeURIComponent(title) + '&body=' + body },
     ];
   }
 
@@ -160,9 +160,13 @@
 
     var targets = node('div', { class: 'gs-share-targets' });
     destinations(url, text, title).forEach(function (d) {
+      // Real brand SVG files instead of the old coloured dot placeholder.
+      var img = node('img', { class: 'gs-share-target-icon', src: d.icon,
+        alt: '', width: '20', height: '20', loading: 'lazy' });
+      img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
       targets.appendChild(node('a', { class: 'gs-share-target', 'data-net': d.net,
         href: d.href, target: '_blank', rel: 'noopener noreferrer', title: d.label },
-        [node('span', { class: 'gs-share-target-dot' }), node('span', { text: d.label })]));
+        [img, node('span', { text: d.label })]));
     });
 
     var actions = node('div', { class: 'gs-share-actions' });

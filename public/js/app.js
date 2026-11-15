@@ -967,6 +967,14 @@
     let activeDownloadController = null;
     let activeStreamReader = null;
     let cancelRequested = false;
+    let nativeLeaveHandler = null;
+    let nativeDownloadFinished = false;
+    function clearNativeLeaveHandler() {
+      if (nativeLeaveHandler) {
+        try { window.removeEventListener('pagehide', nativeLeaveHandler); } catch (e) {}
+        nativeLeaveHandler = null;
+      }
+    }
 
     function setCancelVisible(visible) {
       group.classList.toggle('split-active', visible);
@@ -979,15 +987,10 @@
       cancelBtn.disabled = true;
       cancelRequested = true;
       cancelBtn.classList.add('hidden');
-      if (activeDownloadController) {
-        try { activeDownloadController.abort(); } catch (e) {}
-      }
-      if (activeStreamReader) {
-        try { activeStreamReader.cancel().catch(() => {}); } catch (e) {}
-      }
+      // Abort ONLY this slug's controller/reader; other concurrent downloads
+      // (other apps/games, other tabs) are untouched.
+      try { S.abortWebDownload(app.slug); } catch (e) {}
       try { S.cancelDownload(app.slug); } catch (e) {}
-      S.removeActiveDownload(app.slug);
-      S.removeApkState(app.slug);
       removeInstalledActions();
       showIdle();
       toast(t('تم إلغاء التنزيل'), 'info');
@@ -1124,6 +1127,11 @@
     }
 
     apkStateHandlers[app.slug] = function (status, progress, message) {
+      if (status === 'downloaded' || status === 'installed'
+          || status === 'cancelled' || status === 'failed') {
+        nativeDownloadFinished = true;
+        clearNativeLeaveHandler();
+      }
       const errMap = {
         signature_mismatch: t('تعارض توقيع الحزمة: ألغِ التطبيق المثبت ثم ثبّت النسخة الجديدة.'),
         package_mismatch: t('اسم الحزمة غير متطابق مع التطبيق.'),
@@ -1239,6 +1247,9 @@
 
     async function runInstall() {
       if (btn.classList.contains('installing')) return;
+      // Unlimited concurrent downloads: no global slot, no cancellation of
+      // another app/game. Each slug is tracked independently in Store.
+      if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
       cancelRequested = false;
 
       try {
@@ -1258,6 +1269,8 @@
       }
 
       if (isNativeApp()) {
+        // Native bridge is keyed by slug too; starting this game/app does not
+        // cancel any other in-flight download (unlimited concurrency).
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
         const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
         setCancelVisible(true);
@@ -1276,6 +1289,15 @@
           started_at: Math.floor(Date.now() / 1000),
         });
         nativeActiveDownloadRegistered = true;
+        // Android bridge is keyed by slug. If the user leaves this page while
+        // the APK is still downloading, keep THIS entry active in «مكتبتي»
+        // alongside any other concurrent native download.
+        nativeDownloadFinished = false;
+        clearNativeLeaveHandler();
+        nativeLeaveHandler = () => {
+          if (!nativeDownloadFinished) S.markDownloadHandedOff(app.slug);
+        };
+        window.addEventListener('pagehide', nativeLeaveHandler, { once: true });
         try {
           window.GSAndroid.downloadApk(dlUrl, filename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
@@ -1289,7 +1311,9 @@
       }
 
       setCancelVisible(true);
-      activeDownloadController = new AbortController();
+      const controller = new AbortController();
+      activeDownloadController = controller;
+      S.registerWebDownload(app.slug, controller);
       btn.classList.add('installing');
       btn.disabled = true;
       fill.style.transition = 'none';
@@ -1312,6 +1336,11 @@
       const onHandoff = () => {
         if (finished || handoffTriggered) return;
         handoffTriggered = true;
+        finished = true;                    // never let catch cancel/remove it
+        cleanupHandoffListeners();
+        // Browser owns the transfer now: keep THIS slug active & indeterminate
+        // so «مكتبتي» shows it alongside all other concurrent downloads.
+        S.markDownloadHandedOff(app.slug);
         try { fallbackDownload(app.slug); } catch {}
       };
       const cleanupHandoffListeners = () => {
@@ -1331,6 +1360,7 @@
         const total = Number(res.headers.get('Content-Length') || 0);
         const reader = res.body.getReader();
         activeStreamReader = reader;
+        S.registerWebDownload(app.slug, controller, reader);
         const chunks = [];
         let received = 0;
         let lastProgressWrite = 0;
@@ -1365,6 +1395,7 @@
         cleanupHandoffListeners();
         activeStreamReader = null;
         activeDownloadController = null;
+        S.unregisterWebDownload(app.slug);
         cancelRequested = false;
         S.removeActiveDownload(app.slug);
         markInstalledStored(app.slug);
@@ -1372,10 +1403,12 @@
         showInstalled();
         toast(t('اكتمل التحميل وحفظ الملف في جهازك'), 'success');
       } catch (e) {
+        if (finished) return;               // handed off: active entry preserved
         finished = true;
         cleanupHandoffListeners();
         activeStreamReader = null;
         activeDownloadController = null;
+        S.unregisterWebDownload(app.slug);
         if (cancelRequested) {
           cancelRequested = false;
           S.removeActiveDownload(app.slug);
@@ -1383,8 +1416,10 @@
           showIdle();
           return;
         }
+        // Stream failed: the normal browser download still continues, so keep
+        // this slug active (indeterminate) instead of deleting it.
         fallbackDownload(app.slug);
-        S.removeActiveDownload(app.slug);
+        S.markDownloadHandedOff(app.slug);
         S.addToDownloadHistory(app);
         showIdle();
         toast(t('تعذر عرض شريط التقدم، وبدأ التنزيل بالطريقة العادية'), 'info');

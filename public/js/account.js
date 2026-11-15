@@ -252,7 +252,8 @@
             ? Math.max(0, Math.min(100, Math.round(st.progress * 100))) : null;
 
           const statusText = st.status === 'downloading'
-            ? (pct === null ? t('جارٍ التنزيل…') : `${t('جارٍ التنزيل…')} ${pct}%`)
+            ? (st.handed_off ? t('جارٍ التنزيل في الخلفية…')
+              : (pct === null ? t('جارٍ التنزيل…') : `${t('جارٍ التنزيل…')} ${pct}%`))
             : st.status === 'downloaded' ? t('تم التنزيل — جاهز للتثبيت')
             : st.status === 'installing' ? t('جارٍ التثبيت…')
             : t('قيد المعالجة…');

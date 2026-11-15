@@ -543,6 +543,7 @@
     'تواصل معنا': { en: 'Contact us', fr: 'Contactez-nous', es: 'Contáctanos' },
     'جارٍ التثبيت…': { en: 'Installing…', fr: 'Installation…', es: 'Instalando…' },
     'جارٍ التنزيل…': { en: 'Downloading…', fr: 'Téléchargement…', es: 'Descargando…' },
+    'جارٍ التنزيل في الخلفية…': { en: 'Downloading in the background…', fr: 'Téléchargement en arrière-plan…', es: 'Descargando en segundo plano…' },
     'جميع التقييمات والمراجعات': { en: 'All ratings and reviews', fr: 'Toutes les notes et avis', es: 'Todas las valoraciones y reseñas' },
     'حاول لاحقاً بعد دقائق قليلة.': { en: 'Try again in a few minutes.', fr: 'Réessayez dans quelques minutes.', es: 'Inténtalo de nuevo en unos minutos.' },
     'حدّث الصفحة وحاول مجدداً.': { en: 'Refresh the page and try again.', fr: 'Actualisez la page et réessayez.', es: 'Actualiza la página e inténtalo de nuevo.' },

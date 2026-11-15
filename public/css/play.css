@@ -4005,12 +4005,15 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
   transition: filter .18s ease, transform .18s ease;
 }
 .gs-share-target:hover { filter: brightness(1.2); transform: translateY(-1px); }
-.gs-share-target-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; background: currentColor; }
-.gs-share-target[data-net="wa"] { color: #5fd28a; }
-.gs-share-target[data-net="tg"] { color: #56b8ec; }
-.gs-share-target[data-net="fb"] { color: #7ea6ff; }
-.gs-share-target[data-net="x"] { color: #d8d8de; }
-.gs-share-target[data-net="mail"] { color: #f4c01f; }
+.gs-share-target-icon {
+  width: 20px; height: 20px; flex: 0 0 20px; object-fit: contain;
+  border-radius: 50%;
+}
+.gs-share-target[data-net="wa"] { color: rgb(37, 211, 102); background: rgba(37,211,102,.07); }
+.gs-share-target[data-net="tg"] { color: #229ed9; background: rgba(34,158,233,.07); }
+.gs-share-target[data-net="fb"] { color: #1877f2; background: rgba(24,119,242,.07); }
+.gs-share-target[data-net="x"] { color: #e8e8ec; background: rgba(232,232,236,.06); }
+.gs-share-target[data-net="mail"] { color: #f4c01f; background: rgba(244,192,31,.07); }
 @media (max-width: 620px) {
   .gs-share-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -1619,6 +1619,25 @@ function removeApkState(slug) {
   delete map[slug];
   try { localStorage.setItem(APK_STATE_KEY, JSON.stringify(map)); } catch {}
 }
+/* When the user leaves an app page mid-download, the browser takes over the
+   file transfer. Keep THIS slug active (indeterminate) so «مكتبتي» still
+   shows it alongside every other concurrent download instead of deleting it. */
+function markDownloadHandedOff(slug) {
+  if (!slug) return;
+  const now = Math.floor(Date.now() / 1000);
+  const map = getActiveDownloadMap();
+  const entry = map[slug] || {
+    slug, name: slug, icon_url: null, developer: '', size_bytes: 0,
+    status: 'downloading', progress: -1, started_at: now,
+  };
+  entry.status = 'downloading';
+  entry.progress = -1;
+  entry.handed_off = true;
+  map[slug] = entry;
+  writeActiveDownloadMap(map);
+  setApkState(slug, { slug, status: 'downloading', progress: -1, handed_off: true, updated_at: now });
+  try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'downloading', progress: -1 } })); } catch {}
+}
 function onApkState(fn) {
   const handler = (e) => { try { fn(e.detail || {}); } catch (err) { console.error(err); } };
   window.addEventListener('gs-apk-state', handler);
@@ -1772,10 +1791,11 @@ function versionIsNewer(storeVersion, deviceVersion) {
 }
 function cancelDownload(slug) {
   try {
+    abortWebDownload(slug);
     if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.cancelDownload === 'function') {
       window.GSAndroid.cancelDownload(slug);
     }
-    removeActiveDownload(slug);
+    removeActiveDownload(slug);   // only THIS slug; other downloads stay active
     removeApkState(slug);
   } catch (e) {}
 }
@@ -1813,6 +1833,32 @@ function clearDownloadHistory() {
   try { localStorage.removeItem(DL_HISTORY_KEY); } catch {}
 }
 
+/* Concurrent downloads: explicit owner request = UNLIMITED simultaneous
+   downloads. Every slug owns its own controller/reader; starting a second
+   app/game never aborts or removes another slug's entry. */
+const MAX_CONCURRENT_DOWNLOADS = Infinity;
+const WEB_DOWNLOAD_CONTROLLERS = new Map();
+const WEB_DOWNLOAD_READERS = new Map();
+function downloadConcurrencyLimit() { return MAX_CONCURRENT_DOWNLOADS; }
+function canStartConcurrentDownload() { return true; }
+function registerWebDownload(slug, controller, reader) {
+  if (!slug) return;
+  if (controller) WEB_DOWNLOAD_CONTROLLERS.set(slug, controller);
+  if (reader) WEB_DOWNLOAD_READERS.set(slug, reader);
+}
+function abortWebDownload(slug) {
+  const c = WEB_DOWNLOAD_CONTROLLERS.get(slug);
+  if (c) { try { c.abort(); } catch {} }
+  const r = WEB_DOWNLOAD_READERS.get(slug);
+  if (r) { try { r.cancel().catch(() => {}); } catch {} }
+  WEB_DOWNLOAD_CONTROLLERS.delete(slug);
+  WEB_DOWNLOAD_READERS.delete(slug);
+}
+function unregisterWebDownload(slug) {
+  WEB_DOWNLOAD_CONTROLLERS.delete(slug);
+  WEB_DOWNLOAD_READERS.delete(slug);
+}
+
 const ACTIVE_DL_KEY = 'gs_active_dl';
 function getActiveDownloadMap() {
   try {
@@ -1834,6 +1880,7 @@ function getActiveDownloads() {
 }
 function setActiveDownload(entry) {
   if (!entry || !entry.slug) return null;
+  // Map is keyed by slug: unlimited entries coexist, no global slot/cancel.
   const map = getActiveDownloadMap();
   map[entry.slug] = { ...(map[entry.slug] || {}), ...entry };
   writeActiveDownloadMap(map);
@@ -1947,6 +1994,8 @@ window.Store = {
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
+  downloadConcurrencyLimit, canStartConcurrentDownload, registerWebDownload, abortWebDownload, unregisterWebDownload,
+  markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,

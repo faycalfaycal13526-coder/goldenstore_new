@@ -193,6 +193,14 @@ a { color: inherit; text-decoration: none; }
   background: rgba(244,192,31,.12); border: 1px solid rgba(244,192,31,.28);
 }
 .dl-feature-ico .icon { width: 28px; height: 28px; }
+/* No-ads badge: clean prohibition mark (red ring + bar, dark ADS text),
+   same box geometry as the other feature icons. */
+.dl-feature-ico.is-noads { background: rgba(225,29,46,.08); border-color: rgba(225,29,46,.38); }
+.dl-noads-img { width: 40px; height: 40px; object-fit: contain; display: block; }
+
+/* Support card at the bottom: exactly the same .dl-feature formatting. */
+.dl-support-wrap { display: flex; justify-content: center; margin-top: 18px; }
+a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; color: inherit; }
 .dl-feature h3 { font-size: 14.5px; font-weight: 800; margin-bottom: 5px; }
 .dl-feature p { font-size: 12.5px; color: var(--text-2); line-height: 1.65; }
 
@@ -291,10 +299,17 @@ a { color: inherit; text-decoration: none; }
           <p data-i18n="إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.">إصدارات جديدة وتحسينات مستمرة تصل إلى جهازك أولاً بأول.</p>
         </article>
         <article class="dl-feature">
-          <div class="dl-feature-ico"><span class="icon" data-icon="spark"></span></div>
+          <div class="dl-feature-ico is-noads"><img class="dl-noads-img" src="/images/no-ads.svg" alt="بدون إعلانات" width="40" height="40"></div>
           <h3 data-i18n="بدون إعلانات مزعجة">بدون إعلانات مزعجة</h3>
           <p data-i18n="واجهة هادئة بأسلوب ذهبي وأسود/أبيض، بلا إعلانات مقاطِعة.">واجهة هادئة بأسلوب ذهبي وأسود/أبيض، بلا إعلانات مقاطِعة.</p>
         </article>
+      </div>
+      <div class="dl-support-wrap">
+        <a class="dl-feature dl-support-card" href="/support">
+          <div class="dl-feature-ico"><span class="icon" data-icon="message"></span></div>
+          <h3 data-i18n="الدعم">الدعم</h3>
+          <p data-i18n="تحتاج مساعدة؟ تواصل مع فريق الدعم.">تحتاج مساعدة؟ تواصل مع فريق الدعم.</p>
+        </a>
       </div>
     </div>
   </section>
@@ -313,10 +328,10 @@ a { color: inherit; text-decoration: none; }
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261108m"></script>
-<script src="/js/store-settings.js?v=20261108m"></script>
-  <script src="/js/lang.js?v=20261108m"></script>
-<script src="/js/download.js?v=20261108m"></script>
-  <script src="/js/notification-hub.js?v=20261108m"></script>
+<script src="/js/icons.js?v=20261108n"></script>
+<script src="/js/store-settings.js?v=20261108n"></script>
+  <script src="/js/lang.js?v=20261108n"></script>
+<script src="/js/download.js?v=20261108n"></script>
+  <script src="/js/notification-hub.js?v=20261108n"></script>
 </body>
 </html>

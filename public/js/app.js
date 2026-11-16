@@ -1135,6 +1135,40 @@
         restoreReadyToInstall(file, { toast: t('لم يُفتح مثبّت النظام، اضغط تثبيت'), kind: 'error' });
       }, 6000);
     }
+    /* «تحديث» must look EXACTLY like a normal download: the two buttons
+       (تحديث / إلغاء التثبيت) disappear and the one progress bar with the X
+       takes their place — immediately, on the tap, before anything async. */
+    function beginUpdateUi() {
+      removeInstalledActions();
+      btn.classList.remove('installed', 'has-update');
+      setCancelVisible(true);
+      btn.classList.add('installing');
+      btn.classList.remove('indeterminate');
+      btn.disabled = true;
+      fill.style.transition = 'none';
+      fill.style.width = '0%';
+      label.textContent = `${t('جارٍ التنزيل…')} 0%`;
+    }
+    /* The APK is already on the phone (or just finished): keep the SAME bar at
+       100% and ask the bridge to INSTALL it over the installed copy. */
+    function installWithBar(a, file) {
+      const fn = String(file || '');
+      markInstallPrompt(a.slug, fn);
+      S.setApkState(a.slug, {
+        slug: a.slug, status: 'installing', progress: 1, filename: fn,
+        updated_at: Math.floor(Date.now() / 1000),
+      });
+      beginUpdateUi();
+      setProgress(1);
+      const used = launchInstaller(a, fn);
+      if (!used) {
+        clearInstallPrompt(a.slug);
+        restoreReadyToInstall(fn, { toast: t('تعذّر فتح الملف'), kind: 'error' });
+        return;
+      }
+      armInstallWatchdog(a, fn);
+      toast(t('جارٍ فتح مثبّت النظام…'), 'info');
+    }
     function openDownloadedApk(a, filename) {
       if (isNativeApp() && window.GSAndroid) {
         try {
@@ -1212,7 +1246,7 @@
         // Older build on the device: the user must get BOTH actions —
         // «تحديث التطبيق» (installs the new APK) and «إلغاء التثبيت».
         // Leaving only the uninstall button stranded the update.
-        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { updateIntent = true; runInstall(); } },
+        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { updateIntent = true; runInstall({ update: true }); } },
           ico('refresh', 'icon'), t('تحديث التطبيق')));
       }
       bar.append(el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
@@ -1384,7 +1418,9 @@
         label.textContent = t('جاهز للتثبيت');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
-        showDownloadedActions(app, message || filename);
+        // No Install/Delete flicker during a direct update: the progress bar
+        // stays and the installer opens on top of it.
+        if (!autoInstall) showDownloadedActions(app, message || filename);
         if (autoInstall) {
           // Direct update: the APK is ready, so open the system installer
           // ourselves (INSTALL over the old version) instead of waiting for a
@@ -1392,7 +1428,7 @@
           // `message`, so always prefer it over the name we requested.
           const file = (message && /\.apk$/i.test(message)) ? message
             : (message || (S.getApkState(app.slug) || {}).filename || filename);
-          setTimeout(() => { try { openDownloadedApk(app, file); } catch (e) {} }, 250);
+          setTimeout(() => { try { installWithBar(app, file); } catch (e) {} }, 250);
         }
         return;
       }
@@ -1507,7 +1543,10 @@
 
     async function runInstall(opts) {
       const fresh = !!(opts && opts.fresh);
-      if (btn.classList.contains('installing')) return;
+      const update = !!(opts && opts.update);
+      if (update) updateIntent = true;
+      // A stuck «installing» class must never swallow an explicit update tap.
+      if (btn.classList.contains('installing') && !updateIntent) return;
       // Unlimited concurrent downloads: no global slot, no cancellation of
       // another app/game. Each slug is tracked independently in Store.
       if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
@@ -1525,7 +1564,9 @@
       } catch (e) {}
 
       if (btn.classList.contains('has-update')) updateIntent = true;
-      if (btn.classList.contains('installed')
+      // SWITCH THE UI NOW: buttons out, the plain download bar in.
+      if (updateIntent) beginUpdateUi();
+      if (btn.classList.contains('installed') && !updateIntent
           && !(S.appHasUpdate && S.appHasUpdate(app))) { openInstalled(app); return; }
 
       const liveState = S.getApkState(app.slug);
@@ -1537,11 +1578,16 @@
         if (liveFile) purgeNativeApk(liveFile, app.slug);
         S.removeApkState(app.slug);
         S.removeActiveDownload(app.slug);
-        removeInstalledActions();
         showIdle();
+        if (updateIntent) beginUpdateUi();
       } else if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveFile) {
+        // A finished APK is already there: install it over the old version
+        // instead of silently reopening it, and keep the same bar.
+        if (updateIntent) { installWithBar(app, liveFile); return; }
         openDownloadedApk(app, liveFile);
         return;
+      } else if (isNativeApp() && liveState && liveState.status === 'installing' && liveFile) {
+        if (updateIntent) { installWithBar(app, liveFile); return; }
       }
 
       if (!isNativeApp() && !S.isLoggedIn()) {
@@ -1553,11 +1599,7 @@
         // cancel any other in-flight download (unlimited concurrency).
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
         const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
-        if (updateIntent) {
-          // Un-hide the main slot so the REAL download counter (and its cancel
-          // button) are visible while the update APK is fetched.
-          removeInstalledActions();
-        }
+        if (updateIntent) beginUpdateUi();
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;

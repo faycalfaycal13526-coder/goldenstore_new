@@ -997,6 +997,7 @@
        counter and the user never got the install prompt. */
     let updateIntent = false;
     let lastLaunchAt = 0;
+    let launchInFlight = false;
     function clearNativeLeaveHandler() {
       if (nativeLeaveHandler) {
         try { window.removeEventListener('pagehide', nativeLeaveHandler); } catch (e) {}
@@ -1039,7 +1040,33 @@
       btn.classList.add('indeterminate');
       label.textContent = t('جارٍ التنزيل…');
     }
+    /* Even when the Android bridge (or a streamed response without
+       Content-Length) sends no progress, the bar must never look frozen: it
+       creeps smoothly toward 95% and real progress always wins. */
+    let creepTimer = null;
+    let creepValue = 0;
+    function stopCreep() {
+      if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
+    }
+    function startCreep(from) {
+      stopCreep();
+      creepValue = Math.max(0, Math.min(0.94, Number(from) || 0));
+      if (creepValue <= 0) setProgress(0.01);
+      creepTimer = setInterval(() => {
+        if (!btn.classList.contains('installing')) { stopCreep(); return; }
+        if (creepValue >= 0.95) return;
+        creepValue = Math.min(0.95, creepValue + Math.max(0.01, (0.95 - creepValue) * 0.055));
+        setProgress(creepValue);
+      }, 380);
+    }
+    function noteRealProgress(p) {
+      const v = Number(p);
+      if (!(v >= 0)) return;
+      if (v > creepValue) creepValue = v;
+    }
     function resetBar() {
+      stopCreep();
+      creepValue = 0;
       btn.classList.remove('installing', 'indeterminate');
       fill.style.transition = 'none';
       fill.style.width = '0%';
@@ -1149,6 +1176,7 @@
       fill.style.transition = 'none';
       fill.style.width = '0%';
       label.textContent = `${t('جارٍ التنزيل…')} 0%`;
+      startCreep(0);
     }
     /* The APK is already on the phone (or just finished): keep the SAME bar at
        100% and ask the bridge to INSTALL it over the installed copy. */
@@ -1386,6 +1414,8 @@
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
+        if (!creepTimer) startCreep(typeof progress === 'number' ? progress : 0);
+        noteRealProgress(progress);
         if (!nativeActiveDownloadRegistered) {
           S.setActiveDownload({
             slug: app.slug,
@@ -1406,6 +1436,7 @@
         return;
       }
       if (status === 'downloaded') {
+        stopCreep();
         if (isDeadFilename(message || filename)) { handleMissingFile(); return; }
         const autoInstall = updateIntent;
         updateIntent = false;
@@ -1434,6 +1465,7 @@
         return;
       }
       if (status === 'installing') {
+        stopCreep();
         setCancelVisible(false);
         cancelRequested = false;
         btn.classList.add('installing');
@@ -1444,6 +1476,7 @@
         return;
       }
       if (status === 'installed') {
+        stopCreep();
         updateIntent = false;
         fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
@@ -1460,6 +1493,7 @@
         return;
       }
       if (status === 'cancelled') {
+        stopCreep();
         if (hasInstallPrompt(app.slug)) {
           const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
           restoreReadyToInstall(fn, { toast: t('تم إلغاء التثبيت، الملف جاهز للتثبيت') });
@@ -1493,6 +1527,7 @@
         return;
       }
       if (status === 'failed') {
+        stopCreep();
         if (message === 'file_missing') { handleMissingFile(); return; }
         if (hasInstallPrompt(app.slug)) {
           const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
@@ -1567,11 +1602,27 @@
       const fresh = !!(opts && opts.fresh);
       const update = !!(opts && opts.update);
       if (update) updateIntent = true;
-      // Re-entrancy guard: rapid taps used to start several downloads at once,
-      // which froze the screen. One launch per 1.2s is enough.
+      // Re-entrancy guard: ONE launch at a time, released in `finally` and by a
+      // safety timer, so the button can never stay dead.
+      if (launchInFlight) return;
       const stamp = Date.now();
-      if (stamp - lastLaunchAt < 1200) return;
+      if (stamp - lastLaunchAt < 250) return;   // ignore click+touch double-fire
       lastLaunchAt = stamp;
+      launchInFlight = true;
+      const releaseLaunch = setTimeout(() => { launchInFlight = false; }, 4000);
+      try {
+        return await runInstallLaunch({ fresh, update });
+      } finally {
+        clearTimeout(releaseLaunch);
+        launchInFlight = false;
+      }
+    }
+
+    async function runInstallLaunch(opts) {
+      const fresh = !!(opts && opts.fresh);
+      // Unlimited concurrent downloads: no global slot, no cancellation of
+      // another app/game. Each slug is tracked independently in Store.
+      if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
       // PAINT FIRST — before any state write, network call or popup.
       if (updateIntent || btn.classList.contains('has-update')) {
         updateIntent = true;
@@ -1580,14 +1631,10 @@
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
-        setIndeterminate();
+        setProgress(0.01);
+        startCreep(0.01);
       }
       await new Promise((r) => nextFrame(r));
-      // A stuck «installing» class must never swallow an explicit update tap.
-      if (btn.classList.contains('installing') && !updateIntent) return;
-      // Unlimited concurrent downloads: no global slot, no cancellation of
-      // another app/game. Each slug is tracked independently in Store.
-      if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
       if (!autoRestartInProgress) fileMissingRetries = 0;
       autoRestartInProgress = false;
       cancelRequested = false;
@@ -1739,7 +1786,9 @@
           S.updateActiveDownloadProgress(app.slug, value);
         };
         if (!total) {
-          setIndeterminate();
+          // Unknown size: keep the CREEP bar (it always moves) instead of a
+          // frozen indeterminate sweep, and mark the store entry unknown.
+          if (!creepTimer) startCreep(0.02);
           S.updateActiveDownloadProgress(app.slug, -1);
         } else {
           pushProgress(0, true);
@@ -1750,6 +1799,7 @@
           chunks.push(value);
           received += value.length;
           if (total) {
+            noteRealProgress(received / total);
             setProgress(received / total);
             pushProgress(received / total);
           }

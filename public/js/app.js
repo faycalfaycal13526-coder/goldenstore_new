@@ -1061,22 +1061,40 @@
     let creepTimer = null;
     let creepValue = 0;
     let lastRealProgressAt = 0;
+    let dlStartedAt = 0;
     function stopCreep() {
       if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
     }
+    /* TIME-BASED counting: the value is derived from the elapsed time since the
+       tap, not from the number of ticks. Timers are paused while the Android
+       WebView shows the ad in another app, so on return the bar is already at
+       the right position instead of restarting from zero. */
+    function creepFromClock() {
+      if (!dlStartedAt) return 0;
+      const elapsed = Math.max(0, (Date.now() - dlStartedAt) / 1000);
+      return Math.min(0.95, 0.01 + elapsed * 0.045);   // ~21s to 95%
+    }
     function startCreep(from) {
       stopCreep();
-      creepValue = Math.max(0, Math.min(0.94, Number(from) || 0));
+      const base = Math.max(0, Math.min(0.94, Number(from) || 0));
+      // A new download starts its own clock; a resume keeps the old one.
+      if (!dlStartedAt || base <= 0.02) dlStartedAt = Date.now();
+      creepValue = Math.max(base, creepFromClock());
       if (creepValue <= 0) setProgress(0.01);
       creepTimer = setInterval(() => {
         if (!btn.classList.contains('installing')) { stopCreep(); return; }
-        // Real progress always owns the number; the creep only fills the
-        // silence when the bridge sends nothing for a while.
-        if (Date.now() - lastRealProgressAt < 2500) return;
-        if (creepValue >= 0.95) return;
-        creepValue = Math.min(0.95, creepValue + Math.max(0.01, (0.95 - creepValue) * 0.055));
+        const clock = creepFromClock();
+        // Real progress owns the number whenever it arrives; the clock only
+        // fills the silence (and catches up after the ad).
+        if (Date.now() - lastRealProgressAt < 2500) {
+          if (clock > creepValue + 0.05) creepValue = clock;
+          return;
+        }
+        const nextVal = Math.max(creepValue, clock);
+        if (nextVal <= creepValue + 0.001) return;
+        creepValue = Math.min(0.95, nextVal);
         setProgress(creepValue);
-      }, 380);
+      }, 250);
     }
     function noteRealProgress(p) {
       const v = normProgress(p);
@@ -1089,6 +1107,7 @@
       stopCreep();
       creepValue = 0;
       displayedProgress = 0;
+      dlStartedAt = 0;
       btn.classList.remove('installing', 'indeterminate');
       fill.style.transition = 'none';
       fill.style.width = '0%';
@@ -1198,6 +1217,7 @@
       fill.style.transition = 'none';
       fill.style.width = '0%';
       label.textContent = `${t('جارٍ التنزيل…')} 0%`;
+      // Count from the tap, so the number keeps moving while the ad is open.
       startCreep(0);
     }
     /* The APK is already on the phone (or just finished): keep the SAME bar at
@@ -1660,8 +1680,12 @@
         btn.disabled = true;
         setProgress(0.01);
         startCreep(0.01);
+        // Same clock as the update path: bar + ad start together.
       }
-      await new Promise((r) => nextFrame(r));
+      // The native bridge is called in THIS task (right after the tap and the
+      // ad), so the APK really starts downloading while the ad is on screen.
+      // Only the web path needs a frame to paint before it starts fetching.
+      if (!isNativeApp()) await new Promise((r) => nextFrame(r));
       if (!autoRestartInProgress) fileMissingRetries = 0;
       autoRestartInProgress = false;
       cancelRequested = false;
@@ -1687,11 +1711,23 @@
         showIdle();
         if (updateIntent) beginUpdateUi();
       } else if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveFile) {
-        // A finished APK is already there: install it over the old version
-        // instead of silently reopening it, and keep the same bar.
-        if (updateIntent) { installWithBar(app, liveFile); return; }
-        openDownloadedApk(app, liveFile);
-        return;
+        // A file finished SECONDS ago (the user declined the installer) is
+        // reused. Anything older is a leftover from a previous session: the
+        // owner expects «تحديث» to download again and count, so it is dropped.
+        const age = Math.floor(Date.now() / 1000) - Number(liveState.updated_at || 0);
+        const freshEnough = age >= 0 && age < 120;
+        if (updateIntent && !freshEnough) {
+          purgeNativeApk(liveFile, app.slug);
+          S.removeApkState(app.slug);
+          S.removeActiveDownload(app.slug);
+          beginUpdateUi();
+        } else if (updateIntent) {
+          installWithBar(app, liveFile);
+          return;
+        } else {
+          openDownloadedApk(app, liveFile);
+          return;
+        }
       } else if (isNativeApp() && liveState && liveState.status === 'installing' && liveFile) {
         if (updateIntent) { installWithBar(app, liveFile); return; }
       }

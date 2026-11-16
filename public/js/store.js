@@ -1782,8 +1782,25 @@ function resolvedPackageName(slug) {
   } catch { return ''; }
 }
 const recentInstalledAt = Object.create(null);
+/* True while an APK for this slug is still downloading/installing. The phone
+   keeps the OLD version installed during an update, so the heartbeat would
+   otherwise report «installed» every 400ms and wipe the in-flight download
+   (that is why «تحديث التطبيق» only showed a download counter). */
+function hasInFlightApk(slug) {
+  if (!slug) return false;
+  const now = Math.floor(Date.now() / 1000);
+  // Stale guard: a forgotten record older than 5 minutes must never block the
+  // device truth (a real install reported by the bridge).
+  const fresh = (ts) => !ts || now - Number(ts) < 300;
+  const st = getApkState(slug);
+  if (st && (st.status === 'downloading' || st.status === 'installing') && fresh(st.updated_at)) return true;
+  const dl = getActiveDownloadMap()[slug];
+  return !!(dl && (dl.status === 'downloading' || dl.status === 'installing')
+    && fresh(dl.updated_at || dl.started_at));
+}
 function applyInstalled(slug, resolvedPkg) {
   if (!slug) return;
+  if (hasInFlightApk(slug)) return;
   const now = Date.now();
   if (now - (recentInstalledAt[slug] || 0) < 500) return;
   recentInstalledAt[slug] = now;
@@ -1817,7 +1834,7 @@ function heartbeatTick() {
       const targetPkg = pkg || resolvedPackageName(slug) || '';
       const st = checkAppStatus(slug, targetPkg);
       if (st && st.installed) {
-        applyInstalled(slug, st.package_name);
+        if (!hasInFlightApk(slug)) applyInstalled(slug, st.package_name);
       } else if (st && !st.installed && isInstalledStored(slug)) {
         unmarkInstalledStored(slug);
         removeApkState(slug);
@@ -1834,7 +1851,7 @@ function heartbeatTick() {
       const info = st.package_name || resolvedPackageName(slug) || '';
       const res = checkAppStatus(slug, info);
       if (res && res.installed) {
-        applyInstalled(slug, res.package_name);
+        if (!hasInFlightApk(slug)) applyInstalled(slug, res.package_name);
       } else if (res && !res.installed && isInstalledStored(slug)) {
         unmarkInstalledStored(slug);
         removeApkState(slug);
@@ -2139,7 +2156,7 @@ window.Store = {
   isDeadApkFile, markDeadApkFile, clearDeadApkFile,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, appHasUpdate, isAppInstalledOnDevice, cancelDownload, isSlugInstalled,
-  checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
+  checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled, hasInFlightApk,
   checkAppUpdate, checkForUpdates, showUpdateDialog, showUpdateBanner, shouldShowUpdate, offlineScreen, getCurrentAppVersion,
 };
 

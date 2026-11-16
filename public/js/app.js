@@ -992,6 +992,10 @@
     let nativeDownloadFinished = false;
     let fileMissingRetries = 0;
     let autoRestartInProgress = false;
+    /* «تحديث التطبيق» means: download the new APK AND open the system
+       installer by itself. Without this the button only produced a download
+       counter and the user never got the install prompt. */
+    let updateIntent = false;
     function clearNativeLeaveHandler() {
       if (nativeLeaveHandler) {
         try { window.removeEventListener('pagehide', nativeLeaveHandler); } catch (e) {}
@@ -1009,6 +1013,7 @@
       if (cancelBtn.disabled || cancelBtn.classList.contains('hidden')) return;
       cancelBtn.disabled = true;
       cancelRequested = true;
+      updateIntent = false;
       clearInstallPrompt(app.slug);
       cancelBtn.classList.add('hidden');
       // Abort ONLY this slug's controller/reader; other concurrent downloads
@@ -1020,16 +1025,19 @@
       toast(t('تم إلغاء التنزيل'), 'info');
     }
 
+    function dlLabel() {
+      return updateIntent ? t('جارٍ تنزيل التحديث…') : t('جارٍ التنزيل…');
+    }
     function setProgress(ratio) {
       const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
       btn.classList.remove('indeterminate');
       fill.style.transition = 'width .15s linear';
       fill.style.width = pct + '%';
-      label.textContent = `${t('جارٍ التنزيل…')} ${pct}%`;
+      label.textContent = `${dlLabel()} ${pct}%`;
     }
     function setIndeterminate() {
       btn.classList.add('indeterminate');
-      label.textContent = t('جارٍ التنزيل…');
+      label.textContent = dlLabel();
     }
     function resetBar() {
       btn.classList.remove('installing', 'indeterminate');
@@ -1170,7 +1178,7 @@
         // Older build on the device: the user must get BOTH actions —
         // «تحديث التطبيق» (installs the new APK) and «إلغاء التثبيت».
         // Leaving only the uninstall button stranded the update.
-        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { runInstall(); } },
+        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { updateIntent = true; runInstall(); } },
           ico('refresh', 'icon'), t('تحديث التطبيق')));
       }
       bar.append(el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
@@ -1326,6 +1334,8 @@
       }
       if (status === 'downloaded') {
         if (isDeadFilename(message || filename)) { handleMissingFile(); return; }
+        const autoInstall = updateIntent;
+        updateIntent = false;
         fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         setCancelVisible(false);
@@ -1337,6 +1347,12 @@
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
         showDownloadedActions(app, message || filename);
+        if (autoInstall) {
+          // Direct update: the APK is ready, so open the system installer
+          // ourselves instead of waiting for a second tap.
+          const file = message || filename;
+          setTimeout(() => { try { openDownloadedApk(app, file); } catch (e) {} }, 250);
+        }
         return;
       }
       if (status === 'installing') {
@@ -1350,6 +1366,7 @@
         return;
       }
       if (status === 'installed') {
+        updateIntent = false;
         fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         markInstalledStored(app.slug);
@@ -1372,6 +1389,7 @@
         }
         const alreadyNotified = cancelRequested;
         cancelRequested = false;
+        updateIntent = false;
         S.removeActiveDownload(app.slug);
         removeInstalledActions();
         showIdle();
@@ -1379,6 +1397,7 @@
         return;
       }
       if (status === 'uninstalled') {
+        updateIntent = false;
         fileMissingRetries = 0;
         unmarkInstalledStored(app.slug);
         S.removeApkState(app.slug);
@@ -1403,6 +1422,7 @@
           return;
         }
         clearInstallPrompt(app.slug);
+        updateIntent = false;
         const isInstalled = (S.installedVersionOnDevice && S.installedVersionOnDevice(realPackage(app))) || (S.isSlugInstalled && S.isSlugInstalled(app.slug));
         if (isInstalled) {
           return;
@@ -1463,6 +1483,7 @@
         window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
       } catch (e) {}
 
+      if (btn.classList.contains('has-update')) updateIntent = true;
       if (btn.classList.contains('installed')
           && !(S.appHasUpdate && S.appHasUpdate(app))) { openInstalled(app); return; }
 
@@ -1491,6 +1512,11 @@
         // cancel any other in-flight download (unlimited concurrency).
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
         const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
+        if (updateIntent) {
+          // Un-hide the main slot so the REAL download counter (and its cancel
+          // button) are visible while the update APK is fetched.
+          removeInstalledActions();
+        }
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
@@ -1654,6 +1680,18 @@
     function resolveInstallState() {
       if (S.registerInstallWatch) S.registerInstallWatch(app.slug, app.package_name || '');
 
+      // A download/install is running for THIS slug: keep its progress on
+      // screen. The phone still reports the OLD version installed meanwhile.
+      if (S.hasInFlightApk && S.hasInFlightApk(app.slug)) {
+        const inflight = (S.getActiveDownloads() || []).find((d) => d.slug === app.slug) || {};
+        const live = S.getApkState(app.slug) || inflight;
+        const p = typeof live.progress === 'number' ? live.progress : -1;
+        setCancelVisible(true);
+        btn.classList.add('installing');
+        btn.disabled = true;
+        if (p >= 0) setProgress(p); else setIndeterminate();
+        return;
+      }
       const st = isNativeApp() && S.checkAppStatus ? S.checkAppStatus(app.slug, app.package_name || '') : null;
       // Use the REAL GSAndroid bridge detector in Store: Capacitor is absent
       // in the Android WebView, so st alone could miss an older installation.

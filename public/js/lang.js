@@ -484,6 +484,8 @@
     'اسم الحزمة غير متطابق مع التطبيق.': { en: 'Package name does not match the app.', fr: 'Le nom du package ne correspond pas à l’application.', es: 'El nombre del paquete no coincide con la aplicación.' },
     'تعذّر قراءة ملف APK.': { en: 'Could not read APK file.', fr: 'Impossible de lire le fichier APK.', es: 'No se pudo leer el archivo APK.' },
     'فشل التثبيت.': { en: 'Installation failed.', fr: 'Échec de l’installation.', es: 'Error de instalación.' },
+    'جارٍ تنزيل التحديث…': { en: 'Downloading the update…', fr: 'Téléchargement de la mise à jour…', es: 'Descargando la actualización…' },
+    'جارٍ فتح مثبّت النظام…': { en: 'Opening the system installer…', fr: 'Ouverture de l’installateur système…', es: 'Abriendo el instalador del sistema…' },
     'ملف التحميل مفقود.': { en: 'Downloaded file is missing.', fr: 'Le fichier téléchargé est introuvable.', es: 'Falta el archivo descargado.' },
     'ملف التحميل مفقود، بدأ تنزيل جديد…': { en: 'Downloaded file was missing, starting a fresh download…', fr: 'Fichier téléchargé introuvable, nouveau téléchargement…', es: 'Faltaba el archivo descargado, iniciando una nueva descarga…' },
     'تعذّر تحديث التطبيق. حاول إلغاء التثبيت وإعادة المحاولة.': { en: 'Could not update the app. Try uninstalling and retrying.', fr: 'Impossible de mettre à jour l’application. Essayez de la désinstaller et réessayez.', es: 'No se pudo actualizar la aplicación. Intente desinstalar y volver a intentar.' },

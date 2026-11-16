@@ -11,22 +11,46 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261108x">
-<link rel="stylesheet" href="/css/admin.css?v=20261108x">
+<link rel="stylesheet" href="/css/play.css?v=20261108y">
+<link rel="stylesheet" href="/css/admin.css?v=20261108y">
+<script id="gs-apk-self-heal">
+(function(){
+  try {
+    var del = JSON.parse(localStorage.getItem('gs_deleted_apks') || '[]');
+    if (!Array.isArray(del)) del = [];
+    var states = JSON.parse(localStorage.getItem('gs_apk_states') || '{}') || {};
+    var changed = false;
+    Object.keys(states).forEach(function(k){
+      var s = states[k];
+      if (del.indexOf(k) >= 0 || !s || s.status === 'none' ||
+          ((s.status === 'downloaded' || s.status === 'installing') && !s.filename)) {
+        delete states[k]; changed = true;
+      }
+    });
+    if (changed) localStorage.setItem('gs_apk_states', JSON.stringify(states));
+    var active = JSON.parse(localStorage.getItem('gs_active_dl') || '{}') || {};
+    var changedActive = false;
+    Object.keys(active).forEach(function(k){
+      if (del.indexOf(k) >= 0) { delete active[k]; changedActive = true; }
+    });
+    if (changedActive) localStorage.setItem('gs_active_dl', JSON.stringify(active));
+  } catch (e) {}
+})();
+</script>
 </head>
 <!-- Cache-busted assets: standalone support chat + admin chat UI (2026-11-05) -->
 <body data-page="admin">
 
 <div id="content"></div>
 
-<script src="/js/icons.js?v=20261108x"></script>
-<script src="/js/store-settings.js?v=20261108x"></script>
-  <script src="/js/lang.js?v=20261108x"></script>
-<script src="/js/common.js?v=20261108x"></script>
-<script src="/js/chat-utils.js?v=20261108x"></script>
+<script src="/js/icons.js?v=20261108y"></script>
+<script src="/js/store-settings.js?v=20261108y"></script>
+  <script src="/js/lang.js?v=20261108y"></script>
+<script src="/js/common.js?v=20261108y"></script>
+<script src="/js/chat-utils.js?v=20261108y"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="/js/admin-advanced.js?v=20261108x"></script>
-<script src="/js/admin.js?v=20261108x"></script>
-  <script src="/js/notification-hub.js?v=20261108x"></script>
+<script src="/js/admin-advanced.js?v=20261108y"></script>
+<script src="/js/admin.js?v=20261108y"></script>
+  <script src="/js/notification-hub.js?v=20261108y"></script>
 </body>
 </html>

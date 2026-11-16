@@ -13,7 +13,31 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261108x">
+<link rel="stylesheet" href="/css/play.css?v=20261108y">
+<script id="gs-apk-self-heal">
+(function(){
+  try {
+    var del = JSON.parse(localStorage.getItem('gs_deleted_apks') || '[]');
+    if (!Array.isArray(del)) del = [];
+    var states = JSON.parse(localStorage.getItem('gs_apk_states') || '{}') || {};
+    var changed = false;
+    Object.keys(states).forEach(function(k){
+      var s = states[k];
+      if (del.indexOf(k) >= 0 || !s || s.status === 'none' ||
+          ((s.status === 'downloaded' || s.status === 'installing') && !s.filename)) {
+        delete states[k]; changed = true;
+      }
+    });
+    if (changed) localStorage.setItem('gs_apk_states', JSON.stringify(states));
+    var active = JSON.parse(localStorage.getItem('gs_active_dl') || '{}') || {};
+    var changedActive = false;
+    Object.keys(active).forEach(function(k){
+      if (del.indexOf(k) >= 0) { delete active[k]; changedActive = true; }
+    });
+    if (changedActive) localStorage.setItem('gs_active_dl', JSON.stringify(active));
+  } catch (e) {}
+})();
+</script>
 </head>
 <body data-page="about">
   <div class="shell legal-shell">
@@ -89,11 +113,11 @@
     <footer class="site-footer" id="siteFooter" data-active="about"></footer>
   </div>
 
-  <script src="/js/icons.js?v=20261108x"></script>
-  <script src="/js/store-settings.js?v=20261108x"></script>
-  <script src="/js/lang.js?v=20261108x"></script>
-  <script src="/js/legal.js?v=20261108x"></script>
-  <script src="/js/legal-content.js?v=20261108x"></script>
-  <script src="/js/notification-hub.js?v=20261108x"></script>
+  <script src="/js/icons.js?v=20261108y"></script>
+  <script src="/js/store-settings.js?v=20261108y"></script>
+  <script src="/js/lang.js?v=20261108y"></script>
+  <script src="/js/legal.js?v=20261108y"></script>
+  <script src="/js/legal-content.js?v=20261108y"></script>
+  <script src="/js/notification-hub.js?v=20261108y"></script>
 </body>
 </html>

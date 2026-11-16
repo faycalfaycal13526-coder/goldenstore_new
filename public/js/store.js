@@ -1657,6 +1657,29 @@ function clearDeletedApk(slug) {
   if (!slug) return;
   try { const set = deletedApkSet(); if (!set.delete(slug)) return; localStorage.setItem(DELETED_APK_KEY, JSON.stringify([...set])); } catch {}
 }
+/* Boot-time self-heal for WebViews that kept an old localStorage state. */
+function pruneStaleApkStates() {
+  try {
+    const map = getApkStateMap();
+    let changed = false;
+    Object.keys(map).forEach((slug) => {
+      const st = map[slug];
+      if (isDeletedApk(slug) || !st || st.status === 'none'
+          || ((st.status === 'downloaded' || st.status === 'installing') && !st.filename)) {
+        delete map[slug]; changed = true;
+      }
+    });
+    if (!changed) return;
+    localStorage.setItem(APK_STATE_KEY, JSON.stringify(map));
+    const dls = getActiveDownloadMap();
+    let changedDls = false;
+    Object.keys(dls).forEach((slug) => {
+      if (isDeletedApk(slug)) { delete dls[slug]; changedDls = true; }
+    });
+    if (changedDls) writeActiveDownloadMap(dls);
+    else notifyActiveDownloads();
+  } catch (e) {}
+}
 /* When the user leaves an app page mid-download, the browser takes over the
    file transfer. Keep THIS slug active (indeterminate) so «مكتبتي» still
    shows it alongside every other concurrent download instead of deleting it. */
@@ -1880,6 +1903,7 @@ function cancelDownload(slug) {
 /* ----------------------------- Boot ----------------------------- */
 function boot() {
   initAuth();
+  pruneStaleApkStates();
   syncNativeStates();
   startHeartbeat();
   if (hasDeviceBridge()) setTimeout(checkAppUpdate, 2000);

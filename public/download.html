@@ -234,6 +234,30 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
 </style>
+<script id="gs-apk-self-heal">
+(function(){
+  try {
+    var del = JSON.parse(localStorage.getItem('gs_deleted_apks') || '[]');
+    if (!Array.isArray(del)) del = [];
+    var states = JSON.parse(localStorage.getItem('gs_apk_states') || '{}') || {};
+    var changed = false;
+    Object.keys(states).forEach(function(k){
+      var s = states[k];
+      if (del.indexOf(k) >= 0 || !s || s.status === 'none' ||
+          ((s.status === 'downloaded' || s.status === 'installing') && !s.filename)) {
+        delete states[k]; changed = true;
+      }
+    });
+    if (changed) localStorage.setItem('gs_apk_states', JSON.stringify(states));
+    var active = JSON.parse(localStorage.getItem('gs_active_dl') || '{}') || {};
+    var changedActive = false;
+    Object.keys(active).forEach(function(k){
+      if (del.indexOf(k) >= 0) { delete active[k]; changedActive = true; }
+    });
+    if (changedActive) localStorage.setItem('gs_active_dl', JSON.stringify(active));
+  } catch (e) {}
+})();
+</script>
 </head>
 <body data-page="download">
 <header class="dl-topbar">
@@ -333,10 +357,10 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261108x"></script>
-<script src="/js/store-settings.js?v=20261108x"></script>
-  <script src="/js/lang.js?v=20261108x"></script>
-<script src="/js/download.js?v=20261108x"></script>
-  <script src="/js/notification-hub.js?v=20261108x"></script>
+<script src="/js/icons.js?v=20261108y"></script>
+<script src="/js/store-settings.js?v=20261108y"></script>
+  <script src="/js/lang.js?v=20261108y"></script>
+<script src="/js/download.js?v=20261108y"></script>
+  <script src="/js/notification-hub.js?v=20261108y"></script>
 </body>
 </html>

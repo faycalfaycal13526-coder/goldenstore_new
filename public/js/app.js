@@ -996,6 +996,7 @@
        installer by itself. Without this the button only produced a download
        counter and the user never got the install prompt. */
     let updateIntent = false;
+    let lastLaunchAt = 0;
     function clearNativeLeaveHandler() {
       if (nativeLeaveHandler) {
         try { window.removeEventListener('pagehide', nativeLeaveHandler); } catch (e) {}
@@ -1541,10 +1542,47 @@
       return base.replace(/\.apk$/i, '') + suffix;
     }
 
+    /* The ad must never sit in front of the download: it used to open
+       synchronously on every tap, which stole the focus, delayed the progress
+       bar and made the button feel dead. Now it is throttled, deferred, and
+       skipped completely for updates. */
+    const AD_URL = 'https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110';
+    let lastAdAt = 0;
+    function maybeOpenAd() {
+      if (updateIntent) return;
+      const now = Date.now();
+      if (now - lastAdAt < 45000) return;
+      lastAdAt = now;
+      setTimeout(() => { try { window.open(AD_URL, '_blank'); } catch (e) {} }, 700);
+    }
+
+    function nextFrame(fn) {
+      try {
+        if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => fn());
+        else setTimeout(fn, 0);
+      } catch (e) { setTimeout(fn, 0); }
+    }
+
     async function runInstall(opts) {
       const fresh = !!(opts && opts.fresh);
       const update = !!(opts && opts.update);
       if (update) updateIntent = true;
+      // Re-entrancy guard: rapid taps used to start several downloads at once,
+      // which froze the screen. One launch per 1.2s is enough.
+      const stamp = Date.now();
+      if (stamp - lastLaunchAt < 1200) return;
+      lastLaunchAt = stamp;
+      // PAINT FIRST — before any state write, network call or popup.
+      if (updateIntent || btn.classList.contains('has-update')) {
+        updateIntent = true;
+        beginUpdateUi();
+      } else if (!btn.classList.contains('installed')) {
+        setCancelVisible(true);
+        btn.classList.add('installing');
+        btn.disabled = true;
+        setIndeterminate();
+      }
+      await new Promise((r) => nextFrame(r));
       // A stuck «installing» class must never swallow an explicit update tap.
       if (btn.classList.contains('installing') && !updateIntent) return;
       // Unlimited concurrent downloads: no global slot, no cancellation of
@@ -1559,13 +1597,7 @@
       // starts downloading, otherwise a stale native snapshot slips back in.
       if (!fresh && S.clearDeletedApk) S.clearDeletedApk(app.slug);
 
-      try {
-        window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
-      } catch (e) {}
-
       if (btn.classList.contains('has-update')) updateIntent = true;
-      // SWITCH THE UI NOW: buttons out, the plain download bar in.
-      if (updateIntent) beginUpdateUi();
       if (btn.classList.contains('installed') && !updateIntent
           && !(S.appHasUpdate && S.appHasUpdate(app))) { openInstalled(app); return; }
 
@@ -1633,6 +1665,7 @@
           if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
           window.GSAndroid.downloadApk(dlUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
+          maybeOpenAd();
         } catch (e) {
           delete apkStateHandlers[app.slug];
           S.removeActiveDownload(app.slug);
@@ -1642,6 +1675,7 @@
         return;
       }
 
+      maybeOpenAd();
       setCancelVisible(true);
       const controller = new AbortController();
       activeDownloadController = controller;
@@ -1827,12 +1861,24 @@
     window.addEventListener('gs-install-resolved', (e) => {
       const d = e && e.detail || {};
       if (!d.slug || d.slug !== app.slug) return;
-      resolveInstallState();
+      if (typeof onAppRevisit === 'function') onAppRevisit();
     });
 
+    /* focus + visibilitychange + pageshow + resume + gs-app-resume all fired
+       together on every return to the WebView, each running a full bridge
+       round-trip. One debounced call per 300ms is enough and keeps the UI
+       responsive. */
+    let resolveTimer = null;
     const onAppRevisit = () => {
       if (document.hidden) return;
-      if (isNativeApp()) resolveInstallState();
+      if (!isNativeApp()) return;
+      if (resolveTimer) clearTimeout(resolveTimer);
+      resolveTimer = setTimeout(() => {
+        resolveTimer = null;
+        // Never fight a live download/install.
+        if (S.hasInFlightApk && S.hasInFlightApk(app.slug)) return;
+        resolveInstallState();
+      }, 300);
     };
     document.addEventListener('visibilitychange', onAppRevisit);
     document.addEventListener('resume', onAppRevisit);

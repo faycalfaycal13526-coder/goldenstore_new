@@ -1561,6 +1561,9 @@ window.__gsDownloadStatesSnapshot = function (states) {
       if ((status === 'downloaded' || status === 'installing') && isDeadApkFile(st.filename)) return;
       if (status === 'downloading') {
         clearDeletedApk(slug);
+        const prev = getApkState(slug) || {};
+        if (prev.status === 'downloading' && prev.filename === (st.filename || '')
+            && Math.abs((prev.progress || 0) - (progress || 0)) < 0.02) return;
         setApkState(slug, {
           slug, status: 'downloading', progress: progress >= 0 ? progress : 0,
           filename: st.filename || '', package_name: st.package_name || '',
@@ -1827,8 +1830,13 @@ function startHeartbeat() {
   window.addEventListener('focus', onVisible);
   window.addEventListener('pageshow', onVisible);
 }
+let heartbeatBusy = false;
 function heartbeatTick() {
   if (!isNativeBridge()) return;
+  // Never overlap ticks and never burn CPU while the WebView is in the
+  // background — that was making the whole page feel unresponsive.
+  if (heartbeatBusy || (typeof document !== 'undefined' && document.hidden)) return;
+  heartbeatBusy = true;
   try {
     watchedApps.forEach((pkg, slug) => {
       const targetPkg = pkg || resolvedPackageName(slug) || '';
@@ -1860,6 +1868,7 @@ function heartbeatTick() {
       }
     });
   } catch (e) { console.error('[heartbeat]', e); }
+  finally { heartbeatBusy = false; }
 }
 
 /* ------------------- Installed apps registry (device truth) ------------------- */
@@ -2041,8 +2050,17 @@ function setActiveDownload(entry) {
   writeActiveDownloadMap(map);
   return map[entry.slug];
 }
+const lastProgressWriteAt = Object.create(null);
 function updateActiveDownloadProgress(slug, progress) {
   if (!slug) return;
+  // Progress arrives many times per second; writing + broadcasting every time
+  // re-renders every listener and stutters the UI. 400ms is plenty.
+  const now = Date.now();
+  const key = `${slug}`;
+  const last = lastProgressWriteAt[key] || 0;
+  const p = Number(progress);
+  if (now - last < 400 && p !== 1 && p !== 0 && p !== -1) return;
+  lastProgressWriteAt[key] = now;
   const map = getActiveDownloadMap();
   const entry = map[slug];
   if (!entry) return;

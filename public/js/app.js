@@ -1025,19 +1025,18 @@
       toast(t('تم إلغاء التنزيل'), 'info');
     }
 
-    function dlLabel() {
-      return updateIntent ? t('جارٍ تنزيل التحديث…') : t('جارٍ التنزيل…');
-    }
+    // Exactly the SAME bar/label as a normal download — an update must not
+    // look like a different, confusing control.
     function setProgress(ratio) {
       const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
       btn.classList.remove('indeterminate');
       fill.style.transition = 'width .15s linear';
       fill.style.width = pct + '%';
-      label.textContent = `${dlLabel()} ${pct}%`;
+      label.textContent = `${t('جارٍ التنزيل…')} ${pct}%`;
     }
     function setIndeterminate() {
       btn.classList.add('indeterminate');
-      label.textContent = dlLabel();
+      label.textContent = t('جارٍ التنزيل…');
     }
     function resetBar() {
       btn.classList.remove('installing', 'indeterminate');
@@ -1103,14 +1102,49 @@
       }
       toast(t('غير متاح في هذا المتصفح'), 'info');
     }
+    /* The bridge may expose the installer under several names depending on the
+       APK build. Always ASK FOR AN INSTALL (never «open app»), so an update is
+       really installed over the older copy that is already on the phone. */
+    function launchInstaller(a, filename) {
+      const bridge = window.GSAndroid || {};
+      const fn = String(filename || '');
+      const args = [fn, a.slug || '', a.package_name || ''];
+      const methods = ['installDownloadedApk', 'installApk', 'installDownloadedFile', 'openDownloadedApk'];
+      for (let i = 0; i < methods.length; i++) {
+        const name = methods[i];
+        if (typeof bridge[name] === 'function') {
+          try { bridge[name](args[0], args[1], args[2]); return name; } catch (e) {}
+        }
+      }
+      return '';
+    }
+    let installWatchdog = null;
+    function clearInstallWatchdog() {
+      if (installWatchdog) { clearTimeout(installWatchdog); installWatchdog = null; }
+    }
+    /* If the system installer never reports back, never leave the user on a
+       bare download bar: restore the explicit Install/Delete bar. */
+    function armInstallWatchdog(a, file) {
+      clearInstallWatchdog();
+      installWatchdog = setTimeout(() => {
+        installWatchdog = null;
+        const st = S.getApkState(a.slug) || {};
+        const busy = (S.hasInFlightApk && S.hasInFlightApk(a.slug))
+          || st.status === 'installing';
+        if (busy) return;
+        restoreReadyToInstall(file, { toast: t('لم يُفتح مثبّت النظام، اضغط تثبيت'), kind: 'error' });
+      }, 6000);
+    }
     function openDownloadedApk(a, filename) {
-      if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.openDownloadedApk === 'function') {
+      if (isNativeApp() && window.GSAndroid) {
         try {
           // Immediately show ONLY the downloaded-actions bar (no big split
           // button behind the system dialog), and remember we are in the prompt.
           markInstallPrompt(a.slug, filename || '');
           showDownloadedActions(a, filename);
-          window.GSAndroid.openDownloadedApk(filename || '', a.slug || '', a.package_name || '');
+          const used = launchInstaller(a, filename);
+          if (!used) { clearInstallPrompt(a.slug); toast(t('تعذّر فتح الملف'), 'error'); return; }
+          armInstallWatchdog(a, filename);
           toast(t('جارٍ فتح مثبّت النظام…'), 'info');
         } catch (e) {
           clearInstallPrompt(a.slug);
@@ -1301,6 +1335,10 @@
           || status === 'installed' || status === 'uninstalled') {
         clearInstallPrompt(app.slug);
       }
+      if (status === 'installing' || status === 'installed'
+          || status === 'cancelled' || status === 'failed') {
+        clearInstallWatchdog();
+      }
       const errMap = {
         signature_mismatch: t('تعارض توقيع الحزمة: ألغِ التطبيق المثبت ثم ثبّت النسخة الجديدة.'),
         package_mismatch: t('اسم الحزمة غير متطابق مع التطبيق.'),
@@ -1349,8 +1387,11 @@
         showDownloadedActions(app, message || filename);
         if (autoInstall) {
           // Direct update: the APK is ready, so open the system installer
-          // ourselves instead of waiting for a second tap.
-          const file = message || filename;
+          // ourselves (INSTALL over the old version) instead of waiting for a
+          // second tap. The bridge reports the real saved filename in
+          // `message`, so always prefer it over the name we requested.
+          const file = (message && /\.apk$/i.test(message)) ? message
+            : (message || (S.getApkState(app.slug) || {}).filename || filename);
           setTimeout(() => { try { openDownloadedApk(app, file); } catch (e) {} }, 250);
         }
         return;

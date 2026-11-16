@@ -157,3 +157,59 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 - واجهة التسجيل تتطلب جلسة Firebase (`Authorization: Bearer <idToken>`) ومحدودة بـ 30 طلب/دقيقة.
 - `installation_id` معرّف عشوائي، لا يحتوي على بريد أو رقم هاتف أو IMEI.
 - لا تضع أي `ghp_…` أو `cfut_…` داخل الـ APK أو المستودع؛ بدّل أي توكن سبق مشاركته.
+
+---
+
+## 4.1 عقد التحديث المباشر (مهم جداً لزر «تحديث التطبيق»)
+
+الموقع يستدعي الجسر بالترتيب التالي عند وجود نسخة أقدم مثبّتة على الهاتف:
+
+```
+GSAndroid.downloadApk(dlUrl, filename, slug, packageName, appName, iconUrl)
+```
+
+ثم ينتظر حدث الحالة، وبعد اكتمال الملف يطلب **التثبيت** (وليس الفتح) عبر أول دالة متاحة:
+
+```
+GSAndroid.installDownloadedApk(filename, slug, packageName)   // المفضّلة
+GSAndroid.installApk(filename, slug, packageName)
+GSAndroid.installDownloadedFile(filename, slug, packageName)
+GSAndroid.openDownloadedApk(filename, slug, packageName)      // احتياطية
+```
+
+شروط يجب أن يحققها كود الـ APK:
+
+1. **`downloadApk` يحفظ الملف بالاسم الممرَّر حرفياً** ويُبلّغ به في
+   `window.__gsApkDownloadUpdate(slug, 'downloaded', 1, filename)`؛
+   أي اسم آخر يسبب «ملف التحميل مفقود».
+2. **`openDownloadedApk` / `installDownloadedApk` لا تفتح التطبيق أبداً.**
+   إذا كانت الحزمة مثبّتة بنسخة أقدم، أطلق **مثبّت النظام** على الـAPK الجديد
+   (Intent `ACTION_VIEW` مع `application/vnd.android.package-archive` و`FileProvider`).
+   توجيه المستخدم إلى `openApp` هو سبب مشكلة «عدّاد تحميل فقط».
+3. قبل إطلاق المثبّت أرسل `window.__gsApkDownloadUpdate(slug, 'installing', 1)`.
+4. عند نجاح التثبيت: `window.__gsApkDownloadUpdate(slug, 'installed', 1, packageName)`.
+   عند إلغاء المستخدم: `'cancelled'`، وعند فشل الحزمة: `'failed'` مع سبب
+   (`signature_mismatch` / `package_mismatch` / `apk_parse_failed` / `install_error`).
+5. الصلاحية `REQUEST_INSTALL_PACKAGES` يجب أن تكون معلنة وممنوحة، وإلا لا يظهر المثبّت إطلاقاً.
+
+كود Kotlin مختصر للدالة الموصى بها:
+
+```kotlin
+@JavascriptInterface
+fun installDownloadedApk(filename: String, slug: String, pkg: String) {
+    val file = File(File(ctx.filesDir, "downloads"), filename)   // نفس مسار downloadApk
+    if (!file.exists()) { fail("file_missing", filename); return }
+    notifyJs(slug, "installing", 1.0, filename)
+    val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", file)
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        // مهم: لا تضع أي شرط يفتح التطبيق بدل التثبيت
+    }
+    ctx.startActivity(intent)     // حتى لو كانت الحزمة مثبتّة بنسخة أقدم
+}
+```
+
+الموقع يملك أيضاً **حاجز أمان (watchdog 6 ثوانٍ)**: إذا لم يصل أي حدث تثبيت بعد
+فتح المثبّت، يعيد شريط «تثبيت / حذف الملف» مع رسالة واضحة بدل ترْك المستخدم
+أمام شريط تحميل مكتمل بلا نتيجة.

@@ -484,6 +484,7 @@
     'اسم الحزمة غير متطابق مع التطبيق.': { en: 'Package name does not match the app.', fr: 'Le nom du package ne correspond pas à l’application.', es: 'El nombre del paquete no coincide con la aplicación.' },
     'تعذّر قراءة ملف APK.': { en: 'Could not read APK file.', fr: 'Impossible de lire le fichier APK.', es: 'No se pudo leer el archivo APK.' },
     'فشل التثبيت.': { en: 'Installation failed.', fr: 'Échec de l’installation.', es: 'Error de instalación.' },
+    'لم يُفتح مثبّت النظام، اضغط تثبيت': { en: 'The system installer did not open — tap Install', fr: 'L’installateur système ne s’est pas ouvert — appuyez sur Installer', es: 'El instalador del sistema no se abrió: pulsa Instalar' },
     'جارٍ تنزيل التحديث…': { en: 'Downloading the update…', fr: 'Téléchargement de la mise à jour…', es: 'Descargando la actualización…' },
     'جارٍ فتح مثبّت النظام…': { en: 'Opening the system installer…', fr: 'Ouverture de l’installateur système…', es: 'Abriendo el instalador del sistema…' },
     'ملف التحميل مفقود.': { en: 'Downloaded file is missing.', fr: 'Le fichier téléchargé est introuvable.', es: 'Falta el archivo descargado.' },

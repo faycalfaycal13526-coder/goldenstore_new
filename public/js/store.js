@@ -1459,7 +1459,14 @@ function showUpdateDialog(update, opts = {}) {
 }
 
 
+function normApkProgress(p) {
+  const n = Number(p);
+  if (!isFinite(n) || n < 0) return -1;
+  if (n > 1.5) return Math.max(0, Math.min(1, n / 100));   // 0..100 -> 0..1
+  return Math.max(0, Math.min(1, n));
+}
 window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
+  const progressNorm = normApkProgress(progress);
   try {
     if (slug && slug !== 'app-update') {
       if (status === 'downloading') {
@@ -1467,7 +1474,7 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
         const prev = getApkState(slug) || {};
         setApkState(slug, {
           slug, status: 'downloading',
-          progress: progress >= 0 ? progress : (prev.progress || 0),
+          progress: progressNorm >= 0 ? progressNorm : (prev.progress || 0),
           filename: message || prev.filename || '',
           updated_at: Math.floor(Date.now() / 1000),
         });
@@ -1479,7 +1486,7 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
           icon_url: entry.icon_url || null,
           developer: entry.developer || '',
           size_bytes: entry.size_bytes || 0,
-          progress: progress >= 0 ? progress : (entry.progress || 0),
+          progress: progressNorm >= 0 ? progressNorm : (entry.progress || 0),
           status: 'downloading',
           started_at: entry.started_at || Math.floor(Date.now() / 1000),
         });
@@ -1574,7 +1581,7 @@ window.__gsDownloadStatesSnapshot = function (states) {
         setActiveDownload({
           slug, name: entry.name || slug, icon_url: entry.icon_url || null,
           developer: entry.developer || '', size_bytes: entry.size_bytes || st.total_bytes || 0,
-          progress: progress >= 0 ? progress : (entry.progress || 0),
+          progress: progressNorm >= 0 ? progressNorm : (entry.progress || 0),
           status: 'downloading', started_at: entry.started_at || Math.floor(Date.now() / 1000),
         });
       } else if (status === 'downloaded' || status === 'installing') {

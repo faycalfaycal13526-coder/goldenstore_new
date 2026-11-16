@@ -1030,7 +1030,12 @@
     // Exactly the SAME bar/label as a normal download — an update must not
     // look like a different, confusing control.
     function setProgress(ratio) {
-      const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+      const v = normProgress(ratio);
+      if (v < 0) return;
+      // Monotonic: a late/partial bridge value (0.02 after 0.60) can no longer
+      // drag the bar back or scramble the number.
+      displayedProgress = Math.max(displayedProgress, v);
+      const pct = Math.round(displayedProgress * 100);
       btn.classList.remove('indeterminate');
       fill.style.transition = 'width .15s linear';
       fill.style.width = pct + '%';
@@ -1040,11 +1045,22 @@
       btn.classList.add('indeterminate');
       label.textContent = t('جارٍ التنزيل…');
     }
-    /* Even when the Android bridge (or a streamed response without
-       Content-Length) sends no progress, the bar must never look frozen: it
-       creeps smoothly toward 95% and real progress always wins. */
+    /* The Android bridge may report progress as 0..1 OR as 0..100 — mixing the
+       two made the numbers jump wildly (4500%). Everything is normalised to
+       0..1 here, and the painted value is MONOTONIC: it can only grow. */
+    let displayedProgress = 0;
+    function normProgress(p) {
+      const n = Number(p);
+      if (!isFinite(n) || n < 0) return -1;
+      if (n > 1.5) return Math.max(0, Math.min(1, n / 100));   // percentage
+      return Math.max(0, Math.min(1, n));
+    }
+    /* Even when the bridge (or a streamed response without Content-Length)
+       sends no progress, the bar must never look frozen: it creeps smoothly
+       toward 95%, and real progress always wins — never backwards. */
     let creepTimer = null;
     let creepValue = 0;
+    let lastRealProgressAt = 0;
     function stopCreep() {
       if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
     }
@@ -1054,19 +1070,25 @@
       if (creepValue <= 0) setProgress(0.01);
       creepTimer = setInterval(() => {
         if (!btn.classList.contains('installing')) { stopCreep(); return; }
+        // Real progress always owns the number; the creep only fills the
+        // silence when the bridge sends nothing for a while.
+        if (Date.now() - lastRealProgressAt < 2500) return;
         if (creepValue >= 0.95) return;
         creepValue = Math.min(0.95, creepValue + Math.max(0.01, (0.95 - creepValue) * 0.055));
         setProgress(creepValue);
       }, 380);
     }
     function noteRealProgress(p) {
-      const v = Number(p);
-      if (!(v >= 0)) return;
+      const v = normProgress(p);
+      if (v < 0) return;
+      lastRealProgressAt = Date.now();
       if (v > creepValue) creepValue = v;
+      if (v > displayedProgress) displayedProgress = v;
     }
     function resetBar() {
       stopCreep();
       creepValue = 0;
+      displayedProgress = 0;
       btn.classList.remove('installing', 'indeterminate');
       fill.style.transition = 'none';
       fill.style.width = '0%';
@@ -1431,8 +1453,8 @@
         } else {
           S.updateActiveDownloadProgress(app.slug, progress);
         }
-        if (progress >= 0) setProgress(progress);
-        else setIndeterminate();
+        if (normProgress(progress) >= 0) setProgress(progress);
+        else if (!creepTimer) startCreep(displayedProgress);
         return;
       }
       if (status === 'downloaded') {
@@ -1583,12 +1605,15 @@
        skipped completely for updates. */
     const AD_URL = 'https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110';
     let lastAdAt = 0;
-    function maybeOpenAd() {
-      if (updateIntent) return;
+    /* Owner requirement: the ad opens FIRST, on every download/update tap.
+       It is opened synchronously (still inside the tap gesture, so popup
+       blockers allow it) and before anything else runs. Only a 2s guard
+       remains, to swallow the click+touch double-event. */
+    function openAdNow() {
       const now = Date.now();
-      if (now - lastAdAt < 45000) return;
+      if (now - lastAdAt < 2000) return;
       lastAdAt = now;
-      setTimeout(() => { try { window.open(AD_URL, '_blank'); } catch (e) {} }, 700);
+      try { window.open(AD_URL, '_blank'); } catch (e) {}
     }
 
     function nextFrame(fn) {
@@ -1608,6 +1633,8 @@
       const stamp = Date.now();
       if (stamp - lastLaunchAt < 250) return;   // ignore click+touch double-fire
       lastLaunchAt = stamp;
+      // AD FIRST — synchronous, inside the gesture, before any UI work.
+      openAdNow();
       launchInFlight = true;
       const releaseLaunch = setTimeout(() => { launchInFlight = false; }, 4000);
       try {
@@ -1712,7 +1739,6 @@
           if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
           window.GSAndroid.downloadApk(dlUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
-          maybeOpenAd();
         } catch (e) {
           delete apkStateHandlers[app.slug];
           S.removeActiveDownload(app.slug);
@@ -1722,7 +1748,6 @@
         return;
       }
 
-      maybeOpenAd();
       setCancelVisible(true);
       const controller = new AbortController();
       activeDownloadController = controller;

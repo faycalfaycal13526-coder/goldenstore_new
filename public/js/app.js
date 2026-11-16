@@ -1081,7 +1081,7 @@
               S.removeActiveDownload(a.slug);
               clearInstallPrompt(a.slug);
               removeInstalledActions();
-              showIdle({ grey: true });
+              showIdle();
               toast(t('تم إلغاء تثبيت التطبيق'), 'info');
             }
           }, 500);
@@ -1208,16 +1208,11 @@
       btn.classList.remove('installed', 'has-update');
       btn.disabled = false;
       label.textContent = t('تثبيت');
-      // After «إلغاء التثبيت» (or after deleting the file) the app is gone:
-      // the download button must read as NEUTRAL (grey), not as a primary blue
-      // CTA, until the user really starts downloading again. The choice is
-      // durable, because the slug stays marked-as-deleted across reloads.
-      const greyOpt = opts && typeof opts === 'object' && typeof opts.grey === 'boolean' ? opts.grey : null;
-      const grey = greyOpt === null
-        ? !!(S.isDeletedApk && S.isDeletedApk(app.slug))
-        : greyOpt;
-      btn.classList.toggle('gs-btn-grey', grey);
-      group.classList.toggle('gs-grey', grey);
+      // The download button must ALWAYS come back in the normal PRIMARY blue —
+      // a grey CTA after «إلغاء التثبيت» was reported as a bug, so any leftover
+      // neutral styling is cleared explicitly here.
+      btn.classList.remove('gs-btn-grey');
+      group.classList.remove('gs-grey');
     }
 
     /* A deleted APK leaves a stale «downloaded» filename behind. Drop it,
@@ -1386,7 +1381,7 @@
         S.removeActiveDownload(app.slug);
         clearInstallPrompt(app.slug);
         removeInstalledActions();
-        showIdle({ grey: true });
+        showIdle();
         toast(t('تم إلغاء تثبيت التطبيق'), 'info');
         return;
       }
@@ -1423,7 +1418,7 @@
       if (matches) {
         unmarkInstalledStored(app.slug);
         removeInstalledActions();
-        showIdle({ grey: true });
+        showIdle();
       }
     });
 

@@ -1649,20 +1649,6 @@ html[dir="ltr"] .support-entry-chevron { transform: scaleX(-1); }
   box-shadow: 0 2px 8px rgba(47,123,255,.15);
 }
 
-/* After «إلغاء التثبيت» the app is gone from the phone, so the install /
-   download button must read NEUTRAL (grey) instead of the blue CTA. It turns
-   blue again the moment a real download starts. */
-.install-btn.gs-btn-grey,
-.install-btn.gs-btn-grey:hover {
-  background: var(--surface-2); color: var(--text);
-  border: 1px solid var(--line); box-shadow: none; filter: none;
-}
-.install-btn.gs-btn-grey .icon { color: var(--text-2); }
-.install-group.gs-grey .install-caret,
-.install-group.gs-grey .install-caret:hover {
-  background: var(--surface-2); color: var(--text-2);
-  border: 1px solid var(--line); box-shadow: none;
-}
 /* Update state: «تحديث التطبيق» and «إلغاء التثبيت» side by side, equal width. */
 .installed-actions .gs-action-update .icon { color: currentColor; }
 

@@ -38,6 +38,21 @@ applyTheme(currentTheme());
 function isNativeApp() {
   return typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 }
+/* The Android WebView exposes GSAndroid, NOT Capacitor. Device/install helpers
+   must use this bridge detector; isNativeApp() stays for API-base routing. */
+function hasDeviceBridge() {
+  try {
+    const b = window.GSAndroid;
+    return !!(b && (
+      typeof b.downloadApk === 'function' ||
+      typeof b.checkAppStatus === 'function' ||
+      typeof b.isPackageInstalled === 'function' ||
+      typeof b.isSlugInstalled === 'function' ||
+      typeof b.cancelDownload === 'function' ||
+      typeof b.getDownloadStates === 'function'
+    ));
+  } catch (e) { return false; }
+}
 const STORE_API_ORIGIN = 'https://api.goldenstore.online';
 
 function apiBaseUrl() {
@@ -1250,7 +1265,7 @@ async function checkForUpdates(opts = {}) {
     showUpdateCheckCard('error', null);
     return { status: 'error', error: new Error('invalid_update') };
   }
-  if (isNativeApp()) {
+  if (hasDeviceBridge()) {
     if (shouldShowUpdate(update, { manual: true })) {
       showUpdateDialog(update, { manual: true });
       return { status: 'available', update };
@@ -1581,7 +1596,7 @@ window.__gsPackageUninstalled = function (packageName) {
 };
 
 async function checkAppUpdate() {
-  if (!isNativeApp() || autoUpdateChecked) return;
+  if (!hasDeviceBridge() || autoUpdateChecked) return;
   autoUpdateChecked = true;                 // one automatic check per page load
   try {
     const update = await api('/api/app-update', { timeoutMs: 8000 });
@@ -1645,7 +1660,7 @@ function onApkState(fn) {
 }
 
 function syncNativeStates() {
-  if (!isNativeApp()) return;
+  if (!hasDeviceBridge()) return;
   try {
     if (window.GSAndroid && typeof window.GSAndroid.getDownloadStates === 'function') {
       const raw = window.GSAndroid.getDownloadStates();
@@ -1761,7 +1776,7 @@ function unmarkInstalledStored(slug) {
   try { const s = installedSet(); s.delete(slug); localStorage.setItem(INSTALL_KEY, JSON.stringify([...s])); } catch {}
 }
 function installedVersionOnDevice(packageName) {
-  if (!isNativeApp() || !packageName) return '';
+  if (!hasDeviceBridge() || !packageName) return '';
   try {
     if (window.GSAndroid && typeof window.GSAndroid.isPackageInstalled === 'function') {
       return window.GSAndroid.isPackageInstalled(packageName) || '';
@@ -1770,7 +1785,7 @@ function installedVersionOnDevice(packageName) {
   return '';
 }
 function isSlugInstalled(slug) {
-  if (!isNativeApp() || !slug) return '';
+  if (!hasDeviceBridge() || !slug) return '';
   try {
     if (window.GSAndroid && typeof window.GSAndroid.isSlugInstalled === 'function') {
       return window.GSAndroid.isSlugInstalled(slug) || '';
@@ -1790,35 +1805,40 @@ function versionIsNewer(storeVersion, deviceVersion) {
   }
   return false;
 }
+/* Device truth for one app, using the REAL GSAndroid bridge (not Capacitor). */
+function deviceAppInfo(app) {
+  const empty = { installed: false, version: '', versionCode: 0 };
+  if (!app || !hasDeviceBridge()) return empty;
+  const pkg = app.package_name
+    || (typeof resolvedPackageName === 'function' ? resolvedPackageName(app.slug) : '') || '';
+  const st = typeof checkAppStatus === 'function' ? checkAppStatus(app.slug, pkg) : null;
+  if (st && st.installed) {
+    return {
+      installed: true,
+      version: String(st.version || st.version_name || '').trim(),
+      versionCode: Number(st.version_code || st.versionCode || 0) || 0,
+    };
+  }
+  const raw = String(
+    (typeof installedVersionOnDevice === 'function' ? installedVersionOnDevice(pkg) : '')
+    || (typeof isSlugInstalled === 'function' ? isSlugInstalled(app.slug) : '')
+    || ''
+  ).trim();
+  if (!raw) return empty;
+  return { installed: true, version: raw === 'installed' ? '' : raw, versionCode: 0 };
+}
+function isAppInstalledOnDevice(app) { return deviceAppInfo(app).installed; }
 /* Does the store APK represent a NEWER build than the copy on this device?
    Uses version_code first, then version_name, and — when the bridge cannot
    report a device version — treats the store build as newer instead of
    silently re-opening an old installation. */
 function appHasUpdate(app) {
-  if (!app || !isNativeApp()) return false;
-  const pkg = app.package_name
-    || (typeof resolvedPackageName === 'function' ? resolvedPackageName(app.slug) : '') || '';
-  let deviceName = '';
-  let deviceCode = 0;
-  let installed = false;
-  const st = typeof checkAppStatus === 'function' ? checkAppStatus(app.slug, pkg) : null;
-  if (st && st.installed) {
-    installed = true;
-    deviceName = String(st.version || st.version_name || '').trim();
-    deviceCode = Number(st.version_code || st.versionCode || 0) || 0;
-  } else {
-    const raw = (typeof installedVersionOnDevice === 'function' ? installedVersionOnDevice(pkg) : '')
-      || (typeof isSlugInstalled === 'function' ? isSlugInstalled(app.slug) : '');
-    if (!raw) return false;
-    installed = true;
-    deviceName = String(raw).trim();
-    if (deviceName === 'installed') deviceName = '';
-  }
-  if (!installed) return false;
+  const info = deviceAppInfo(app);
+  if (!info.installed) return false;
   const storeCode = Number(app.version_code || 0) || 0;
   const storeName = String(app.version_name || '').trim();
-  if (storeCode > 0 && deviceCode > 0) return storeCode > deviceCode;
-  if (storeName && deviceName) return versionIsNewer(storeName, deviceName);
+  if (storeCode > 0 && info.versionCode > 0) return storeCode > info.versionCode;
+  if (storeName && info.version) return versionIsNewer(storeName, info.version);
   // Unknown device version: never OPEN instead of updating a user-downloaded APK.
   return !!storeName;
 }
@@ -1826,7 +1846,7 @@ function appHasUpdate(app) {
 function cancelDownload(slug) {
   try {
     abortWebDownload(slug);
-    if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.cancelDownload === 'function') {
+    if (hasDeviceBridge() && window.GSAndroid && typeof window.GSAndroid.cancelDownload === 'function') {
       window.GSAndroid.cancelDownload(slug);
     }
     removeActiveDownload(slug);   // only THIS slug; other downloads stay active
@@ -1839,7 +1859,7 @@ function boot() {
   initAuth();
   syncNativeStates();
   startHeartbeat();
-  if (isNativeApp()) setTimeout(checkAppUpdate, 2000);
+  if (hasDeviceBridge()) setTimeout(checkAppUpdate, 2000);
 }
 
 /* ----------------------------- Download History ----------------------------- */
@@ -2032,7 +2052,7 @@ window.Store = {
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
-  installedVersionOnDevice, versionIsNewer, appHasUpdate, cancelDownload, isSlugInstalled,
+  installedVersionOnDevice, versionIsNewer, appHasUpdate, isAppInstalledOnDevice, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
   checkAppUpdate, checkForUpdates, showUpdateDialog, showUpdateBanner, shouldShowUpdate, offlineScreen, getCurrentAppVersion,
 };

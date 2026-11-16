@@ -1514,9 +1514,13 @@
       if (S.registerInstallWatch) S.registerInstallWatch(app.slug, app.package_name || '');
 
       const st = isNativeApp() && S.checkAppStatus ? S.checkAppStatus(app.slug, app.package_name || '') : null;
-      if (st && st.installed) {
+      // Use the REAL GSAndroid bridge detector in Store: Capacitor is absent
+      // in the Android WebView, so st alone could miss an older installation.
+      const installedOnDevice = S.isAppInstalledOnDevice
+        ? S.isAppInstalledOnDevice(app) : !!(st && st.installed);
+      if (installedOnDevice) {
         markInstalledStored(app.slug);
-        if (st.package_name) S.rememberResolvedPackage(app.slug, st.package_name);
+        if (st && st.package_name) S.rememberResolvedPackage(app.slug, st.package_name);
         const hasUpdate = S.appHasUpdate ? S.appHasUpdate(app) : false;
         showInstalled(hasUpdate ? 'update' : 'open');
         showInstalledActions(app, { withOpen: !hasUpdate });

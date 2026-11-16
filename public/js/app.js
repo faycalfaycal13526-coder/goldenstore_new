@@ -1032,7 +1032,7 @@
       fill.style.transition = 'none';
       fill.style.width = '0%';
     }
-    function showInstalled(mode) {
+    function showInstalled(mode = 'open') {
       removeInstalledActions();
       setCancelVisible(false);
       resetBar();
@@ -1043,8 +1043,10 @@
         btn.classList.add('has-update');
         label.append(ico('refresh', 'icon'), document.createTextNode(t('تحديث')));
       } else {
+        btn.classList.remove('has-update');
         btn.classList.add('installed');
-        label.append(ico('check', 'icon'), document.createTextNode(t('تم التثبيت')));
+        // Same version already on the phone: one direct «فتح» action.
+        label.append(ico('play', 'icon'), document.createTextNode(t('فتح')));
       }
     }
 
@@ -1127,12 +1129,12 @@
       if (!isNativeApp()) return;
       removeInstalledActions();
       const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' });
-      bar.append(
-        el('button', { class: 'btn btn-primary btn-lg gs-action-open', type: 'button', onclick: () => openInstalled(a) },
-          ico('play', 'icon'), t('فتح')),
-        el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
-          ico('trash', 'icon'), t('إلغاء التثبيت')),
-      );
+      if (opts.withOpen !== false) {
+        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-open', type: 'button', onclick: () => openInstalled(a) },
+          ico('play', 'icon'), t('فتح')));
+      }
+      bar.append(el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
+        ico('trash', 'icon'), t('إلغاء التثبيت')));
       placeActionsBar(bar, true);
     }
     function showDownloadedActions(a, filename) {
@@ -1257,8 +1259,9 @@
         S.removeActiveDownload(app.slug);
         S.removeApkState(app.slug);
         if (message && message !== 'installed') S.rememberResolvedPackage(app.slug, message);
-        const devVer = S.installedVersionOnDevice(realPackage(app)) || S.isSlugInstalled(app.slug);
-        const hasUpdate = S.versionIsNewer(app.version_name || '', devVer);
+        // Compare the STORE build with the DEVICE build. An older installed
+        // copy must show «تحديث» and install the APK, never OPEN the old app.
+        const hasUpdate = S.appHasUpdate ? S.appHasUpdate(app) : false;
         showInstalled(hasUpdate ? 'update' : 'open');
         showInstalledActions(app, { withOpen: !hasUpdate });
         toast(t('تم تثبيت التطبيق بنجاح'), 'success');
@@ -1334,7 +1337,8 @@
         window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
       } catch (e) {}
 
-      if (btn.classList.contains('installed')) { openInstalled(app); return; }
+      if (btn.classList.contains('installed')
+          && !(S.appHasUpdate && S.appHasUpdate(app))) { openInstalled(app); return; }
 
       const liveState = S.getApkState(app.slug);
       if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveState.filename) {
@@ -1513,7 +1517,7 @@
       if (st && st.installed) {
         markInstalledStored(app.slug);
         if (st.package_name) S.rememberResolvedPackage(app.slug, st.package_name);
-        const hasUpdate = S.versionIsNewer(app.version_name || '', st.version || '');
+        const hasUpdate = S.appHasUpdate ? S.appHasUpdate(app) : false;
         showInstalled(hasUpdate ? 'update' : 'open');
         showInstalledActions(app, { withOpen: !hasUpdate });
         return;
@@ -1605,7 +1609,7 @@
         }, stepInterval);
       }
       } else if (isInstalled(app.slug)) {
-        showInstalled();
+        showInstalled('open');
       }
     }
 

@@ -1790,6 +1790,39 @@ function versionIsNewer(storeVersion, deviceVersion) {
   }
   return false;
 }
+/* Does the store APK represent a NEWER build than the copy on this device?
+   Uses version_code first, then version_name, and — when the bridge cannot
+   report a device version — treats the store build as newer instead of
+   silently re-opening an old installation. */
+function appHasUpdate(app) {
+  if (!app || !isNativeApp()) return false;
+  const pkg = app.package_name
+    || (typeof resolvedPackageName === 'function' ? resolvedPackageName(app.slug) : '') || '';
+  let deviceName = '';
+  let deviceCode = 0;
+  let installed = false;
+  const st = typeof checkAppStatus === 'function' ? checkAppStatus(app.slug, pkg) : null;
+  if (st && st.installed) {
+    installed = true;
+    deviceName = String(st.version || st.version_name || '').trim();
+    deviceCode = Number(st.version_code || st.versionCode || 0) || 0;
+  } else {
+    const raw = (typeof installedVersionOnDevice === 'function' ? installedVersionOnDevice(pkg) : '')
+      || (typeof isSlugInstalled === 'function' ? isSlugInstalled(app.slug) : '');
+    if (!raw) return false;
+    installed = true;
+    deviceName = String(raw).trim();
+    if (deviceName === 'installed') deviceName = '';
+  }
+  if (!installed) return false;
+  const storeCode = Number(app.version_code || 0) || 0;
+  const storeName = String(app.version_name || '').trim();
+  if (storeCode > 0 && deviceCode > 0) return storeCode > deviceCode;
+  if (storeName && deviceName) return versionIsNewer(storeName, deviceName);
+  // Unknown device version: never OPEN instead of updating a user-downloaded APK.
+  return !!storeName;
+}
+
 function cancelDownload(slug) {
   try {
     abortWebDownload(slug);
@@ -1999,7 +2032,7 @@ window.Store = {
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
-  installedVersionOnDevice, versionIsNewer, cancelDownload, isSlugInstalled,
+  installedVersionOnDevice, versionIsNewer, appHasUpdate, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,
   checkAppUpdate, checkForUpdates, showUpdateDialog, showUpdateBanner, shouldShowUpdate, offlineScreen, getCurrentAppVersion,
 };

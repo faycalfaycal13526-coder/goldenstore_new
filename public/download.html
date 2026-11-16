@@ -243,8 +243,11 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
     var changed = false;
     Object.keys(states).forEach(function(k){
       var s = states[k];
+      var sfn = (s && s.filename) || '';
+      var dead = false;
+      try { dead = !!sfn && (JSON.parse(localStorage.getItem('gs_dead_apk_files') || '[]') || []).indexOf(sfn) >= 0; } catch (e2) {}
       if (del.indexOf(k) >= 0 || !s || s.status === 'none' ||
-          ((s.status === 'downloaded' || s.status === 'installing') && !s.filename)) {
+          ((s.status === 'downloaded' || s.status === 'installing') && (!s.filename || dead))) {
         delete states[k]; changed = true;
       }
     });
@@ -357,10 +360,10 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261108y"></script>
-<script src="/js/store-settings.js?v=20261108y"></script>
-  <script src="/js/lang.js?v=20261108y"></script>
-<script src="/js/download.js?v=20261108y"></script>
-  <script src="/js/notification-hub.js?v=20261108y"></script>
+<script src="/js/icons.js?v=20261108z"></script>
+<script src="/js/store-settings.js?v=20261108z"></script>
+  <script src="/js/lang.js?v=20261108z"></script>
+<script src="/js/download.js?v=20261108z"></script>
+  <script src="/js/notification-hub.js?v=20261108z"></script>
 </body>
 </html>

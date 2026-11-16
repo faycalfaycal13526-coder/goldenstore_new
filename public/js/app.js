@@ -1081,7 +1081,7 @@
               S.removeActiveDownload(a.slug);
               clearInstallPrompt(a.slug);
               removeInstalledActions();
-              showIdle();
+              showIdle({ grey: true });
               toast(t('تم إلغاء تثبيت التطبيق'), 'info');
             }
           }, 500);
@@ -1107,9 +1107,30 @@
       }
       toast(t('غير متاح في هذا المتصفح'), 'info');
     }
+    /* The Android side keeps its own «downloaded» record. Deleting the file
+       from the phone (or with «حذف الملف») must therefore also purge that
+       record and blacklist the filename, otherwise every later tap reopens a
+       file that no longer exists and ends in «ملف التحميل مفقود». */
+    function purgeNativeApk(filename, slug) {
+      const fn = String(filename || '');
+      if (fn && S.markDeadApkFile) S.markDeadApkFile(fn);
+      if (!isNativeApp()) return;
+      ['deleteDownloadedApk', 'deleteDownloadedFile', 'removeDownloadedApk', 'clearDownloadState']
+        .forEach((name) => {
+          const bridge = window.GSAndroid;
+          if (bridge && typeof bridge[name] === 'function') {
+            try { bridge[name](fn, slug || ''); } catch (e) {}
+          }
+        });
+    }
+    function isDeadFilename(fn) {
+      return !!(fn && S.isDeadApkFile && S.isDeadApkFile(fn));
+    }
     function deleteDownloadedApk(a, filename) {
+      const fn = String(filename || '');
+      if (fn && S.markDeadApkFile) S.markDeadApkFile(fn);
       if (isNativeApp() && window.GSAndroid && typeof window.GSAndroid.deleteDownloadedApk === 'function') {
-        try { window.GSAndroid.deleteDownloadedApk(filename || '', a.slug || ''); } catch (e) {}
+        try { window.GSAndroid.deleteDownloadedApk(fn, a.slug || ''); } catch (e) {}
       }
     }
     /* Place the secondary bar exactly where the main install button lives.
@@ -1140,6 +1161,12 @@
       if (opts.withOpen !== false) {
         bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-open', type: 'button', onclick: () => openInstalled(a) },
           ico('play', 'icon'), t('فتح')));
+      } else {
+        // Older build on the device: the user must get BOTH actions —
+        // «تحديث التطبيق» (installs the new APK) and «إلغاء التثبيت».
+        // Leaving only the uninstall button stranded the update.
+        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { runInstall(); } },
+          ico('refresh', 'icon'), t('تحديث التطبيق')));
       }
       bar.append(el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
         ico('trash', 'icon'), t('إلغاء التثبيت')));
@@ -1158,7 +1185,7 @@
           S.removeApkState(a.slug);
           S.removeActiveDownload(a.slug);
           clearInstallPrompt(a.slug);
-          removeInstalledActions(); showIdle(true);
+          removeInstalledActions(); showIdle();
           toast(t('تم حذف ملف التحميل'), 'info');
         } },
           ico('trash', 'icon'), t('حذف الملف')),
@@ -1174,13 +1201,23 @@
       setCancelVisible(false);
       actionsWrap.style.display = '';
     }
-    function showIdle(skipAnchorRestore) {
+    function showIdle(opts) {
       removeInstalledActions();
       setCancelVisible(false);
       resetBar();
-      btn.classList.remove('installed');
+      btn.classList.remove('installed', 'has-update');
       btn.disabled = false;
       label.textContent = t('تثبيت');
+      // After «إلغاء التثبيت» (or after deleting the file) the app is gone:
+      // the download button must read as NEUTRAL (grey), not as a primary blue
+      // CTA, until the user really starts downloading again. The choice is
+      // durable, because the slug stays marked-as-deleted across reloads.
+      const greyOpt = opts && typeof opts === 'object' && typeof opts.grey === 'boolean' ? opts.grey : null;
+      const grey = greyOpt === null
+        ? !!(S.isDeletedApk && S.isDeletedApk(app.slug))
+        : greyOpt;
+      btn.classList.toggle('gs-btn-grey', grey);
+      group.classList.toggle('gs-grey', grey);
     }
 
     /* A deleted APK leaves a stale «downloaded» filename behind. Drop it,
@@ -1188,7 +1225,12 @@
        once automatically instead of showing a dead تثبيت button. */
     function handleMissingFile() {
       if (cancelRequested) return;
+      const deadFile = installPromptFilename(app.slug)
+        || (S.getApkState(app.slug) || {}).filename || filename;
       clearInstallPrompt(app.slug);
+      // Forget the file on BOTH sides (web state + Android record) and never
+      // reuse that filename again, so the missing-file loop cannot repeat.
+      purgeNativeApk(deadFile, app.slug);
       if (S.markDeletedApk) S.markDeletedApk(app.slug);
       S.removeApkState(app.slug);
       S.removeActiveDownload(app.slug);
@@ -1201,7 +1243,9 @@
       fileMissingRetries++;
       toast(t('ملف التحميل مفقود، بدأ تنزيل جديد…'), 'info');
       autoRestartInProgress = true;
-      Promise.resolve().then(() => { try { runInstall(); } catch (e) {} });
+      // fresh:true forces a brand-new download instead of reopening the very
+      // file we just proved to be gone.
+      Promise.resolve().then(() => { try { runInstall({ fresh: true }); } catch (e) {} });
     }
 
     /* One deterministic state after a declined install: the APK is still
@@ -1209,6 +1253,15 @@
     function restoreReadyToInstall(fn, opts) {
       const file = fn || installPromptFilename(app.slug)
         || (S.getApkState(app.slug) || {}).filename || filename;
+      // Never restore a «ready to install» bar for a file we know is gone.
+      if (isDeadFilename(file)) {
+        purgeNativeApk(file, app.slug);
+        S.removeApkState(app.slug);
+        S.removeActiveDownload(app.slug);
+        removeInstalledActions();
+        showIdle();
+        return;
+      }
       const now = Math.floor(Date.now() / 1000);
       S.setApkState(app.slug, {
         slug: app.slug, status: 'downloaded', progress: 1,
@@ -1272,6 +1325,7 @@
         return;
       }
       if (status === 'downloaded') {
+        if (isDeadFilename(message || filename)) { handleMissingFile(); return; }
         fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         setCancelVisible(false);
@@ -1332,7 +1386,7 @@
         S.removeActiveDownload(app.slug);
         clearInstallPrompt(app.slug);
         removeInstalledActions();
-        showIdle();
+        showIdle({ grey: true });
         toast(t('تم إلغاء تثبيت التطبيق'), 'info');
         return;
       }
@@ -1369,13 +1423,28 @@
       if (matches) {
         unmarkInstalledStored(app.slug);
         removeInstalledActions();
-        showIdle();
+        showIdle({ grey: true });
       }
     });
 
     const filename = `${app.slug || 'app'}-${app.version_name || ''}.apk`.replace(/-+/g, '-');
+    let downloadAttempt = 0;
 
-    async function runInstall() {
+    /* A filename that was deleted on the device must never be reused: the
+       Android side would answer «downloaded» again for a file that is gone and
+       the store would loop on «ملف التحميل مفقود». Every later attempt gets a
+       unique suffix instead. */
+    function nextDownloadFilename() {
+      const base = filename;
+      const baseDead = isDeadFilename(base);
+      if (!baseDead && !downloadAttempt) return base;
+      downloadAttempt += 1;
+      const suffix = `-r${downloadAttempt}-${Date.now().toString(36)}.apk`;
+      return base.replace(/\.apk$/i, '') + suffix;
+    }
+
+    async function runInstall(opts) {
+      const fresh = !!(opts && opts.fresh);
       if (btn.classList.contains('installing')) return;
       // Unlimited concurrent downloads: no global slot, no cancellation of
       // another app/game. Each slug is tracked independently in Store.
@@ -1383,7 +1452,11 @@
       if (!autoRestartInProgress) fileMissingRetries = 0;
       autoRestartInProgress = false;
       cancelRequested = false;
-      if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
+      btn.classList.remove('gs-btn-grey');
+      group.classList.remove('gs-grey');
+      // A fresh attempt must keep the «deleted» marker until the bridge really
+      // starts downloading, otherwise a stale native snapshot slips back in.
+      if (!fresh && S.clearDeletedApk) S.clearDeletedApk(app.slug);
 
       try {
         window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
@@ -1393,8 +1466,18 @@
           && !(S.appHasUpdate && S.appHasUpdate(app))) { openInstalled(app); return; }
 
       const liveState = S.getApkState(app.slug);
-      if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveState.filename) {
-        openDownloadedApk(app, liveState.filename);
+      const liveFile = (liveState && liveState.filename) || '';
+      const liveIsDead = isDeadFilename(liveFile);
+      if (fresh || liveIsDead) {
+        // We already know this file is not on the phone: purge it everywhere
+        // and go straight to a brand-new download with a new filename.
+        if (liveFile) purgeNativeApk(liveFile, app.slug);
+        S.removeApkState(app.slug);
+        S.removeActiveDownload(app.slug);
+        removeInstalledActions();
+        showIdle();
+      } else if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveFile) {
+        openDownloadedApk(app, liveFile);
         return;
       }
 
@@ -1433,7 +1516,12 @@
         };
         window.addEventListener('pagehide', nativeLeaveHandler, { once: true });
         try {
-          window.GSAndroid.downloadApk(dlUrl, filename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
+          // Unique filename when the previous file was deleted on the device,
+          // then — and only then — forget the «deleted» marker: a real
+          // download is starting, so native snapshots are trustworthy again.
+          const dlFilename = nextDownloadFilename();
+          if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
+          window.GSAndroid.downloadApk(dlUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
         } catch (e) {
           delete apkStateHandlers[app.slug];
@@ -1594,10 +1682,21 @@
         return;
       }
       if (live && (live.status === 'installing' || live.status === 'downloaded')) {
+        const liveFile = live.filename || '';
+        // The device says «downloaded» but that very file was deleted: drop the
+        // record instead of rebuilding a button that ends in «ملف التحميل مفقود».
+        if (isDeadFilename(liveFile)) {
+          purgeNativeApk(liveFile, app.slug);
+          S.removeApkState(app.slug);
+          S.removeActiveDownload(app.slug);
+          removeInstalledActions();
+          showIdle();
+          return;
+        }
         // Returning from the system installer without an «installed» event
         // means the user declined. Restore the final UI IMMEDIATELY (no
         // heartbeat wait, no stuck «جارٍ التثبيت…», no duplicate big button).
-        restoreReadyToInstall(live.filename || filename);
+        restoreReadyToInstall(liveFile || filename);
         return;
       }
       showIdle();

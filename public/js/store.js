@@ -1555,6 +1555,7 @@ window.__gsDownloadStatesSnapshot = function (states) {
       const status = st.status || 'downloading';
       const progress = typeof st.progress === 'number' ? st.progress : -1;
       if ((status === 'downloaded' || status === 'installing') && isDeletedApk(slug)) return;
+      if ((status === 'downloaded' || status === 'installing') && isDeadApkFile(st.filename)) return;
       if (status === 'downloading') {
         clearDeletedApk(slug);
         setApkState(slug, {
@@ -1657,6 +1658,37 @@ function clearDeletedApk(slug) {
   if (!slug) return;
   try { const set = deletedApkSet(); if (!set.delete(slug)) return; localStorage.setItem(DELETED_APK_KEY, JSON.stringify([...set])); } catch {}
 }
+/* EXACT filenames whose APK no longer exists on the device. The Android bridge
+   keeps reporting «downloaded» for a file the user deleted, so the filename —
+   not only the slug — has to be blacklisted. A blacklisted filename is never
+   reused for a new download, which is what finally kills the endless
+   «ملف التحميل مفقود» loop. */
+const DEAD_FILE_KEY = 'gs_dead_apk_files';
+function deadApkFileSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(DEAD_FILE_KEY) || '[]')); } catch { return new Set(); }
+}
+function isDeadApkFile(filename) {
+  const fn = String(filename || '').trim();
+  return fn ? deadApkFileSet().has(fn) : false;
+}
+function markDeadApkFile(filename) {
+  const fn = String(filename || '').trim();
+  if (!fn) return;
+  try {
+    const set = deadApkFileSet();
+    set.add(fn);
+    localStorage.setItem(DEAD_FILE_KEY, JSON.stringify([...set].slice(-40)));
+  } catch {}
+}
+function clearDeadApkFile(filename) {
+  const fn = String(filename || '').trim();
+  if (!fn) return;
+  try {
+    const set = deadApkFileSet();
+    if (!set.delete(fn)) return;
+    localStorage.setItem(DEAD_FILE_KEY, JSON.stringify([...set]));
+  } catch {}
+}
 /* Boot-time self-heal for WebViews that kept an old localStorage state. */
 function pruneStaleApkStates() {
   try {
@@ -1665,7 +1697,8 @@ function pruneStaleApkStates() {
     Object.keys(map).forEach((slug) => {
       const st = map[slug];
       if (isDeletedApk(slug) || !st || st.status === 'none'
-          || ((st.status === 'downloaded' || st.status === 'installing') && !st.filename)) {
+          || ((st.status === 'downloaded' || st.status === 'installing') && !st.filename)
+          || ((st.status === 'downloaded' || st.status === 'installing') && isDeadApkFile(st.filename))) {
         delete map[slug]; changed = true;
       }
     });
@@ -2100,6 +2133,7 @@ window.Store = {
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isDeletedApk, markDeletedApk, clearDeletedApk,
+  isDeadApkFile, markDeadApkFile, clearDeadApkFile,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, appHasUpdate, isAppInstalledOnDevice, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,

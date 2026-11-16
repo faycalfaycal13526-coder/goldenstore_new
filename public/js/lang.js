@@ -485,6 +485,7 @@
     'تعذّر قراءة ملف APK.': { en: 'Could not read APK file.', fr: 'Impossible de lire le fichier APK.', es: 'No se pudo leer el archivo APK.' },
     'فشل التثبيت.': { en: 'Installation failed.', fr: 'Échec de l’installation.', es: 'Error de instalación.' },
     'ملف التحميل مفقود.': { en: 'Downloaded file is missing.', fr: 'Le fichier téléchargé est introuvable.', es: 'Falta el archivo descargado.' },
+    'ملف التحميل مفقود، بدأ تنزيل جديد…': { en: 'Downloaded file was missing, starting a fresh download…', fr: 'Fichier téléchargé introuvable, nouveau téléchargement…', es: 'Faltaba el archivo descargado, iniciando una nueva descarga…' },
     'تعذّر تحديث التطبيق. حاول إلغاء التثبيت وإعادة المحاولة.': { en: 'Could not update the app. Try uninstalling and retrying.', fr: 'Impossible de mettre à jour l’application. Essayez de la désinstaller et réessayez.', es: 'No se pudo actualizar la aplicación. Intente desinstalar y volver a intentar.' },
     'اختر ملف APK': { en: 'Select APK file', fr: 'Choisir APK', es: 'Seleccionar APK' },
     'اختر صورة': { en: 'Select image', fr: 'Choisir image', es: 'Seleccionar imagen' },

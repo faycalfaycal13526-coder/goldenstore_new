@@ -287,9 +287,11 @@
   const storeApkHandler = window.__gsApkDownloadUpdate;
   window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
     let hubStatus = status, hubProgress = progress;
+    const missing = status === 'failed' && message === 'file_missing';
     // A declined/failed INSTALL is not a cancelled DOWNLOAD: keep the file.
+    // EXCEPT file_missing: that APK was deleted and must be forgotten.
     if (slug && slug !== 'app-update' && hasInstallPrompt(slug)
-        && (status === 'cancelled' || status === 'failed')) {
+        && (status === 'cancelled' || (status === 'failed' && !missing))) {
       hubStatus = 'downloaded'; hubProgress = 1;
     }
     if (typeof storeApkHandler === 'function') storeApkHandler(slug, hubStatus, hubProgress, message);
@@ -988,6 +990,8 @@
     let cancelRequested = false;
     let nativeLeaveHandler = null;
     let nativeDownloadFinished = false;
+    let fileMissingRetries = 0;
+    let autoRestartInProgress = false;
     function clearNativeLeaveHandler() {
       if (nativeLeaveHandler) {
         try { window.removeEventListener('pagehide', nativeLeaveHandler); } catch (e) {}
@@ -1072,6 +1076,10 @@
             if (st && !st.installed) {
               clearInterval(poll);
               unmarkInstalledStored(a.slug);
+              if (S.markDeletedApk) S.markDeletedApk(a.slug);
+              S.removeApkState(a.slug);
+              S.removeActiveDownload(a.slug);
+              clearInstallPrompt(a.slug);
               removeInstalledActions();
               showIdle();
               toast(t('تم إلغاء تثبيت التطبيق'), 'info');
@@ -1144,7 +1152,15 @@
       const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
         el('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => openDownloadedApk(a, filename) },
           ico('download', 'icon'), t('تثبيت')),
-        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => { deleteDownloadedApk(a, filename); S.removeApkState(a.slug); S.removeActiveDownload(a.slug); removeInstalledActions(); showIdle(true); toast(t('تم حذف ملف التحميل'), 'info'); } },
+        el('button', { class: 'btn btn-secondary btn-lg', type: 'button', onclick: () => {
+          deleteDownloadedApk(a, filename);
+          if (S.markDeletedApk) S.markDeletedApk(a.slug);
+          S.removeApkState(a.slug);
+          S.removeActiveDownload(a.slug);
+          clearInstallPrompt(a.slug);
+          removeInstalledActions(); showIdle(true);
+          toast(t('تم حذف ملف التحميل'), 'info');
+        } },
           ico('trash', 'icon'), t('حذف الملف')),
       );
       placeActionsBar(bar, false);
@@ -1167,6 +1183,27 @@
       label.textContent = t('تثبيت');
     }
 
+    /* A deleted APK leaves a stale «downloaded» filename behind. Drop it,
+       mark it deleted so native snapshots cannot resurrect it, and re-download
+       once automatically instead of showing a dead تثبيت button. */
+    function handleMissingFile() {
+      if (cancelRequested) return;
+      clearInstallPrompt(app.slug);
+      if (S.markDeletedApk) S.markDeletedApk(app.slug);
+      S.removeApkState(app.slug);
+      S.removeActiveDownload(app.slug);
+      removeInstalledActions();
+      showIdle();
+      if (fileMissingRetries >= 1) {
+        toast(t('ملف التحميل مفقود.'), 'error');
+        return;
+      }
+      fileMissingRetries++;
+      toast(t('ملف التحميل مفقود، بدأ تنزيل جديد…'), 'info');
+      autoRestartInProgress = true;
+      Promise.resolve().then(() => { try { runInstall(); } catch (e) {} });
+    }
+
     /* One deterministic state after a declined install: the APK is still
        downloaded, the big button is hidden, and only Install/Delete shows. */
     function restoreReadyToInstall(fn, opts) {
@@ -1178,7 +1215,9 @@
         filename: file, updated_at: now,
       });
       S.removeActiveDownload(app.slug);
+      if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
       clearInstallPrompt(app.slug);
+      fileMissingRetries = 0;
       setCancelVisible(false);
       btn.classList.remove('installing', 'indeterminate');
       btn.disabled = false;
@@ -1233,6 +1272,8 @@
         return;
       }
       if (status === 'downloaded') {
+        fileMissingRetries = 0;
+        if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         setCancelVisible(false);
         cancelRequested = false;
         setProgress(1);
@@ -1255,6 +1296,8 @@
         return;
       }
       if (status === 'installed') {
+        fileMissingRetries = 0;
+        if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         markInstalledStored(app.slug);
         S.removeActiveDownload(app.slug);
         S.removeApkState(app.slug);
@@ -1282,7 +1325,12 @@
         return;
       }
       if (status === 'uninstalled') {
+        fileMissingRetries = 0;
         unmarkInstalledStored(app.slug);
+        if (S.markDeletedApk) S.markDeletedApk(app.slug);
+        S.removeApkState(app.slug);
+        S.removeActiveDownload(app.slug);
+        clearInstallPrompt(app.slug);
         removeInstalledActions();
         showIdle();
         toast(t('تم إلغاء تثبيت التطبيق'), 'info');
@@ -1293,6 +1341,7 @@
         return;
       }
       if (status === 'failed') {
+        if (message === 'file_missing') { handleMissingFile(); return; }
         if (hasInstallPrompt(app.slug)) {
           const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
           restoreReadyToInstall(fn, { toast: errMap[message] || t('تعذّر التثبيت، الملف جاهز لإعادة المحاولة'), kind: 'error' });
@@ -1331,7 +1380,10 @@
       // Unlimited concurrent downloads: no global slot, no cancellation of
       // another app/game. Each slug is tracked independently in Store.
       if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
+      if (!autoRestartInProgress) fileMissingRetries = 0;
+      autoRestartInProgress = false;
       cancelRequested = false;
+      if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
 
       try {
         window.open('https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110', '_blank');
@@ -1519,6 +1571,8 @@
       const installedOnDevice = S.isAppInstalledOnDevice
         ? S.isAppInstalledOnDevice(app) : !!(st && st.installed);
       if (installedOnDevice) {
+        S.removeApkState(app.slug);
+        S.removeActiveDownload(app.slug);
         markInstalledStored(app.slug);
         if (st && st.package_name) S.rememberResolvedPackage(app.slug, st.package_name);
         const hasUpdate = S.appHasUpdate ? S.appHasUpdate(app) : false;

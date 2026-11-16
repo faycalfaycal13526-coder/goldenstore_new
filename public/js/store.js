@@ -1463,6 +1463,7 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
   try {
     if (slug && slug !== 'app-update') {
       if (status === 'downloading') {
+        clearDeletedApk(slug);
         const prev = getApkState(slug) || {};
         setApkState(slug, {
           slug, status: 'downloading',
@@ -1499,8 +1500,13 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
         try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'uninstalled', progress: -1, message } })); } catch (e) {}
         try { window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { slug, packageName: message } })); } catch (e) {}
         return;
+      } else if (status === 'failed' && message === 'file_missing') {
+        // The APK we tried to open was deleted: never keep its filename.
+        removeApkState(slug);
+        removeActiveDownload(slug);
+        if (slug !== 'app-update') markDeletedApk(slug);
       } else if (status === 'cancelled' || status === 'failed') {
-        const isInst = (typeof isSlugInstalled === 'function' && isSlugInstalled(slug)) || (typeof resolvedPackageName === 'function' && resolvedPackageName(slug) && typeof isPackageInstalled === 'function' && isPackageInstalled(resolvedPackageName(slug)));
+        const isInst = (typeof isSlugInstalled === 'function' && isSlugInstalled(slug)) || (typeof resolvedPackageName === 'function' && resolvedPackageName(slug) && typeof installedVersionOnDevice === 'function' && installedVersionOnDevice(resolvedPackageName(slug)));
         if (isInst && status === 'failed') {
           return;
         }
@@ -1548,7 +1554,9 @@ window.__gsDownloadStatesSnapshot = function (states) {
       const st = states[slug] || {};
       const status = st.status || 'downloading';
       const progress = typeof st.progress === 'number' ? st.progress : -1;
+      if ((status === 'downloaded' || status === 'installing') && isDeletedApk(slug)) return;
       if (status === 'downloading') {
+        clearDeletedApk(slug);
         setApkState(slug, {
           slug, status: 'downloading', progress: progress >= 0 ? progress : 0,
           filename: st.filename || '', package_name: st.package_name || '',
@@ -1633,6 +1641,21 @@ function removeApkState(slug) {
   if (!map[slug]) return;
   delete map[slug];
   try { localStorage.setItem(APK_STATE_KEY, JSON.stringify(map)); } catch {}
+}
+/* A deleted APK must not be resurrected by a stale native download snapshot.
+   The marker is cleared as soon as a REAL new download starts. */
+const DELETED_APK_KEY = 'gs_deleted_apks';
+function deletedApkSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_APK_KEY) || '[]')); } catch { return new Set(); }
+}
+function isDeletedApk(slug) { return slug ? deletedApkSet().has(slug) : false; }
+function markDeletedApk(slug) {
+  if (!slug) return;
+  try { const set = deletedApkSet(); set.add(slug); localStorage.setItem(DELETED_APK_KEY, JSON.stringify([...set])); } catch {}
+}
+function clearDeletedApk(slug) {
+  if (!slug) return;
+  try { const set = deletedApkSet(); if (!set.delete(slug)) return; localStorage.setItem(DELETED_APK_KEY, JSON.stringify([...set])); } catch {}
 }
 /* When the user leaves an app page mid-download, the browser takes over the
    file transfer. Keep THIS slug active (indeterminate) so «مكتبتي» still
@@ -1934,6 +1957,7 @@ function getActiveDownloads() {
 }
 function setActiveDownload(entry) {
   if (!entry || !entry.slug) return null;
+  if (entry.status === 'downloading') clearDeletedApk(entry.slug);
   // Map is keyed by slug: unlimited entries coexist, no global slot/cancel.
   const map = getActiveDownloadMap();
   map[entry.slug] = { ...(map[entry.slug] || {}), ...entry };
@@ -2051,6 +2075,7 @@ window.Store = {
   downloadConcurrencyLimit, canStartConcurrentDownload, registerWebDownload, abortWebDownload, unregisterWebDownload,
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
+  isDeletedApk, markDeletedApk, clearDeletedApk,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, appHasUpdate, isAppInstalledOnDevice, cancelDownload, isSlugInstalled,
   checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled,

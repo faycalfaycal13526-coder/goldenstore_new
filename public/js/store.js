@@ -1497,6 +1497,9 @@ window.__gsApkDownloadUpdate = function (slug, status, progress, message) {
         unmarkInstalledStored(slug);
         removeApkState(slug);
         removeActiveDownload(slug);
+        // A real uninstall starts from zero: clear the «deleted» marker so the
+        // next download's «downloaded» state is not pruned away.
+        clearDeletedApk(slug);
         try { window.dispatchEvent(new CustomEvent('gs-apk-state', { detail: { slug, status: 'uninstalled', progress: -1, message } })); } catch (e) {}
         try { window.dispatchEvent(new CustomEvent('gs-package-uninstalled', { detail: { slug, packageName: message } })); } catch (e) {}
         return;

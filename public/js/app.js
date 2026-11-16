@@ -1076,10 +1076,15 @@
             if (st && !st.installed) {
               clearInterval(poll);
               unmarkInstalledStored(a.slug);
-              if (S.markDeletedApk) S.markDeletedApk(a.slug);
+              const oldFile = (S.getApkState(a.slug) || {}).filename || '';
               S.removeApkState(a.slug);
               S.removeActiveDownload(a.slug);
               clearInstallPrompt(a.slug);
+              // A REAL uninstall means the app is gone: blue «تثبيت» from scratch.
+              // Do NOT blacklist the slug, otherwise the fresh download's
+              // finished state would be pruned again («ملف التحميل مفقود»).
+              if (S.clearDeletedApk) S.clearDeletedApk(a.slug);
+              if (oldFile) purgeNativeApk(oldFile, a.slug);
               removeInstalledActions();
               showIdle();
               toast(t('تم إلغاء تثبيت التطبيق'), 'info');
@@ -1376,10 +1381,11 @@
       if (status === 'uninstalled') {
         fileMissingRetries = 0;
         unmarkInstalledStored(app.slug);
-        if (S.markDeletedApk) S.markDeletedApk(app.slug);
         S.removeApkState(app.slug);
         S.removeActiveDownload(app.slug);
         clearInstallPrompt(app.slug);
+        // Uninstalled = starts over with the normal blue «تثبيت» button.
+        if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         removeInstalledActions();
         showIdle();
         toast(t('تم إلغاء تثبيت التطبيق'), 'info');

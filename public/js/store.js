@@ -330,7 +330,11 @@ function featureCarousel(apps, opts = {}) {
 
   let idx = 0;
   let timer = null;
-  const AUTO_ADVANCE = false;
+  /* Owner request: the hero images move BY THEMSELVES as well — they rotate
+     through the featured apps/games of the page they belong to, exactly like
+     the manual swipe does, and any manual swipe restarts the rotation. */
+  const AUTO_ADVANCE = true;
+  const AUTO_MS = opts.interval || 5000;
 
   function slideWidth() {
     return track.clientWidth || wrap.clientWidth || 1;
@@ -350,9 +354,15 @@ function featureCarousel(apps, opts = {}) {
   }
   function go(i, manual) { goTo(i, true); if (manual && AUTO_ADVANCE) restart(); }
   function restart() {
-    if (timer) clearInterval(timer);
+    if (timer) { clearInterval(timer); timer = null; }
     if (!AUTO_ADVANCE || list.length <= 1) return;
-    timer = setInterval(() => go(idx >= maxIndex() ? 0 : idx + 1), opts.interval || 6000);
+    if (typeof document !== 'undefined' && document.hidden) return;  // paused tab
+    timer = setInterval(() => {
+      // Never advance a carousel that left the page, or inside a hidden tab.
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (!wrap.isConnected) { if (timer) { clearInterval(timer); timer = null; } return; }
+      go(idx >= maxIndex() ? 0 : idx + 1);
+    }, AUTO_MS);
   }
   function paint() { goTo(idx, false); }
 
@@ -377,8 +387,9 @@ function featureCarousel(apps, opts = {}) {
     if (touchResumeTimer) clearTimeout(touchResumeTimer);
     touchResumeTimer = setTimeout(restart, 4000);
   }, { passive: true });
-  wrap.addEventListener('mouseenter', () => { if (timer) clearInterval(timer); });
+  wrap.addEventListener('mouseenter', () => { if (timer) { clearInterval(timer); timer = null; } });
   wrap.addEventListener('mouseleave', restart);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) restart(); });
   paint();
   restart();
   return wrap;
@@ -693,8 +704,8 @@ function topbarNav(title = '', actions = []) {
 
 /* Owner request: the two first tabs are swapped — «الألعاب» then «التطبيقات». */
 const NAV_ITEMS_RAW = [
-  { key: 'games', label: 'الألعاب', icon: 'gamepad', href: '/games' },
-  { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/' },
+  { key: 'games', label: 'الألعاب', icon: 'gamepad', href: '/' },
+  { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/apps' },
   { key: 'library', label: 'مكتبتي', icon: 'download', href: '/account?tab=library' },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];

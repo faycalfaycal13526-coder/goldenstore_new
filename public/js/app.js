@@ -1088,6 +1088,11 @@
     let creepTimer = null;
     let creepValue = 0;
     let lastRealProgressAt = 0;
+    /* The bridge repeats the SAME percentage while it waits for the network.
+       That used to refresh the «real progress» timestamp forever, so the clock
+       creep never took over and the bar froze (the reported 46 % stall). Now
+       only an ADVANCING value counts as real progress. */
+    let lastRealValue = 0;
     let dlStartedAt = 0;
     function stopCreep() {
       if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
@@ -1111,22 +1116,31 @@
       creepTimer = setInterval(() => {
         if (!btn.classList.contains('installing')) { stopCreep(); return; }
         const clock = creepFromClock();
-        // Real progress owns the number whenever it arrives; the clock only
-        // fills the silence (and catches up after the ad).
-        if (Date.now() - lastRealProgressAt < 2500) {
+        const silent = Date.now() - lastRealProgressAt;
+        // Real progress owns the number while it keeps advancing.
+        if (silent < 2000) {
           if (clock > creepValue + 0.05) creepValue = clock;
           return;
         }
-        const nextVal = Math.max(creepValue, clock);
-        if (nextVal <= creepValue + 0.001) return;
-        creepValue = Math.min(0.95, nextVal);
+        // Silence: move forward at a steady, visible pace — but stay honest,
+        // never more than ~12 points ahead of the last real value, never >95%.
+        const cap = lastRealValue > 0 ? Math.min(0.95, lastRealValue + 0.12) : 0.95;
+        const step = lastRealValue > 0 ? creepValue + 0.012 : Math.max(creepValue + 0.012, clock);
+        const nextVal = Math.min(cap, step);
+        if (nextVal <= creepValue + 0.0005) return;
+        creepValue = nextVal;
         setProgress(creepValue);
       }, 250);
     }
     function noteRealProgress(p) {
       const v = normProgress(p);
       if (v < 0) return;
-      lastRealProgressAt = Date.now();
+      // Only an ADVANCE is real news: a repeated identical value means the
+      // bridge is stalled, so the clock creep must be allowed to take over.
+      if (v > lastRealValue + 0.0005) {
+        lastRealValue = v;
+        lastRealProgressAt = Date.now();
+      }
       if (v > creepValue) creepValue = v;
       if (v > displayedProgress) displayedProgress = v;
     }
@@ -1134,6 +1148,8 @@
       stopCreep();
       creepValue = 0;
       displayedProgress = 0;
+      lastRealValue = 0;
+      lastRealProgressAt = 0;
       dlStartedAt = 0;
       btn.classList.remove('installing', 'indeterminate');
       fill.style.transition = 'none';
@@ -1780,14 +1796,28 @@
       const r = adResolve; adResolve = null;
       if (r) { try { r(); } catch (e) {} }
     }
+    /* The ad layer must be impossible to lose: it is created on every launch,
+       pinned with !important inline declarations, sandboxed so the creative
+       cannot navigate the WebView away (that was the «sometimes no ad» bug),
+       and watched by a 1s watchdog that re-attaches it if anything removes it. */
+    function pinAdLayer(layer) {
+      const set = (k, v) => { try { layer.style.setProperty(k, v, 'important'); } catch (e) { layer.style[k] = v; } };
+      set('position', 'fixed'); set('top', '0'); set('left', '0'); set('right', '0'); set('bottom', '0');
+      set('width', '100vw'); set('height', '100vh'); set('margin', '0'); set('padding', '0');
+      set('inset', '0'); set('z-index', '2147482200'); set('background', '#0b0b10');
+      set('display', 'flex'); set('flex-direction', 'column'); set('overflow', 'hidden');
+      set('visibility', 'visible'); set('opacity', '1'); set('transform', 'none');
+      set('pointer-events', 'auto'); set('border-radius', '0');
+    }
     function showInAppAd() {
       return new Promise((resolve) => {
-        if (adLayerEl) { resolve(); return; }
+        // A previous layer may have been detached by the WebView: only a layer
+        // that is still IN THE DOCUMENT may short-circuit the new ad.
+        if (adLayerEl && adLayerEl.isConnected && adLayerEl.parentNode) { resolve(); return; }
+        closeInAppAd();
         adResolve = resolve;
         const layer = document.createElement('div');
         layer.id = 'gs-ad-layer';
-        layer.setAttribute('style', 'position:fixed;inset:0;z-index:2147482200;background:#0b0b10;'
-          + 'display:flex;flex-direction:column;overscroll-behavior:contain');
         const head = document.createElement('div');
         head.setAttribute('style', 'display:flex;align-items:center;gap:8px;flex:0 0 auto;'
           + 'padding:calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px;background:#12121a;'
@@ -1804,17 +1834,37 @@
         frame.id = 'gs-ad-frame';
         frame.setAttribute('title', t('إعلان'));
         frame.setAttribute('style', 'flex:1 1 auto;width:100%;height:100%;border:0;background:#fff;display:block');
-        try { frame.src = AD_URL; } catch (e) {}
+        // No allow-top-navigation: the creative can never replace the store.
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms');
+        frame.setAttribute('referrerpolicy', 'no-referrer');
+        let frameLoaded = false;
+        frame.addEventListener('load', () => { frameLoaded = true; });
+        const loadSrc = () => { try { frame.src = AD_URL + '&gs_ad_t=' + Date.now(); } catch (e) {} };
+        loadSrc();
         head.appendChild(tagEl); head.appendChild(cdEl);
         layer.appendChild(head); layer.appendChild(frame);
+        pinAdLayer(layer);
         (document.body || document.documentElement).appendChild(layer);
         adLayerEl = layer;
         let left = AD_SECONDS;
-        const paintCd = () => { cdEl.textContent = left > 0 ? `${t('يبدأ التحميل بعد')} ${left}` : t('جارٍ بدء التحميل…'); };
+        let retried = false;
+        const paintCd = () => {
+          cdEl.textContent = left > 0
+            ? `${t('يبدأ التحميل بعد')} ${left}`
+            : t('جارٍ بدء التحميل…');
+        };
         paintCd();
         adTimer = setInterval(() => {
+          // Watchdog: if a re-render dropped the layer, put it straight back.
+          if (adLayerEl && adLayerEl !== layer) { closeInAppAd(); return; }
+          if (layer && !layer.isConnected) {
+            try { (document.body || document.documentElement).appendChild(layer); } catch (e) {}
+          }
           left -= 1;
           if (left <= 0) { closeInAppAd(); return; }
+          // A creative that never renders would leave a black screen: retry it
+          // once, then keep the countdown running regardless.
+          if (!frameLoaded && !retried && left <= AD_SECONDS - 3) { retried = true; loadSrc(); }
           paintCd();
         }, 1000);
       });

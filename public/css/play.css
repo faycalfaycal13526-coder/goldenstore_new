@@ -2043,6 +2043,8 @@ html[dir="ltr"] .support-entry-chevron { transform: scaleX(-1); }
   font-weight: 700 !important;
   z-index: 5 !important;
   position: relative !important;
+  /* never intercept the tap aimed at the X next to it */
+  pointer-events: none !important;
 }
 
 .install-group.split-active .install-fill {
@@ -2058,6 +2060,10 @@ html[dir="ltr"] .support-entry-chevron { transform: scaleX(-1); }
 
 .install-group.split-active .download-cancel-btn,
 .install-group.split-active .install-cancel-btn {
+  /* The X must sit ABOVE the progress fill/label and always accept taps. */
+  pointer-events: auto !important;
+  z-index: 6 !important;
+  -webkit-tap-highlight-color: transparent;
   flex: 0 0 60px !important;
   width: 60px !important;
   min-width: 60px !important;

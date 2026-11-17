@@ -980,7 +980,6 @@
       type: 'button',
       'aria-label': t('إلغاء التنزيل'),
       title: t('إلغاء التنزيل'),
-      onclick: handleCancelDownload,
     }, ico('close', 'icon icon-sm'));
     group.append(cancelBtn);
 
@@ -1010,6 +1009,32 @@
       cancelBtn.classList.toggle('hidden', !visible);
       if (visible) cancelBtn.disabled = false;
     }
+
+    /* The X must react to the FIRST tap. Some Android WebViews swallow the
+       synthetic `click` on an element that sits inside a flex bar (or the tap
+       lands on the label underneath), so it listens to `pointerup`/`touchend`
+       as well — with one shared debounce — and there is a delegated document
+       fallback right after the control is created. */
+    let lastCancelAt = 0;
+    function onCancelTap(e) {
+      if (e && e.cancelable) { try { e.preventDefault(); } catch (err) {} }
+      const now = Date.now();
+      if (now - lastCancelAt < 350) return;
+      lastCancelAt = now;
+      handleCancelDownload();
+    }
+    cancelBtn.addEventListener('pointerup', onCancelTap);
+    cancelBtn.addEventListener('touchend', onCancelTap, { passive: false });
+    cancelBtn.addEventListener('click', onCancelTap);
+    const onDocCancelClick = (e) => {
+      const t2 = e && e.target;
+      if (!t2 || !t2.closest) return;
+      const hit = t2.closest('.download-cancel-btn');
+      if (!hit || hit !== cancelBtn) return;
+      if (cancelBtn.classList.contains('hidden')) return;
+      onCancelTap(e);
+    };
+    document.addEventListener('click', onDocCancelClick, true);
 
     function handleCancelDownload() {
       if (cancelBtn.disabled || cancelBtn.classList.contains('hidden')) return;
@@ -1653,7 +1678,13 @@
       const stamp = Date.now();
       if (stamp - lastLaunchAt < 250) return;   // ignore click+touch double-fire
       lastLaunchAt = stamp;
-      // AD FIRST — synchronous, inside the gesture, before any UI work.
+      // 1) PAINT + COMMIT the bar first. `window.open` hands the WebView to the
+      //    ad activity and can stall rendering, which is why the bar used to
+      //    appear late. Painting and forcing a synchronous layout flush makes
+      //    the 0% bar visible in the same frame, before the ad opens.
+      paintLaunchUi();
+      forceReflow();
+      // 2) Then open the ad — still inside the tap gesture (popup blockers).
       openAdNow();
       launchInFlight = true;
       const releaseLaunch = setTimeout(() => { launchInFlight = false; }, 4000);
@@ -1665,23 +1696,39 @@
       }
     }
 
+    /* One place that decides what the bar looks like the moment of the tap. */
+    function paintLaunchUi() {
+      if (updateIntent || btn.classList.contains('has-update')) {
+        updateIntent = true;
+        beginUpdateUi();
+        return;
+      }
+      if (btn.classList.contains('installed')) return;
+      removeInstalledActions();
+      btn.classList.remove('installed', 'has-update');
+      setCancelVisible(true);
+      btn.classList.add('installing');
+      btn.classList.remove('indeterminate');
+      btn.disabled = true;
+      setProgress(0.01);
+      startCreep(0.01);
+    }
+    /* Forces the browser to actually compute and paint the new style NOW. */
+    function forceReflow() {
+      try {
+        void btn.offsetHeight;
+        void fill.offsetWidth;
+        void document.body.offsetHeight;
+      } catch (e) {}
+    }
+
     async function runInstallLaunch(opts) {
       const fresh = !!(opts && opts.fresh);
       // Unlimited concurrent downloads: no global slot, no cancellation of
       // another app/game. Each slug is tracked independently in Store.
       if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
-      // PAINT FIRST — before any state write, network call or popup.
-      if (updateIntent || btn.classList.contains('has-update')) {
-        updateIntent = true;
-        beginUpdateUi();
-      } else if (!btn.classList.contains('installed')) {
-        setCancelVisible(true);
-        btn.classList.add('installing');
-        btn.disabled = true;
-        setProgress(0.01);
-        startCreep(0.01);
-        // Same clock as the update path: bar + ad start together.
-      }
+      // Idempotent: the UI was already painted before the ad opened.
+      paintLaunchUi();
       // The native bridge is called in THIS task (right after the tap and the
       // ad), so the APK really starts downloading while the ad is on screen.
       // Only the web path needs a frame to paint before it starts fetching.

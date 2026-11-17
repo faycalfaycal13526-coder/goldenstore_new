@@ -1238,6 +1238,12 @@
        only this element is shown. It uses inline styles (so no stylesheet rule
        can hide it or steal the taps) and owns its own cancel button. */
     let updateBarEl = null, updateFillEl = null, updateLabelEl = null;
+    /* TRUE from the tap until the update flow really ends. While it is set the
+       background state refresh (focus/visibility/heartbeat → resolveInstallState
+       → showIdle) is NOT allowed to tear the bar down — that was removing the
+       bar a few milliseconds after the tap, which is why it never showed and
+       why the X died (its element had been replaced). */
+    let updateFlowActive = false;
     function removeUpdateBar() {
       if (updateBarEl && updateBarEl.parentNode) updateBarEl.parentNode.removeChild(updateBarEl);
       updateBarEl = null; updateFillEl = null; updateLabelEl = null;
@@ -1248,8 +1254,40 @@
       updateFillEl.style.width = v + '%';
       if (updateLabelEl) updateLabelEl.textContent = text || `${t('جارٍ التنزيل…')} ${v}%`;
     }
+    let lastUpdateXTap = 0;
+    function onUpdateXTap(e) {
+      if (e && e.cancelable) { try { e.preventDefault(); } catch (err) {} }
+      const now = Date.now();
+      if (now - lastUpdateXTap < 400) return;
+      lastUpdateXTap = now;
+      cancelUpdateFlow();
+    }
+    /* Redundant trigger for «تحديث» itself: the delegated listener runs in the
+       capture phase BEFORE the button's own onclick, so the update always
+       starts even if that inline handler was lost or swallowed. The launch
+       guard (`launchInFlight`, 250ms) makes the second call a no-op. */
+    document.addEventListener('click', (e) => {
+      const tg = e && e.target;
+      if (!tg || !tg.closest) return;
+      if (!tg.closest('.gs-action-update')) return;
+      updateIntent = true;
+      runInstall({ update: true });
+    }, true);
+    // ONE delegated listener for the whole page (capture phase), so a tap is
+    // caught even when the WebView swallows the event on the button itself.
+    document.addEventListener('click', (e) => {
+      const tg = e && e.target;
+      if (!tg || !tg.closest) return;
+      if (tg.closest('#gs-update-x')) onUpdateXTap(e);
+    }, true);
+    document.addEventListener('touchend', (e) => {
+      const tg = e && e.target;
+      if (!tg || !tg.closest) return;
+      if (tg.closest('#gs-update-x')) onUpdateXTap(e);
+    }, true);
     function cancelUpdateFlow() {
       cancelRequested = true;
+      updateFlowActive = false;
       clearInstallWatchdog();
       stopCreep();
       try { S.abortWebDownload(app.slug); } catch (e) {}
@@ -1305,22 +1343,9 @@
       }
       updateBarEl = barEl; updateFillEl = fillEl; updateLabelEl = labelEl;
 
-      let lastTap = 0;
-      const onX = (e) => {
-        if (e && e.cancelable) { try { e.preventDefault(); } catch (err) {} }
-        const now = Date.now();
-        if (now - lastTap < 400) return;
-        lastTap = now;
-        cancelUpdateFlow();
-      };
-      xBtn.addEventListener('pointerup', onX);
-      xBtn.addEventListener('touchend', onX, { passive: false });
-      xBtn.addEventListener('click', onX);
-      document.addEventListener('click', (e) => {
-        const tg = e && e.target;
-        if (!tg || !tg.closest) return;
-        if (tg.closest('#gs-update-x')) onX(e);
-      }, true);
+      xBtn.addEventListener('pointerup', onUpdateXTap);
+      xBtn.addEventListener('touchend', onUpdateXTap, { passive: false });
+      xBtn.addEventListener('click', onUpdateXTap);
 
       paintUpdateBar(0);
       startCreep(0);
@@ -1462,7 +1487,7 @@
       actionsWrap.style.display = '';
     }
     function showIdle(opts) {
-      removeUpdateBar();
+      if (!updateFlowActive) removeUpdateBar();
       removeInstalledActions();
       setCancelVisible(false);
       resetBar();
@@ -1590,6 +1615,7 @@
       }
       if (status === 'downloaded') {
         stopCreep();
+        updateFlowActive = false;
         if (isDeadFilename(message || filename)) { handleMissingFile(); return; }
         const autoInstall = updateIntent;
         updateIntent = false;
@@ -1631,6 +1657,7 @@
       }
       if (status === 'installed') {
         stopCreep();
+        updateFlowActive = false;
         removeUpdateBar();
         updateIntent = false;
         fileMissingRetries = 0;
@@ -1649,6 +1676,7 @@
       }
       if (status === 'cancelled') {
         stopCreep();
+        updateFlowActive = false;
         removeUpdateBar();
         if (hasInstallPrompt(app.slug)) {
           const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
@@ -1684,6 +1712,7 @@
       }
       if (status === 'failed') {
         stopCreep();
+        updateFlowActive = false;
         removeUpdateBar();
         if (message === 'file_missing') { handleMissingFile(); return; }
         if (hasInstallPrompt(app.slug)) {
@@ -1748,6 +1777,7 @@
       lastLaunchAt = stamp;
       // 1) PAINT + COMMIT the bar first: nothing may open a window before this,
       //    and a forced synchronous layout makes the 0% bar visible in-frame.
+      if (updateIntent) updateFlowActive = true;
       paintLaunchUi();
       forceReflow();
       // The ad was removed at the owner's request: nothing may delay the bar.
@@ -2018,6 +2048,8 @@
     btn.addEventListener('click', runInstall);
 
     function resolveInstallState() {
+      // A pending update owns the UI: never rebuild the buttons underneath it.
+      if (updateFlowActive) return;
       if (S.registerInstallWatch) S.registerInstallWatch(app.slug, app.package_name || '');
 
       // A download/install is running for THIS slug: keep its progress on

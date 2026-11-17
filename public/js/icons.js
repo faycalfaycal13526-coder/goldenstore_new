@@ -13,6 +13,8 @@ const ICONS = {
 
   // Actions
   download:    '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  // Filled Material-style download glyph — the big icon on the «تحميل إدارة» empty state.
+  downloadBold: '<path d="M19 9h-4V3H9v6H5l7 7 7-7z" fill="currentColor" stroke="none"/><path d="M5 17v3h14v-3H5z" fill="currentColor" stroke="none"/>',
   upload:      '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
   plus:        '<path d="M12 5v14M5 12h14"/>',
   minus:       '<path d="M5 12h14"/>',

@@ -782,6 +782,67 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .navitem.active .pill-ico { background: var(--nav-bg); color: var(--nav); }
 .navitem.active .icon { color: var(--nav); }
 
+/* ---------- Download manager «تحميل إدارة» (bottom nav «مكتبتي») ---------- */
+/* Pixel-matched to the owner's screenshot: back arrow + title + search in one
+   row, three tabs with a green underline on the active one, then either the
+   list or the big download glyph with «لم يتم تنزيل أي تطبيقات». */
+.dlm { padding: 0; }
+.dlm-top {
+  display: flex; align-items: center; gap: 6px;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 10px 4px;
+}
+.dlm-back, .dlm-search {
+  width: 44px; height: 44px; min-width: 44px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; border-radius: 50%;
+  color: var(--text); cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.dlm-back:active, .dlm-search:active { background: var(--surface-2); }
+.dlm-back .icon, .dlm-search .icon { width: 26px; height: 26px; }
+/* The arrow points to the LEFT exactly like the reference screen. */
+.dlm-title {
+  flex: 1 1 auto; margin: 0; font-size: 23px; font-weight: 700;
+  line-height: 1.25; color: var(--text); text-align: start;
+  letter-spacing: -0.2px;
+}
+.dlm-tabs {
+  display: flex; align-items: stretch;
+  padding: 0 4px; margin-top: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.dlm-tab {
+  flex: 1 1 0; position: relative;
+  background: transparent; border: 0; cursor: pointer;
+  padding: 12px 6px 13px; font-family: inherit;
+  font-size: 16px; font-weight: 600; color: var(--text-2);
+  -webkit-tap-highlight-color: transparent; white-space: nowrap;
+  transition: color .15s;
+}
+.dlm-tab.active { color: #0f9d58; }
+.dlm-tab.active::after {
+  content: ''; position: absolute; left: 6%; right: 6%; bottom: -1px;
+  height: 3px; border-radius: 3px 3px 0 0; background: #0f9d58;
+}
+html[data-theme="dark"] .dlm-tab.active { color: #34c47a; }
+html[data-theme="dark"] .dlm-tab.active::after { background: #34c47a; }
+.dlm-body { padding: 0; }
+.dlm-list { padding: 0 16px; }
+.dlm-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: 118px 24px 24px; text-align: center;
+}
+.dlm-empty-ico { display: flex; align-items: center; justify-content: center; }
+.dlm-empty-ico .icon { width: 62px; height: 62px; color: var(--text); }
+.dlm-empty-txt {
+  margin: 22px 0 0; font-size: 15px; font-weight: 400;
+  color: var(--text-2); line-height: 1.5;
+}
+.dlm-clear { display: flex; justify-content: center; padding: 22px 16px 8px; }
+@media (max-width: 360px) {
+  .dlm-tab { font-size: 14.5px; }
+  .dlm-title { font-size: 21px; }
+}
+
 /* ---------- States ---------- */
 .center { display: flex; align-items: center; justify-content: center; padding: 60px 24px; }
 .spinner {

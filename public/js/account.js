@@ -8,10 +8,20 @@
   const TELEGRAM_URL = 'https://t.me/goldenstore_10';
   const isNativeApp = () => !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function');
 
+  // Download-manager tabs («تحميل إدارة») — declared before S.ready(), which can
+  // run synchronously for a cached user.
+  const DLM_TABS = [
+    { key: 'current', label: 'التنبيهات الحالية' },
+    { key: 'downloaded', label: 'تم التنزيل' },
+    { key: 'library', label: 'المكتبة' },
+  ];
+  const DLM_EMPTY = 'لم يتم تنزيل أي تطبيقات';
+
   // Module-level refs so native package events can refresh library rows after
   // renderLibraryPage runs (bound once per page load — no listener leaks).
   let libListRef = null;
   let libRefreshRowRef = null;
+  let libEventsBound = false;
 
   // Determine which view to show based on URL param
   const tabParam = getQuery('tab');
@@ -38,48 +48,59 @@
     }
   });
 
-  // --- Library page (standalone, accessed from bottom nav) ---
+  // --- «تحميل إدارة» — the download manager (bottom nav «مكتبتي») ---
+  // Layout copied from the owner's screenshot: one row with the back arrow,
+  // the title «تحميل إدارة» and a search icon; then three tabs
+  // (التنبيهات الحالية / تم التنزيل / المكتبة) with a green underline on the
+  // active one; then the list — or, when there is nothing, the big download
+  // glyph with «لم يتم تنزيل أي تطبيقات».
+
   function renderLibraryPage(content) {
     bindLibraryPackageEvents();
-    content.append(el('div', { class: 'page-title', style: { padding: '16px' } }, t('مكتبتي')));
-    const body = el('div', { class: 'acct-body' });
-    content.append(body);
+    content.innerHTML = '';
+    content.classList.add('dlm');
 
-    // --- Live downloads: in-flight downloads + ready-to-install packages ---
-    // Progress/status update in real time (Google Play style) via the central
-    // state hub; entries survive app restarts through the native bridge.
-    mountLiveDownloads(body);
+    content.append(el('div', { class: 'dlm-top' },
+      el('button', {
+        class: 'dlm-back', type: 'button', 'aria-label': t('رجوع'),
+        onclick: () => {
+          // Stack first (Android back gesture), then fall back to «أنت».
+          try { if (window.history && window.history.length > 1) { window.history.back(); return; } } catch (e) {}
+          location.href = '/account';
+        },
+      }, ico('arrowLeft', 'icon')),
+      el('h1', { class: 'dlm-title' }, t('تحميل إدارة')),
+      el('a', { class: 'dlm-search', href: '/search', 'aria-label': t('بحث') }, ico('search', 'icon')),
+    ));
 
-    const history = S.getDownloadHistory();
+    const tabsBar = el('div', { class: 'dlm-tabs', role: 'tablist' });
+    const panel = el('div', { class: 'dlm-body' });
+    content.append(tabsBar, panel);
 
-    if (!history.length) {
-      body.append(
-        el('div', { class: 'empty-lib' },
-          el('div', { class: 'empty-lib-icon' }, ico('download', 'icon')),
-          el('h3', null, t('مكتبتك فارغة')),
-          el('p', null, t('ستظهر هنا التطبيقات التي قمت بتحميلها لتسهيل إعادة تحميلها في أي وقت.')),
-          el('a', { class: 'btn btn-primary', href: '/' }, t('تصفح التطبيقات')),
-        ),
-      );
-      return;
+    let active = 'current';
+    let teardown = null;
+    const getItems = () => (S.getDownloadHistory() || []);
+
+    function paintTabs() {
+      tabsBar.innerHTML = '';
+      DLM_TABS.forEach((tb) => tabsBar.append(el('button', {
+        class: `dlm-tab ${tb.key === active ? 'active' : ''}`,
+        type: 'button', role: 'tab', 'aria-selected': tb.key === active ? 'true' : 'false',
+        onclick: () => {
+          if (active === tb.key) return;
+          active = tb.key;
+          paintTabs();
+          renderPanel();
+        },
+      }, t(tb.label))));
     }
 
-    const header = el('div', { class: 'lib-header' },
-      el('div', { class: 'lib-header-info' },
-        ico('package', 'icon lib-header-ico'),
-        el('span', { class: 'lib-count' }, `${history.length} ${t('تطبيق في مكتبتك')}`),
-      ),
-      el('button', { class: 'btn btn-sm btn-secondary', type: 'button', onclick: () => {
-        if (!confirm(t('حذف سجل التحميلات بالكامل؟'))) return;
-        S.clearDownloadHistory();
-        content.innerHTML = '';
-        renderLibraryPage(content);
-        toast(t('تم مسح السجل'), 'success');
-      } }, ico('trash', 'icon icon-sm'), t('مسح السجل')),
-    );
-    body.append(header);
-
-    const list = el('div', { class: 'lib-list' });
+    function dlEmpty() {
+      return el('div', { class: 'dlm-empty' },
+        el('div', { class: 'dlm-empty-ico' }, ico('downloadBold', 'icon')),
+        el('p', { class: 'dlm-empty-txt' }, t(DLM_EMPTY)),
+      );
+    }
 
     // Device truth for one library item — full fallback chain (v1.9):
     // metadata package → native slug registry → resolved package learned
@@ -94,7 +115,7 @@
     }
 
     // Google Play style end state for installed apps: Open + Uninstall
-    // buttons directly in the library row (mirrors the app detail page).
+    // buttons directly in the row (mirrors the app detail page).
     function buildAction(item) {
       const st = deviceStateFor(item);
       if (st.installed && isNativeApp() && st.pkg) {
@@ -124,23 +145,7 @@
       return el('span', { class: 'lib-open-btn' }, ico('chevronStart', 'icon icon-sm'));
     }
 
-    // Re-evaluate one row against the device (install state changed live).
-    function refreshRow(slug) {
-      const item = history.find((h) => h.slug === slug);
-      if (!item || !list.isConnected) return;
-      const rowEl = list.querySelector('.lib-row[data-slug="' + CSS.escape(slug) + '"]');
-      if (!rowEl) return;
-      const act = rowEl.querySelector('.lib-action');
-      if (!act) return;
-      act.innerHTML = '';
-      act.append(buildAction(item));
-      // Keep the local registry in sync with the device.
-      const st = deviceStateFor(item);
-      if (st.installed) S.markInstalledStored(item.slug);
-      else if (S.unmarkInstalledStored) S.unmarkInstalledStored(item.slug);
-    }
-
-    history.forEach((item) => {
+    function libraryRow(item) {
       const row = el('a', { href: `/app?slug=${encodeURIComponent(item.slug)}`, class: 'lib-row' },
         el('div', { class: 'art' },
           item.icon_url
@@ -159,20 +164,91 @@
         el('div', { class: 'lib-action' }, buildAction(item)),
       );
       row.setAttribute('data-slug', item.slug || '');
-      list.append(row);
-    });
-    body.append(list);
+      return row;
+    }
 
-    // Expose refs for the native event listeners (bound once at module scope).
-    libListRef = list;
-    libRefreshRowRef = refreshRow;
+    // Re-evaluate one row against the device (install state changed live).
+    function refreshRow(slug) {
+      const item = getItems().find((h) => h.slug === slug);
+      if (!item || !panel.isConnected) return;
+      const rowEl = panel.querySelector('.lib-row[data-slug="' + CSS.escape(slug) + '"]');
+      if (!rowEl) return;
+      const act = rowEl.querySelector('.lib-action');
+      if (!act) return;
+      act.innerHTML = '';
+      act.append(buildAction(item));
+      const st = deviceStateFor(item);
+      if (st.installed) S.markInstalledStored(item.slug);
+      else if (S.unmarkInstalledStored) S.unmarkInstalledStored(item.slug);
+    }
+
+    function renderCurrentPanel() {
+      panel.innerHTML = '';
+      const host = el('div', { class: 'dlm-list' });
+      const empty = dlEmpty();
+      panel.append(host, empty);
+      const sync = (n) => {
+        const count = typeof n === 'number' ? n : host.querySelectorAll('.live-dl').length;
+        empty.style.display = count ? 'none' : '';
+        host.style.display = count ? '' : 'none';
+      };
+      sync(0);
+      teardown = mountLiveDownloads(host, { onChange: sync });
+      sync();
+    }
+
+    function renderDownloadedPanel() {
+      panel.innerHTML = '';
+      const items = getItems().filter((it) => {
+        const dev = deviceStateFor(it);
+        if (dev.installed) return true;
+        const st = S.getApkState ? S.getApkState(it.slug) : null;
+        return !!(st && (st.status === 'downloaded' || st.status === 'installed'));
+      });
+      if (!items.length) { panel.append(dlEmpty()); return; }
+      const list = el('div', { class: 'lib-list dlm-list' });
+      items.forEach((it) => list.append(libraryRow(it)));
+      panel.append(list);
+      libListRef = list;
+    }
+
+    function renderLibraryPanel() {
+      panel.innerHTML = '';
+      const items = getItems();
+      if (!items.length) { panel.append(dlEmpty()); return; }
+      const list = el('div', { class: 'lib-list dlm-list' });
+      items.forEach((it) => list.append(libraryRow(it)));
+      panel.append(list, el('div', { class: 'dlm-clear' },
+        el('button', {
+          class: 'btn btn-sm btn-secondary', type: 'button',
+          onclick: () => {
+            if (!confirm(t('حذف سجل التحميلات بالكامل؟'))) return;
+            S.clearDownloadHistory();
+            toast(t('تم مسح السجل'), 'success');
+            renderPanel();
+          },
+        }, ico('trash', 'icon icon-sm'), t('مسح السجل')),
+      ));
+      libListRef = list;
+    }
+
+    function renderPanel() {
+      if (teardown) { try { teardown(); } catch (e) {} teardown = null; }
+      libListRef = null;
+      libRefreshRowRef = refreshRow;
+      if (active === 'current') return renderCurrentPanel();
+      if (active === 'downloaded') return renderDownloadedPanel();
+      return renderLibraryPanel();
+    }
+
+    paintTabs();
+    renderPanel();
   }
 
   // --- Native package events → live library row refresh ---
   // When the user uninstalls (system dialog) or an install completes while
   // the library is open, the affected rows flip between
   // [فتح | إلغاء التثبيت] and the plain state WITHOUT a page reload.
-  let libEventsBound = false;
   function bindLibraryPackageEvents() {
     if (libEventsBound) return;
     libEventsBound = true;
@@ -205,8 +281,9 @@
   // Renders downloading / downloaded / installing entries from the central
   // hub, enriched with names/icons from the download history. Re-renders on
   // every state event so progress and status stay live on this page.
-  function mountLiveDownloads(body) {
+  function mountLiveDownloads(body, opts) {
     const section = el('div', { class: 'live-dls' });
+    const o = opts || {};
     let paintQueued = false;
 
     function paint() {
@@ -214,7 +291,7 @@
       const map = S.getApkStateMap ? S.getApkStateMap() : {};
       let entries = Object.values(map).filter((st) => st && st.slug);
       section.innerHTML = '';
-      if (!entries.length) return;
+      if (!entries.length) { if (o.onChange) o.onChange(0); return; }
 
       const historyById = {};
       S.getDownloadHistory().forEach((h) => { historyById[h.slug] = h; });
@@ -235,7 +312,7 @@
         }
         return true;
       });
-      if (!entries.length) return;
+      if (!entries.length) { if (o.onChange) o.onChange(0); return; }
 
       section.append(el('div', { class: 'live-dls-title' },
         ico('download', 'icon'),
@@ -316,6 +393,7 @@
           }
           section.append(row);
         });
+      if (o.onChange) o.onChange(section.querySelectorAll('.live-dl').length);
     }
 
     function queuePaint() {
@@ -327,23 +405,20 @@
     const offState = S.onApkState ? S.onApkState(() => queuePaint()) : null;
     const offDl = S.onActiveDownloadsChange ? S.onActiveDownloadsChange(() => queuePaint()) : null;
     // Stop listening when navigating away (page unload clears everything).
-    window.addEventListener('pagehide', () => {
+    const onHide = () => {
       if (offState) offState();
       if (offDl) offDl();
-    }, { once: true });
+    };
+    window.addEventListener('pagehide', onHide, { once: true });
 
+    body.append(section);
     paint();
-    // Only mount when there is something live to show (or updates arrive).
-    if (section.childNodes.length) body.append(section);
-    else {
-      const earlyOff = S.onApkState(() => {
-        if (section.childNodes.length) return;
-        if (!Object.keys(S.getApkStateMap ? S.getApkStateMap() : {}).length) return;
-        earlyOff();
-        body.prepend(section);
-        queuePaint();
-      });
-    }
+    if (o.onChange) o.onChange(section.querySelectorAll('.live-dl').length);
+    // Explicit teardown: the download manager swaps tabs without reloading.
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      onHide();
+    };
   }
 
   // --- Settings page (profile + settings) ---

@@ -1237,6 +1237,39 @@
     /* A DEDICATED, self-contained update bar: everything else is hidden and
        only this element is shown. It uses inline styles (so no stylesheet rule
        can hide it or steal the taps) and owns its own cancel button. */
+    /* ---- on-device diagnostic (temporary) -------------------------------
+       The owner's device shows no console, so every step of an update tap is
+       written into a small on-screen chip. It is the only reliable way to see
+       whether the tap reaches the code, whether the bar is created/removed and
+       what the native bridge reports. */
+    const UPDATE_LOG = [];
+    let dbgTimer = null;
+    function ulog(msg) {
+      try {
+        UPDATE_LOG.push(`${((Date.now() % 100000) / 1000).toFixed(1)}s ${msg}`);
+        while (UPDATE_LOG.length > 8) UPDATE_LOG.shift();
+        let chip = document.getElementById('gs-upd-dbg');
+        if (!chip) {
+          chip = document.createElement('div');
+          chip.id = 'gs-upd-dbg';
+          chip.setAttribute('style', 'position:fixed;inset-inline:8px;bottom:8px;z-index:2147483000;'
+            + 'background:#0b0b0d;color:#7dff9b;border:1px solid #2f7bff;border-radius:10px;padding:8px 10px;'
+            + 'font:11px/1.45 ui-monospace,monospace;direction:ltr;text-align:left;white-space:pre-wrap;'
+            + 'max-height:38vh;overflow:auto;pointer-events:none;user-select:text;box-shadow:0 8px 24px rgba(0,0,0,.5)');
+          (document.body || document.documentElement).appendChild(chip);
+        }
+        chip.textContent = UPDATE_LOG.join('\n');
+        chip.style.display = 'block';
+        if (dbgTimer) clearTimeout(dbgTimer);
+        dbgTimer = setTimeout(() => { chip.style.display = 'none'; }, 30000);
+      } catch (e) {}
+    }
+    function bridgeMethods() {
+      try {
+        const b = window.GSAndroid || {};
+        return Object.keys(b).filter((k) => typeof b[k] === 'function').slice(0, 8).join(',') || 'none';
+      } catch (e) { return 'err'; }
+    }
     let updateBarEl = null, updateFillEl = null, updateLabelEl = null;
     /* TRUE from the tap until the update flow really ends. While it is set the
        background state refresh (focus/visibility/heartbeat → resolveInstallState
@@ -1244,7 +1277,8 @@
        bar a few milliseconds after the tap, which is why it never showed and
        why the X died (its element had been replaced). */
     let updateFlowActive = false;
-    function removeUpdateBar() {
+    function removeUpdateBar(reason) {
+      if (updateBarEl) ulog(`bar-X (${reason || 'cleanup'})`);
       if (updateBarEl && updateBarEl.parentNode) updateBarEl.parentNode.removeChild(updateBarEl);
       updateBarEl = null; updateFillEl = null; updateLabelEl = null;
     }
@@ -1270,6 +1304,7 @@
       const tg = e && e.target;
       if (!tg || !tg.closest) return;
       if (!tg.closest('.gs-action-update')) return;
+      ulog('delegated tap');
       updateIntent = true;
       runInstall({ update: true });
     }, true);
@@ -1278,12 +1313,12 @@
     document.addEventListener('click', (e) => {
       const tg = e && e.target;
       if (!tg || !tg.closest) return;
-      if (tg.closest('#gs-update-x')) onUpdateXTap(e);
+      if (tg.closest('#gs-update-x')) { ulog('X click'); onUpdateXTap(e); }
     }, true);
     document.addEventListener('touchend', (e) => {
       const tg = e && e.target;
       if (!tg || !tg.closest) return;
-      if (tg.closest('#gs-update-x')) onUpdateXTap(e);
+      if (tg.closest('#gs-update-x')) { ulog('X touch'); onUpdateXTap(e); }
     }, true);
     function cancelUpdateFlow() {
       cancelRequested = true;
@@ -1295,18 +1330,26 @@
       S.removeApkState(app.slug);
       S.removeActiveDownload(app.slug);
       clearInstallPrompt(app.slug);
-      removeUpdateBar();
+      removeUpdateBar('cancelled');
       // back to the «تحديث / إلغاء التثبيت» pair
       setTimeout(() => { try { resolveInstallState(); } catch (e) {} }, 0);
       toast(t('تم إلغاء التنزيل'), 'info');
     }
     function showUpdateBar() {
+      try { return showUpdateBarInner(); }
+      catch (err) {
+        ulog('BAR ERROR: ' + (err && err.message ? err.message : err));
+        return null;
+      }
+    }
+    function showUpdateBarInner() {
+      ulog('bar+ start');
       // Hide EVERYTHING that is currently in the action area.
       removeInstalledActions();
       const existing = document.getElementById('gs-installed-actions');
       if (existing) existing.remove();
       actionsWrap.style.display = 'none';
-      removeUpdateBar();
+      removeUpdateBar('recreate');
 
       const mk = (tag, css, txt) => {
         const n = document.createElement(tag);
@@ -1349,6 +1392,8 @@
 
       paintUpdateBar(0);
       startCreep(0);
+      ulog('bar+ ok inDom=' + document.querySelectorAll('#gs-update-bar').length
+        + ' parent=' + (barEl.parentNode ? barEl.parentNode.className : 'null'));
     }
     function beginUpdateUi() { showUpdateBar(); }
     /* The APK is already on the phone (or just finished): keep the SAME bar at
@@ -1363,6 +1408,7 @@
       beginUpdateUi();
       setProgress(1);
       const used = launchInstaller(a, fn);
+      ulog('installer=' + (used || 'NONE'));
       if (!used) {
         clearInstallPrompt(a.slug);
         restoreReadyToInstall(fn, { toast: t('تعذّر فتح الملف'), kind: 'error' });
@@ -1565,6 +1611,7 @@
     }
 
     apkStateHandlers[app.slug] = function (status, progress, message) {
+      ulog('evt ' + status + ' ' + progress + ' ' + String(message || '').slice(0, 24));
       if (status === 'downloaded' || status === 'installed'
           || status === 'cancelled' || status === 'failed') {
         nativeDownloadFinished = true;
@@ -1778,7 +1825,9 @@
       // 1) PAINT + COMMIT the bar first: nothing may open a window before this,
       //    and a forced synchronous layout makes the 0% bar visible in-frame.
       if (updateIntent) updateFlowActive = true;
+      ulog('tap upd=' + updateIntent + ' native=' + isNativeApp() + ' br=' + bridgeMethods());
       paintLaunchUi();
+      ulog('paint done bars=' + document.querySelectorAll('#gs-update-bar').length);
       forceReflow();
       // The ad was removed at the owner's request: nothing may delay the bar.
       launchInFlight = true;

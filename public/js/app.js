@@ -1065,6 +1065,8 @@
       fill.style.transition = 'width .15s linear';
       fill.style.width = pct + '%';
       label.textContent = `${t('جارٍ التنزيل…')} ${pct}%`;
+      // The dedicated update bar (if shown) mirrors the same value.
+      paintUpdateBar(pct);
     }
     function setIndeterminate() {
       btn.classList.add('indeterminate');
@@ -1232,19 +1234,98 @@
     /* «تحديث» must look EXACTLY like a normal download: the two buttons
        (تحديث / إلغاء التثبيت) disappear and the one progress bar with the X
        takes their place — immediately, on the tap, before anything async. */
-    function beginUpdateUi() {
+    /* A DEDICATED, self-contained update bar: everything else is hidden and
+       only this element is shown. It uses inline styles (so no stylesheet rule
+       can hide it or steal the taps) and owns its own cancel button. */
+    let updateBarEl = null, updateFillEl = null, updateLabelEl = null;
+    function removeUpdateBar() {
+      if (updateBarEl && updateBarEl.parentNode) updateBarEl.parentNode.removeChild(updateBarEl);
+      updateBarEl = null; updateFillEl = null; updateLabelEl = null;
+    }
+    function paintUpdateBar(pct, text) {
+      if (!updateFillEl) return;
+      const v = Math.max(0, Math.min(100, Math.round(pct)));
+      updateFillEl.style.width = v + '%';
+      if (updateLabelEl) updateLabelEl.textContent = text || `${t('جارٍ التنزيل…')} ${v}%`;
+    }
+    function cancelUpdateFlow() {
+      cancelRequested = true;
+      clearInstallWatchdog();
+      stopCreep();
+      try { S.abortWebDownload(app.slug); } catch (e) {}
+      try { S.cancelDownload(app.slug); } catch (e) {}
+      S.removeApkState(app.slug);
+      S.removeActiveDownload(app.slug);
+      clearInstallPrompt(app.slug);
+      removeUpdateBar();
+      // back to the «تحديث / إلغاء التثبيت» pair
+      setTimeout(() => { try { resolveInstallState(); } catch (e) {} }, 0);
+      toast(t('تم إلغاء التنزيل'), 'info');
+    }
+    function showUpdateBar() {
+      // Hide EVERYTHING that is currently in the action area.
       removeInstalledActions();
-      btn.classList.remove('installed', 'has-update');
-      setCancelVisible(true);
-      btn.classList.add('installing');
-      btn.classList.remove('indeterminate');
-      btn.disabled = true;
-      fill.style.transition = 'none';
-      fill.style.width = '0%';
-      label.textContent = `${t('جارٍ التنزيل…')} 0%`;
-      // Count from the tap, so the number keeps moving while the ad is open.
+      const existing = document.getElementById('gs-installed-actions');
+      if (existing) existing.remove();
+      actionsWrap.style.display = 'none';
+      removeUpdateBar();
+
+      const mk = (tag, css, txt) => {
+        const n = document.createElement(tag);
+        if (css) n.setAttribute('style', css);
+        if (txt) n.textContent = txt;
+        return n;
+      };
+      const fillEl = mk('span', 'position:absolute;inset-inline-start:0;top:0;bottom:0;width:0%;'
+        + 'background:rgba(255,255,255,.28);transition:width .2s linear;z-index:0;border-radius:inherit');
+      const labelEl = mk('span', 'position:relative;z-index:2;color:#fff;font-size:15px;font-weight:700;'
+        + 'pointer-events:none;display:inline-flex;align-items:center;justify-content:center;flex:1 1 auto;'
+        + 'padding:0 14px;font-variant-numeric:tabular-nums', `${t('جارٍ التنزيل…')} 0%`);
+      const xBtn = mk('button', 'position:relative;z-index:9;pointer-events:auto;display:flex;align-items:center;'
+        + 'justify-content:center;width:58px;min-width:58px;height:48px;background:transparent;border:0;'
+        + 'border-inline-start:2px solid rgba(255,255,255,.28);color:#fff;font-size:0;cursor:pointer;'
+        + 'border-radius:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation');
+      xBtn.type = 'button';
+      xBtn.id = 'gs-update-x';
+      xBtn.setAttribute('aria-label', t('إلغاء التنزيل'));
+      xBtn.appendChild(ico('close', 'icon'));
+      const barEl = mk('div', 'position:relative;display:flex;align-items:stretch;width:100%;height:48px;'
+        + 'min-height:48px;max-height:48px;background:#2b7de9;border-radius:999px;overflow:hidden;'
+        + 'margin-top:10px;box-shadow:0 4px 14px rgba(43,125,233,.35);direction:inherit');
+      barEl.id = 'gs-update-bar';
+      barEl.appendChild(fillEl);
+      barEl.appendChild(labelEl);
+      barEl.appendChild(xBtn);
+
+      const anchor = actionsWrap.parentNode;
+      if (anchor) anchor.insertBefore(barEl, actionsWrap.nextSibling);
+      else {
+        const det = document.querySelector('.detail') || document.body;
+        det.appendChild(barEl);
+      }
+      updateBarEl = barEl; updateFillEl = fillEl; updateLabelEl = labelEl;
+
+      let lastTap = 0;
+      const onX = (e) => {
+        if (e && e.cancelable) { try { e.preventDefault(); } catch (err) {} }
+        const now = Date.now();
+        if (now - lastTap < 400) return;
+        lastTap = now;
+        cancelUpdateFlow();
+      };
+      xBtn.addEventListener('pointerup', onX);
+      xBtn.addEventListener('touchend', onX, { passive: false });
+      xBtn.addEventListener('click', onX);
+      document.addEventListener('click', (e) => {
+        const tg = e && e.target;
+        if (!tg || !tg.closest) return;
+        if (tg.closest('#gs-update-x')) onX(e);
+      }, true);
+
+      paintUpdateBar(0);
       startCreep(0);
     }
+    function beginUpdateUi() { showUpdateBar(); }
     /* The APK is already on the phone (or just finished): keep the SAME bar at
        100% and ask the bridge to INSTALL it over the installed copy. */
     function installWithBar(a, file) {
@@ -1333,6 +1414,7 @@
     }
     function showInstalledActions(a, opts = {}) {
       if (!isNativeApp()) return;
+      removeUpdateBar();
       removeInstalledActions();
       const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' });
       if (opts.withOpen !== false) {
@@ -1351,6 +1433,7 @@
     }
     function showDownloadedActions(a, filename) {
       setCancelVisible(false);
+      removeUpdateBar();
       if (!isNativeApp()) return;
       removeInstalledActions();
       const bar = el('div', { class: 'installed-actions', id: 'gs-installed-actions' },
@@ -1379,6 +1462,7 @@
       actionsWrap.style.display = '';
     }
     function showIdle(opts) {
+      removeUpdateBar();
       removeInstalledActions();
       setCancelVisible(false);
       resetBar();
@@ -1478,7 +1562,9 @@
       };
       if (status === 'downloading') {
         if (cancelRequested) return;
-        setCancelVisible(true);
+        // An update keeps its own dedicated bar on screen (nothing else shown).
+        if (updateIntent && !updateBarEl) showUpdateBar();
+        if (!updateIntent) setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
         if (!creepTimer) startCreep(typeof progress === 'number' ? progress : 0);
@@ -1517,6 +1603,7 @@
         label.textContent = t('جاهز للتثبيت');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
+        removeUpdateBar();
         // No Install/Delete flicker during a direct update: the progress bar
         // stays and the installer opens on top of it.
         if (!autoInstall) showDownloadedActions(app, message || filename);
@@ -1544,6 +1631,7 @@
       }
       if (status === 'installed') {
         stopCreep();
+        removeUpdateBar();
         updateIntent = false;
         fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
@@ -1561,6 +1649,7 @@
       }
       if (status === 'cancelled') {
         stopCreep();
+        removeUpdateBar();
         if (hasInstallPrompt(app.slug)) {
           const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);
           restoreReadyToInstall(fn, { toast: t('تم إلغاء التثبيت، الملف جاهز للتثبيت') });
@@ -1595,6 +1684,7 @@
       }
       if (status === 'failed') {
         stopCreep();
+        removeUpdateBar();
         if (message === 'file_missing') { handleMissingFile(); return; }
         if (hasInstallPrompt(app.slug)) {
           const fn = (message && /\.apk$/i.test(message)) ? message : installPromptFilename(app.slug);

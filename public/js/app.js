@@ -1288,6 +1288,7 @@
     function cancelUpdateFlow() {
       cancelRequested = true;
       updateFlowActive = false;
+      closeInAppAd();
       clearInstallWatchdog();
       stopCreep();
       try { S.abortWebDownload(app.slug); } catch (e) {}
@@ -1763,8 +1764,62 @@
       return base.replace(/\.apk$/i, '') + suffix;
     }
 
-    /* The ad was removed from this flow: nothing may open a window or steal the
-       focus before the progress bar is on screen and the transfer starts. */
+    /* ---------------- In-app advertisement ---------------- */
+    /* The ad is BACK, but it never leaves the app: it is rendered as a layer
+       inside the page (an <iframe>), never with window.open / target=_blank,
+       so Chrome is never launched. It runs for exactly AD_SECONDS seconds and
+       the transfer only starts when it closes: the 0 % bar is already painted
+       underneath, so the moment the ad goes away the real progress takes over. */
+    const AD_URL = 'https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110';
+    const AD_SECONDS = 10;
+    let adLayerEl = null, adTimer = null, adResolve = null;
+    function closeInAppAd() {
+      if (adTimer) { clearInterval(adTimer); adTimer = null; }
+      if (adLayerEl && adLayerEl.parentNode) adLayerEl.parentNode.removeChild(adLayerEl);
+      adLayerEl = null;
+      const r = adResolve; adResolve = null;
+      if (r) { try { r(); } catch (e) {} }
+    }
+    function showInAppAd() {
+      return new Promise((resolve) => {
+        if (adLayerEl) { resolve(); return; }
+        adResolve = resolve;
+        const layer = document.createElement('div');
+        layer.id = 'gs-ad-layer';
+        layer.setAttribute('style', 'position:fixed;inset:0;z-index:2147482200;background:#0b0b10;'
+          + 'display:flex;flex-direction:column;overscroll-behavior:contain');
+        const head = document.createElement('div');
+        head.setAttribute('style', 'display:flex;align-items:center;gap:8px;flex:0 0 auto;'
+          + 'padding:calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px;background:#12121a;'
+          + 'color:#fff;font-size:13px;font-weight:700;border-bottom:1px solid #24242f');
+        const tagEl = document.createElement('span');
+        tagEl.setAttribute('style', 'font-size:11px;font-weight:800;letter-spacing:.04em;'
+          + 'color:#0b0b10;background:#f5c542;padding:3px 8px;border-radius:6px');
+        tagEl.textContent = t('إعلان');
+        const cdEl = document.createElement('span');
+        cdEl.id = 'gs-ad-count';
+        cdEl.setAttribute('style', 'margin-inline-start:auto;font-size:13px;font-weight:600;'
+          + 'color:#cfcfd8;font-variant-numeric:tabular-nums');
+        const frame = document.createElement('iframe');
+        frame.id = 'gs-ad-frame';
+        frame.setAttribute('title', t('إعلان'));
+        frame.setAttribute('style', 'flex:1 1 auto;width:100%;height:100%;border:0;background:#fff;display:block');
+        try { frame.src = AD_URL; } catch (e) {}
+        head.appendChild(tagEl); head.appendChild(cdEl);
+        layer.appendChild(head); layer.appendChild(frame);
+        (document.body || document.documentElement).appendChild(layer);
+        adLayerEl = layer;
+        let left = AD_SECONDS;
+        const paintCd = () => { cdEl.textContent = left > 0 ? `${t('يبدأ التحميل بعد')} ${left}` : t('جارٍ بدء التحميل…'); };
+        paintCd();
+        adTimer = setInterval(() => {
+          left -= 1;
+          if (left <= 0) { closeInAppAd(); return; }
+          paintCd();
+        }, 1000);
+      });
+    }
+
     async function runInstall(opts) {
       const fresh = !!(opts && opts.fresh);
       const update = !!(opts && opts.update);
@@ -1777,13 +1832,19 @@
       lastLaunchAt = stamp;
       // 1) PAINT + COMMIT the bar first: nothing may open a window before this,
       //    and a forced synchronous layout makes the 0% bar visible in-frame.
+      // Opening an already installed app needs no ad and no bar.
+      const justOpens = !updateIntent && btn.classList.contains('installed')
+        && !btn.classList.contains('has-update') && !fresh;
       if (updateIntent) updateFlowActive = true;
       paintLaunchUi();
       forceReflow();
-      // The ad was removed at the owner's request: nothing may delay the bar.
       launchInFlight = true;
-      const releaseLaunch = setTimeout(() => { launchInFlight = false; }, 4000);
+      const releaseLaunch = setTimeout(() => { launchInFlight = false; }, (AD_SECONDS + 8) * 1000);
       try {
+        // The ad plays INSIDE the app first; the download starts when it ends.
+        cancelRequested = false;
+        if (!justOpens) await showInAppAd();
+        if (cancelRequested) { updateIntent = false; updateFlowActive = false; return; }
         return await runInstallLaunch({ fresh, update });
       } finally {
         clearTimeout(releaseLaunch);

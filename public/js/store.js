@@ -691,9 +691,10 @@ function topbarNav(title = '', actions = []) {
   );
 }
 
+/* Owner request: the two first tabs are swapped — «الألعاب» then «التطبيقات». */
 const NAV_ITEMS_RAW = [
-  { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/' },
   { key: 'games', label: 'الألعاب', icon: 'gamepad', href: '/games' },
+  { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/' },
   { key: 'library', label: 'مكتبتي', icon: 'download', href: '/account?tab=library' },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];
@@ -793,7 +794,47 @@ function bottomNav(active) {
     ),
   );
   document.body.append(nav);
+  wireNavAutoHide(nav);
   renderSiteFooter();
+}
+
+/* ---------- Bottom bar auto-hide, exactly like X / Twitter ----------
+   Scrolling DOWN hides the bar under the screen edge; scrolling UP brings it
+   back. Tapping/scrolling to the very top always shows it again. It listens in
+   the capture phase so it also works when the page scrolls inside an inner
+   container instead of <body>. Desktop (where this nav is a sidebar) ignores it
+   through CSS. */
+function wireNavAutoHide(nav) {
+  if (!nav || nav.dataset.autohide === '1') return;
+  nav.dataset.autohide = '1';
+  const last = new WeakMap();
+  let hidden = false;
+  const setHidden = (v) => {
+    if (hidden === v) return;
+    hidden = v;
+    nav.classList.toggle('nav-hidden', v);
+  };
+  const onScroll = (e) => {
+    const t = (e && e.target) || null;
+    let pos = null, key = null;
+    if (!t || t === document || t === document.documentElement || t === document.body) {
+      pos = (window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0);
+      key = document.documentElement;
+    } else if (typeof t.scrollTop === 'number') {
+      pos = t.scrollTop;
+      key = t;
+    }
+    if (pos === null || !key) return;
+    const prev = last.has(key) ? last.get(key) : pos;
+    last.set(key, pos);
+    const dy = pos - prev;
+    if (pos <= 8) { setHidden(false); return; }
+    if (Math.abs(dy) < 6) return;           // ignore jitter / rubber banding
+    if (dy > 0 && pos > 72) setHidden(true);
+    else if (dy < 0) setHidden(false);
+  };
+  document.addEventListener('scroll', onScroll, { passive: true, capture: true });
+  window.addEventListener('scroll', onScroll, { passive: true });
 }
 
 /* --------------------------- Auth gate --------------------------- */

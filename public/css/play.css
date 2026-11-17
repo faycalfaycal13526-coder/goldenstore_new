@@ -754,6 +754,16 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   border-top: 1px solid var(--line);
   height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* X-style auto-hide: the bar slides out on scroll-down, back on scroll-up. */
+  transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+  will-change: transform;
+}
+.bottomnav.nav-hidden {
+  transform: translateY(calc(100% + 2px));
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bottomnav { transition: none; }
 }
 .bottomnav-inner {
   max-width: var(--maxw); margin: 0 auto; height: var(--nav-h);
@@ -1042,6 +1052,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   }
 
   /* --- Sidebar navigation (was bottom nav) --- */
+  .bottomnav.nav-hidden { transform: none; pointer-events: auto; }
   .bottomnav {
     position: fixed;
     top: 0;

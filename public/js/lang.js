@@ -25,6 +25,10 @@
   // ---- Curated overrides: exact Arabic text -> per-language translation. ----
   // Used for short UI terms where machine translation is ambiguous/risky.
   var O = {
+    // in-app advertisement
+    'إعلان': { en: 'Ad', fr: 'Publicité', es: 'Anuncio' },
+    'يبدأ التحميل بعد': { en: 'Download starts in', fr: 'Téléchargement dans', es: 'La descarga empieza en' },
+    'جارٍ بدء التحميل…': { en: 'Starting the download…', fr: 'Démarrage du téléchargement…', es: 'Iniciando la descarga…' },
     // bottom nav / chrome
     'التطبيقات': { en: 'Apps', fr: 'Applications', es: 'Aplicaciones' },
     'الألعاب': { en: 'Games', fr: 'Jeux', es: 'Juegos' },

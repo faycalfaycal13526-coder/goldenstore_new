@@ -160,6 +160,27 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
 ---
 
+### In-app advertisement (must never leave the WebView)
+
+The download/update flow now shows the ad **inside the app**: `app.js` builds
+`#gs-ad-layer` (a fixed overlay) containing `#gs-ad-frame` (an `<iframe>` with the
+ad URL), plus a 10-second countdown. The transfer starts only when the layer
+closes, and `window.open` / `target=_blank` are never used.
+
+For the APK build this means:
+
+- keep `WebSettings.setJavaScriptEnabled(true)` **and**
+  `setSupportMultipleWindows(false)`;
+- do **not** override `shouldOverrideUrlLoading` to hand `http/https` to an
+  external browser for these URLs — load them in the same WebView;
+- leave `setDomStorageEnabled(true)` and `setMediaPlaybackRequiresUserGesture(false)`
+  so the ad's own media/script follows normal WebView rules;
+- no extra `INTERNET` permission changes are needed (already granted).
+
+If an ad network someday refuses framing (`X-Frame-Options: DENY`), the layer
+still shows the 10-second countdown over the app's own dark background, so the
+flow never breaks and the download still starts on time.
+
 ## 4.1 عقد التحديث المباشر (مهم جداً لزر «تحديث التطبيق»)
 
 الموقع يستدعي الجسر بالترتيب التالي عند وجود نسخة أقدم مثبّتة على الهاتف:

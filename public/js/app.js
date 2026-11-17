@@ -994,6 +994,7 @@
     /* «تحديث التطبيق» means: download the new APK AND open the system
        installer by itself. Without this the button only produced a download
        counter and the user never got the install prompt. */
+    let updateIntent = false;
     let lastLaunchAt = 0;
     let launchInFlight = false;
     function clearNativeLeaveHandler() {
@@ -1039,6 +1040,7 @@
       if (cancelBtn.disabled || cancelBtn.classList.contains('hidden')) return;
       cancelBtn.disabled = true;
       cancelRequested = true;
+      updateIntent = false;
       clearInstallPrompt(app.slug);
       cancelBtn.classList.add('hidden');
       // Abort ONLY this slug's controller/reader; other concurrent downloads
@@ -1227,6 +1229,42 @@
         restoreReadyToInstall(file, { toast: t('لم يُفتح مثبّت النظام، اضغط تثبيت'), kind: 'error' });
       }, 6000);
     }
+    /* «تحديث» must look EXACTLY like a normal download: the two buttons
+       (تحديث / إلغاء التثبيت) disappear and the one progress bar with the X
+       takes their place — immediately, on the tap, before anything async. */
+    function beginUpdateUi() {
+      removeInstalledActions();
+      btn.classList.remove('installed', 'has-update');
+      setCancelVisible(true);
+      btn.classList.add('installing');
+      btn.classList.remove('indeterminate');
+      btn.disabled = true;
+      fill.style.transition = 'none';
+      fill.style.width = '0%';
+      label.textContent = `${t('جارٍ التنزيل…')} 0%`;
+      // Count from the tap, so the number keeps moving while the ad is open.
+      startCreep(0);
+    }
+    /* The APK is already on the phone (or just finished): keep the SAME bar at
+       100% and ask the bridge to INSTALL it over the installed copy. */
+    function installWithBar(a, file) {
+      const fn = String(file || '');
+      markInstallPrompt(a.slug, fn);
+      S.setApkState(a.slug, {
+        slug: a.slug, status: 'installing', progress: 1, filename: fn,
+        updated_at: Math.floor(Date.now() / 1000),
+      });
+      beginUpdateUi();
+      setProgress(1);
+      const used = launchInstaller(a, fn);
+      if (!used) {
+        clearInstallPrompt(a.slug);
+        restoreReadyToInstall(fn, { toast: t('تعذّر فتح الملف'), kind: 'error' });
+        return;
+      }
+      armInstallWatchdog(a, fn);
+      toast(t('جارٍ فتح مثبّت النظام…'), 'info');
+    }
     function openDownloadedApk(a, filename) {
       if (isNativeApp() && window.GSAndroid) {
         try {
@@ -1304,9 +1342,7 @@
         // Older build on the device: the user must get BOTH actions —
         // «تحديث التطبيق» (installs the new APK) and «إلغاء التثبيت».
         // Leaving only the uninstall button stranded the update.
-        // EXACTLY the same action and the same code path as the download
-        // button — only the label differs, as requested.
-        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { runInstall(); } },
+        bar.append(el('button', { class: 'btn btn-primary btn-lg gs-action-update', type: 'button', onclick: () => { updateIntent = true; runInstall({ update: true }); } },
           ico('refresh', 'icon'), t('تحديث')));
       }
       bar.append(el('button', { class: 'btn btn-secondary btn-lg gs-action-uninstall', type: 'button', onclick: () => uninstallInstalled(a) },
@@ -1469,6 +1505,8 @@
       if (status === 'downloaded') {
         stopCreep();
         if (isDeadFilename(message || filename)) { handleMissingFile(); return; }
+        const autoInstall = updateIntent;
+        updateIntent = false;
         fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         setCancelVisible(false);
@@ -1479,9 +1517,18 @@
         label.textContent = t('جاهز للتثبيت');
         S.removeActiveDownload(app.slug);
         S.addToDownloadHistory(app);
-        // Same end state for a download and for an update: the single
-        // «تثبيت / حذف الملف» bar under the stats.
-        showDownloadedActions(app, message || filename);
+        // No Install/Delete flicker during a direct update: the progress bar
+        // stays and the installer opens on top of it.
+        if (!autoInstall) showDownloadedActions(app, message || filename);
+        if (autoInstall) {
+          // Direct update: the APK is ready, so open the system installer
+          // ourselves (INSTALL over the old version) instead of waiting for a
+          // second tap. The bridge reports the real saved filename in
+          // `message`, so always prefer it over the name we requested.
+          const file = (message && /\.apk$/i.test(message)) ? message
+            : (message || (S.getApkState(app.slug) || {}).filename || filename);
+          setTimeout(() => { try { installWithBar(app, file); } catch (e) {} }, 250);
+        }
         return;
       }
       if (status === 'installing') {
@@ -1497,7 +1544,8 @@
       }
       if (status === 'installed') {
         stopCreep();
-          fileMissingRetries = 0;
+        updateIntent = false;
+        fileMissingRetries = 0;
         if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
         markInstalledStored(app.slug);
         S.removeActiveDownload(app.slug);
@@ -1520,14 +1568,16 @@
         }
         const alreadyNotified = cancelRequested;
         cancelRequested = false;
-          S.removeActiveDownload(app.slug);
+        updateIntent = false;
+        S.removeActiveDownload(app.slug);
         removeInstalledActions();
         showIdle();
         if (!alreadyNotified) toast(t('تم إلغاء التنزيل'), 'info');
         return;
       }
       if (status === 'uninstalled') {
-          fileMissingRetries = 0;
+        updateIntent = false;
+        fileMissingRetries = 0;
         unmarkInstalledStored(app.slug);
         S.removeApkState(app.slug);
         S.removeActiveDownload(app.slug);
@@ -1552,7 +1602,8 @@
           return;
         }
         clearInstallPrompt(app.slug);
-          const isInstalled = (S.installedVersionOnDevice && S.installedVersionOnDevice(realPackage(app))) || (S.isSlugInstalled && S.isSlugInstalled(app.slug));
+        updateIntent = false;
+        const isInstalled = (S.installedVersionOnDevice && S.installedVersionOnDevice(realPackage(app))) || (S.isSlugInstalled && S.isSlugInstalled(app.slug));
         if (isInstalled) {
           return;
         }
@@ -1593,25 +1644,27 @@
       return base.replace(/\.apk$/i, '') + suffix;
     }
 
-    /* The ad was removed from this flow: nothing may open a window or steal
-       the focus before the progress bar is on screen and the transfer starts. */
+    /* The ad was removed from this flow: nothing may open a window or steal the
+       focus before the progress bar is on screen and the transfer starts. */
     async function runInstall(opts) {
       const fresh = !!(opts && opts.fresh);
+      const update = !!(opts && opts.update);
+      if (update) updateIntent = true;
       // Re-entrancy guard: ONE launch at a time, released in `finally` and by a
       // safety timer, so the button can never stay dead.
       if (launchInFlight) return;
       const stamp = Date.now();
       if (stamp - lastLaunchAt < 250) return;   // ignore click+touch double-fire
       lastLaunchAt = stamp;
-      // 1) PAINT + COMMIT the bar first: no window may open before this, and a
-      //    forced synchronous layout makes the 0% bar visible in this frame.
+      // 1) PAINT + COMMIT the bar first: nothing may open a window before this,
+      //    and a forced synchronous layout makes the 0% bar visible in-frame.
       paintLaunchUi();
       forceReflow();
       // The ad was removed at the owner's request: nothing may delay the bar.
       launchInFlight = true;
       const releaseLaunch = setTimeout(() => { launchInFlight = false; }, 4000);
       try {
-        return await runInstallLaunch({ fresh });
+        return await runInstallLaunch({ fresh, update });
       } finally {
         clearTimeout(releaseLaunch);
         launchInFlight = false;
@@ -1620,7 +1673,12 @@
 
     /* One place that decides what the bar looks like the moment of the tap. */
     function paintLaunchUi() {
-      if (btn.classList.contains('installed') && !btn.classList.contains('has-update')) return;
+      if (updateIntent || btn.classList.contains('has-update')) {
+        updateIntent = true;
+        beginUpdateUi();
+        return;
+      }
+      if (btn.classList.contains('installed')) return;
       removeInstalledActions();
       btn.classList.remove('installed', 'has-update');
       setCancelVisible(true);
@@ -1646,8 +1704,8 @@
       if (S.canStartConcurrentDownload && !S.canStartConcurrentDownload()) return;
       // Idempotent: the UI was already painted before the ad opened.
       paintLaunchUi();
-      // The native bridge is called in THIS task (right after the tap and the
-      // ad), so the APK really starts downloading while the ad is on screen.
+      // The native bridge is called in THIS task (right after the tap), so the
+      // APK really starts downloading immediately.
       // Only the web path needs a frame to paint before it starts fetching.
       if (!isNativeApp()) await new Promise((r) => nextFrame(r));
       if (!autoRestartInProgress) fileMissingRetries = 0;
@@ -1659,7 +1717,8 @@
       // starts downloading, otherwise a stale native snapshot slips back in.
       if (!fresh && S.clearDeletedApk) S.clearDeletedApk(app.slug);
 
-      if (btn.classList.contains('installed') && !btn.classList.contains('has-update')
+      if (btn.classList.contains('has-update')) updateIntent = true;
+      if (btn.classList.contains('installed') && !updateIntent
           && !(S.appHasUpdate && S.appHasUpdate(app))) { openInstalled(app); return; }
 
       const liveState = S.getApkState(app.slug);
@@ -1672,11 +1731,27 @@
         S.removeApkState(app.slug);
         S.removeActiveDownload(app.slug);
         showIdle();
+        if (updateIntent) beginUpdateUi();
       } else if (isNativeApp() && liveState && liveState.status === 'downloaded' && liveFile) {
-        // Same for both buttons: an APK that is already on the phone is opened
-        // in the system installer instead of being downloaded twice.
-        openDownloadedApk(app, liveFile);
-        return;
+        // A file finished SECONDS ago (the user declined the installer) is
+        // reused. Anything older is a leftover from a previous session: the
+        // owner expects «تحديث» to download again and count, so it is dropped.
+        const age = Math.floor(Date.now() / 1000) - Number(liveState.updated_at || 0);
+        const freshEnough = age >= 0 && age < 120;
+        if (updateIntent && !freshEnough) {
+          purgeNativeApk(liveFile, app.slug);
+          S.removeApkState(app.slug);
+          S.removeActiveDownload(app.slug);
+          beginUpdateUi();
+        } else if (updateIntent) {
+          installWithBar(app, liveFile);
+          return;
+        } else {
+          openDownloadedApk(app, liveFile);
+          return;
+        }
+      } else if (isNativeApp() && liveState && liveState.status === 'installing' && liveFile) {
+        if (updateIntent) { installWithBar(app, liveFile); return; }
       }
 
       if (!isNativeApp() && !S.isLoggedIn()) {
@@ -1688,10 +1763,11 @@
         // cancel any other in-flight download (unlimited concurrency).
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
         const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
+        if (updateIntent) beginUpdateUi();
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
-        if (!creepTimer) startCreep(displayedProgress);
+        setIndeterminate();
         S.setActiveDownload({
           slug: app.slug,
           name: app.name,

@@ -1280,7 +1280,36 @@
     function removeUpdateBar(reason) {
       if (updateBarEl) ulog(`bar-X (${reason || 'cleanup'})`);
       if (updateBarEl && updateBarEl.parentNode) updateBarEl.parentNode.removeChild(updateBarEl);
+      const ov = document.getElementById('gs-upd-overlay');
+      if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+      if (updateGuardTimer) { clearInterval(updateGuardTimer); updateGuardTimer = null; }
       updateBarEl = null; updateFillEl = null; updateLabelEl = null;
+    }
+    /* Some WebViews replace the whole page subtree while the update runs, which
+       silently deleted the bar. This guard re-attaches it (and the overlay) if
+       anything removes them. */
+    let updateGuardTimer = null;
+    function startUpdateGuard() {
+      if (updateGuardTimer) return;
+      updateGuardTimer = setInterval(() => {
+        if (!updateBarEl) { clearInterval(updateGuardTimer); updateGuardTimer = null; return; }
+        if (!document.body.contains(updateBarEl)) {
+          ulog('reattach bar');
+          try { document.body.appendChild(updateBarEl); } catch (e) {}
+        }
+        const ov = document.getElementById('gs-upd-overlay');
+        if (!ov) {
+          ulog('reattach overlay');
+          try { document.body.appendChild(makeOverlay()); } catch (e) {}
+        }
+      }, 500);
+    }
+    function makeOverlay() {
+      const ov = document.createElement('div');
+      ov.id = 'gs-upd-overlay';
+      ov.setAttribute('style', 'position:fixed;inset:0;z-index:2147482000;'
+        + 'background:rgba(6,6,10,.72);backdrop-filter:blur(2px)');
+      return ov;
     }
     function paintUpdateBar(pct, text) {
       if (!updateFillEl) return;
@@ -1363,7 +1392,7 @@
         + 'pointer-events:none;display:inline-flex;align-items:center;justify-content:center;flex:1 1 auto;'
         + 'padding:0 14px;font-variant-numeric:tabular-nums', `${t('جارٍ التنزيل…')} 0%`);
       const xBtn = mk('button', 'position:relative;z-index:9;pointer-events:auto;display:flex;align-items:center;'
-        + 'justify-content:center;width:58px;min-width:58px;height:48px;background:transparent;border:0;'
+        + 'justify-content:center;width:64px;min-width:64px;height:100%;background:transparent;border:0;'
         + 'border-inline-start:2px solid rgba(255,255,255,.28);color:#fff;font-size:0;cursor:pointer;'
         + 'border-radius:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation');
       xBtn.type = 'button';
@@ -1378,13 +1407,16 @@
       barEl.appendChild(labelEl);
       barEl.appendChild(xBtn);
 
-      const anchor = actionsWrap.parentNode;
-      if (anchor) anchor.insertBefore(barEl, actionsWrap.nextSibling);
-      else {
-        const det = document.querySelector('.detail') || document.body;
-        det.appendChild(barEl);
-      }
+      // Fixed, page-independent placement: nothing in the app can hide it and
+      // no re-render can remove it (see startUpdateGuard).
+      barEl.setAttribute('style', (barEl.getAttribute('style') || '')
+        .replace('position:relative', 'position:fixed')
+        + ';position:fixed;inset-inline:14px;bottom:calc(env(safe-area-inset-bottom, 0px) + 24px);'
+        + 'z-index:2147482100;height:54px;max-height:54px;box-shadow:0 10px 30px rgba(0,0,0,.55)');
+      document.body.appendChild(makeOverlay());
+      document.body.appendChild(barEl);
       updateBarEl = barEl; updateFillEl = fillEl; updateLabelEl = labelEl;
+      startUpdateGuard();
 
       xBtn.addEventListener('pointerup', onUpdateXTap);
       xBtn.addEventListener('touchend', onUpdateXTap, { passive: false });
@@ -1393,7 +1425,7 @@
       paintUpdateBar(0);
       startCreep(0);
       ulog('bar+ ok inDom=' + document.querySelectorAll('#gs-update-bar').length
-        + ' parent=' + (barEl.parentNode ? barEl.parentNode.className : 'null'));
+        + ' body=' + (barEl.parentNode === document.body ? 'yes' : 'no'));
     }
     function beginUpdateUi() { showUpdateBar(); }
     /* The APK is already on the phone (or just finished): keep the SAME bar at

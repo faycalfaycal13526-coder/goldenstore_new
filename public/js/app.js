@@ -1593,30 +1593,8 @@
       return base.replace(/\.apk$/i, '') + suffix;
     }
 
-    /* The ad must never sit in front of the download: it used to open
-       synchronously on every tap, which stole the focus, delayed the progress
-       bar and made the button feel dead. Now it is throttled, deferred, and
-       skipped completely for updates. */
-    const AD_URL = 'https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110';
-    let lastAdAt = 0;
-    /* Owner requirement: the ad opens FIRST, on every download/update tap.
-       It is opened synchronously (still inside the tap gesture, so popup
-       blockers allow it) and before anything else runs. Only a 2s guard
-       remains, to swallow the click+touch double-event. */
-    function openAdNow() {
-      const now = Date.now();
-      if (now - lastAdAt < 2000) return;
-      lastAdAt = now;
-      try { window.open(AD_URL, '_blank'); } catch (e) {}
-    }
-
-    function nextFrame(fn) {
-      try {
-        if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => fn());
-        else setTimeout(fn, 0);
-      } catch (e) { setTimeout(fn, 0); }
-    }
-
+    /* The ad was removed from this flow: nothing may open a window or steal
+       the focus before the progress bar is on screen and the transfer starts. */
     async function runInstall(opts) {
       const fresh = !!(opts && opts.fresh);
       // Re-entrancy guard: ONE launch at a time, released in `finally` and by a
@@ -1625,14 +1603,11 @@
       const stamp = Date.now();
       if (stamp - lastLaunchAt < 250) return;   // ignore click+touch double-fire
       lastLaunchAt = stamp;
-      // 1) PAINT + COMMIT the bar first. `window.open` hands the WebView to the
-      //    ad activity and can stall rendering, which is why the bar used to
-      //    appear late. Painting and forcing a synchronous layout flush makes
-      //    the 0% bar visible in the same frame, before the ad opens.
+      // 1) PAINT + COMMIT the bar first: no window may open before this, and a
+      //    forced synchronous layout makes the 0% bar visible in this frame.
       paintLaunchUi();
       forceReflow();
-      // 2) Then open the ad — still inside the tap gesture (popup blockers).
-      openAdNow();
+      // The ad was removed at the owner's request: nothing may delay the bar.
       launchInFlight = true;
       const releaseLaunch = setTimeout(() => { launchInFlight = false; }, 4000);
       try {

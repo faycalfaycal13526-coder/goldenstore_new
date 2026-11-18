@@ -30,6 +30,9 @@
     'التنزيلات الحالية': { en: 'Current downloads', fr: 'Téléchargements en cours', es: 'Descargas actuales' },
     'تم التنزيل': { en: 'Downloaded', fr: 'Téléchargés', es: 'Descargados' },
     'المثبة': { en: 'Installed', fr: 'Installées', es: 'Instaladas' },
+    'المثبة على الجهاز': { en: 'Installed on this device', fr: 'Installées sur cet appareil', es: 'Instaladas en este dispositivo' },
+    'سجل التحميلات': { en: 'Download history', fr: 'Historique des téléchargements', es: 'Historial de descargas' },
+    'جاهز للتثبيت': { en: 'Ready to install', fr: 'Prêt à installer', es: 'Listo para instalar' },
     'لم يتم تنزيل أي تطبيقات': { en: 'No apps have been downloaded', fr: 'Aucune application téléchargée', es: 'No se ha descargado ninguna aplicación' },
     'رجوع': { en: 'Back', fr: 'Retour', es: 'Atrás' },
     // in-app advertisement

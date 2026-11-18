@@ -167,19 +167,55 @@
       return row;
     }
 
-    // Re-evaluate one row against the device (install state changed live).
+    // Install state changed on the device: keep the local registry in sync and
+    // re-render the panel, so an app moves from «تم التنزيل» to «المثبة» (or
+    // leaves «المثبة» after an uninstall) instead of lingering in the wrong tab.
+    let refreshQueued = false;
     function refreshRow(slug) {
-      const item = getItems().find((h) => h.slug === slug);
-      if (!item || !panel.isConnected) return;
-      const rowEl = panel.querySelector('.lib-row[data-slug="' + CSS.escape(slug) + '"]');
-      if (!rowEl) return;
-      const act = rowEl.querySelector('.lib-action');
-      if (!act) return;
-      act.innerHTML = '';
-      act.append(buildAction(item));
+      const item = getItems().find((h) => h.slug === slug) || { slug };
+      if (!panel.isConnected) return;
       const st = deviceStateFor(item);
-      if (st.installed) S.markInstalledStored(item.slug);
-      else if (S.unmarkInstalledStored) S.unmarkInstalledStored(item.slug);
+      if (st.installed) S.markInstalledStored(slug);
+      else if (S.unmarkInstalledStored) S.unmarkInstalledStored(slug);
+      if (active === 'current') return;              // live panel re-renders itself
+      if (refreshQueued) return;
+      refreshQueued = true;
+      setTimeout(() => { refreshQueued = false; if (panel.isConnected) renderPanel(); }, 60);
+    }
+
+    /* ---- ONE consistent row for every tab: same avatar, name, meta line and
+       action button. Only the live bar (current tab) and the badge differ. ---- */
+    function historyOf(slug) { return getItems().find((h) => h.slug === slug) || {}; }
+
+    function libRowBase(opts) {
+      const it = opts.item || {};
+      const slug = it.slug || opts.slug || '';
+      const name = it.name || opts.name || slug;
+      const icon = it.icon_url || opts.icon_url || null;
+      const row = el('a', {
+        href: `/app?slug=${encodeURIComponent(slug)}`,
+        class: `lib-row${opts.className ? ' ' + opts.className : ''}`,
+        'data-slug': slug,
+      },
+        el('div', { class: 'art' },
+          icon ? el('img', { src: icon, alt: name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+        el('div', { class: 'lib-info' },
+          el('div', { class: 'nm' }, name),
+          el('div', { class: 'sub' }, it.developer || opts.developer || 'Golden Store'),
+          opts.metaNode || el('div', { class: 'meta' },
+            el('span', null, formatBytes(it.size_bytes || opts.size_bytes || 0)),
+            el('span', null, '•'),
+            el('span', null, formatDate(it.downloaded_at || opts.downloaded_at)),
+          ),
+        ),
+        opts.action ? el('div', { class: 'lib-action' }, opts.action) : null,
+        opts.trailing || null,
+      );
+      return row;
+    }
+
+    function statusChip(text, kind) {
+      return el('span', { class: `dlm-chip dlm-chip-${kind}` }, text);
     }
 
     function renderCurrentPanel() {
@@ -193,43 +229,122 @@
         host.style.display = count ? '' : 'none';
       };
       sync(0);
-      teardown = mountLiveDownloads(host, { onChange: sync });
+      teardown = mountLiveDownloads(host, { onChange: sync, statuses: ['downloading', 'installing'] });
       sync();
     }
 
+    /* «تم التنزيل» = the APK is on the phone and NOT installed yet:
+       exactly the finished / ready-to-install entries. */
     function renderDownloadedPanel() {
       panel.innerHTML = '';
-      const items = getItems().filter((it) => {
-        const dev = deviceStateFor(it);
-        if (dev.installed) return true;
-        const st = S.getApkState ? S.getApkState(it.slug) : null;
-        return !!(st && (st.status === 'downloaded' || st.status === 'installed'));
-      });
-      if (!items.length) { panel.append(dlEmpty()); return; }
+      const map = S.getApkStateMap ? S.getApkStateMap() : {};
+      const ready = Object.values(map).filter((st) => st && st.slug && st.status === 'downloaded');
+      if (!ready.length) { panel.append(dlEmpty()); return; }
       const list = el('div', { class: 'lib-list dlm-list' });
-      items.forEach((it) => list.append(libraryRow(it)));
+      ready.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0)).forEach((st) => {
+        const it = historyOf(st.slug);
+        const file = st.filename || '';
+        list.append(libRowBase({
+          item: it, slug: st.slug, name: it.name || st.slug, icon_url: it.icon_url,
+          metaNode: el('div', { class: 'meta' },
+            el('span', null, it.size_bytes ? formatBytes(it.size_bytes) : ''),
+            statusChip(t('جاهز للتثبيت'), 'ready')),
+          action: el('button', {
+            class: 'btn btn-primary btn-sm', type: 'button',
+            onclick: (e) => {
+              e.preventDefault(); e.stopPropagation();
+              if (window.GSAndroid && typeof window.GSAndroid.openDownloadedApk === 'function') {
+                window.GSAndroid.openDownloadedApk(file, st.slug, st.package_name || it.package_name || '');
+                toast(t('جارٍ فتح مثبّت النظام…'), 'info');
+              } else {
+                location.href = `/app?slug=${encodeURIComponent(st.slug)}`;
+              }
+            },
+          }, ico('download', 'icon icon-sm'), t('تثبيت')),
+        }));
+      });
       panel.append(list);
       libListRef = list;
     }
 
-    function renderLibraryPanel() {
+    /* «المثبة» = what is REALLY installed on the device, plus a «سجل التحميلات»
+       section for apps that were downloaded but are not installed anymore.
+       Never the raw history dump that used to mix the two. */
+    async function renderLibraryPanel() {
       panel.innerHTML = '';
-      const items = getItems();
-      if (!items.length) { panel.append(dlEmpty()); return; }
-      const list = el('div', { class: 'lib-list dlm-list' });
-      items.forEach((it) => list.append(libraryRow(it)));
-      panel.append(list, el('div', { class: 'dlm-clear' },
-        el('button', {
-          class: 'btn btn-sm btn-secondary', type: 'button',
-          onclick: () => {
-            if (!confirm(t('حذف سجل التحميلات بالكامل؟'))) return;
-            S.clearDownloadHistory();
-            toast(t('تم مسح السجل'), 'success');
-            renderPanel();
-          },
-        }, ico('trash', 'icon icon-sm'), t('مسح السجل')),
-      ));
-      libListRef = list;
+      panel.append(el('div', { class: 'dlm-loading' }, el('div', { class: 'spinner' })));
+      const hist = getItems();
+      const historyBySlug = {};
+      hist.forEach((h) => { if (h && h.slug) historyBySlug[h.slug] = h; });
+
+      // 1) Ask the API for the whole catalog (paginated) so an app installed
+      //    from the Play Store — never downloaded here — is still listed.
+      let catalog = [];
+      try {
+        for (let offset = 0; offset < 600; offset += 60) {
+          const res = await S.api(`/api/apps?limit=60&offset=${offset}`);
+          const batch = (res && res.apps) || [];
+          catalog = catalog.concat(batch);
+          if (batch.length < 60) break;
+        }
+      } catch (e) { catalog = []; }
+
+      const bySlug = {};
+      catalog.forEach((a) => { if (a && a.slug) bySlug[a.slug] = a; });
+      // Merge: catalog metadata wins, history fills the gaps.
+      const merged = Object.keys(bySlug).map((slug) => ({ ...historyBySlug[slug], ...bySlug[slug] }));
+      Object.keys(historyBySlug).forEach((slug) => {
+        if (!bySlug[slug]) merged.push(historyBySlug[slug]);
+      });
+
+      const installed = [];
+      const notInstalled = [];
+      merged.forEach((app) => {
+        const st = deviceStateFor(app);
+        if (st.installed) installed.push(app);
+        else notInstalled.push(app);
+      });
+      // Keep the order stable and readable: installed first, newest first.
+      installed.sort((a, b) => (b.downloaded_at || 0) - (a.downloaded_at || 0));
+
+      if (!panel.isConnected) return;
+      panel.innerHTML = '';
+
+      if (!installed.length && !notInstalled.length) { panel.append(dlEmpty()); return; }
+
+      if (installed.length) {
+        panel.append(el('div', { class: 'dlm-sec' },
+          ico('check', 'icon icon-sm'),
+          el('span', null, t('المثبة على الجهاز')),
+          el('span', { class: 'dlm-sec-count' }, String(installed.length))));
+        const list = el('div', { class: 'lib-list dlm-list' });
+        installed.forEach((it) => list.append(libraryRow(it)));
+        panel.append(list);
+        libListRef = list;
+      }
+
+      const rest = notInstalled.filter((it) => historyBySlug[it.slug]);
+      if (rest.length) {
+        panel.append(el('div', { class: 'dlm-sec' },
+          ico('clock', 'icon icon-sm'),
+          el('span', null, t('سجل التحميلات')),
+          el('span', { class: 'dlm-sec-count' }, String(rest.length))));
+        const list2 = el('div', { class: 'lib-list dlm-list' });
+        rest.forEach((it) => list2.append(libraryRow(it)));
+        panel.append(list2);
+        panel.append(el('div', { class: 'dlm-clear' },
+          el('button', {
+            class: 'btn btn-sm btn-secondary', type: 'button',
+            onclick: () => {
+              if (!confirm(t('حذف سجل التحميلات بالكامل؟'))) return;
+              S.clearDownloadHistory();
+              toast(t('تم مسح السجل'), 'success');
+              renderPanel();
+            },
+          }, ico('trash', 'icon icon-sm'), t('مسح السجل'))));
+      }
+
+      if (!installed.length && !rest.length) panel.append(dlEmpty());
     }
 
     function renderPanel() {
@@ -289,7 +404,12 @@
     function paint() {
       paintQueued = false;
       const map = S.getApkStateMap ? S.getApkStateMap() : {};
-      let entries = Object.values(map).filter((st) => st && st.slug);
+      // Only the statuses this panel owns: «التنزيلات الحالية» owns in-flight and
+      // installing entries, «تم التنزيل» owns the finished-but-not-installed ones.
+      // Without this split the same app appeared in two tabs — the «mixed» feel.
+      const only = Array.isArray(o.statuses) ? o.statuses : null;
+      let entries = Object.values(map).filter((st) => st && st.slug
+        && (!only || only.indexOf(st.status) !== -1 || (only.indexOf('installing') !== -1 && st.status === 'installing')));
       section.innerHTML = '';
       if (!entries.length) { if (o.onChange) o.onChange(0); return; }
 

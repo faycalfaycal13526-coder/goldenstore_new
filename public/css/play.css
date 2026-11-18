@@ -815,14 +815,14 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   transition: color .15s;
 }
 html[data-theme="light"] .dlm-tab { color: #555; }
-.dlm-tab.active { color: #0a6b3c; }
+.dlm-tab.active { color: var(--gold); }
 .dlm-tab .dlm-tab-in { position: relative; display: inline-block; }
 .dlm-tab.active .dlm-tab-in::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: -18px;
-  height: 3px; border-radius: 0; background: #0a6b3c;
+  height: 3px; border-radius: 0; background: var(--gold);
 }
-html[data-theme="dark"] .dlm-tab.active { color: #34c47a; }
-html[data-theme="dark"] .dlm-tab.active .dlm-tab-in::after { background: #34c47a; }
+html[data-theme="dark"] .dlm-tab.active { color: var(--gold); }
+html[data-theme="dark"] .dlm-tab.active .dlm-tab-in::after { background: var(--gold); }
 .dlm-loading { display: flex; justify-content: center; padding: 56px 0; }
 .dlm-sec {
   display: flex; align-items: center; gap: 8px;

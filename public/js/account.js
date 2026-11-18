@@ -92,12 +92,12 @@
           paintTabs();
           renderPanel();
         },
-      }, t(tb.label))));
+      }, el('span', { class: 'dlm-tab-in' }, t(tb.label)))));
     }
 
     function dlEmpty() {
       return el('div', { class: 'dlm-empty' },
-        el('div', { class: 'dlm-empty-ico' }, ico('downloadBold', 'icon')),
+        el('div', { class: 'dlm-empty-ico' }, ico('downloadThick', 'icon')),
         el('p', { class: 'dlm-empty-txt' }, t(DLM_EMPTY)),
       );
     }

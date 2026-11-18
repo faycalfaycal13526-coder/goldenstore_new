@@ -706,7 +706,8 @@ function topbarNav(title = '', actions = []) {
 const NAV_ITEMS_RAW = [
   { key: 'games', label: 'الألعاب', icon: 'gamepad', href: '/' },
   { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/apps' },
-  { key: 'library', label: 'مكتبتي', icon: 'download', href: '/account?tab=library' },
+  // Owner request: the bottom «مكتبتي» button now opens this external site.
+  { key: 'library', label: 'مكتبتي', icon: 'download', href: 'https://fiha1.blogspot.com/?m=1', external: true },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];
 /* ---------------- Legal pages, footer & sign-in consent ------------------ */
@@ -797,7 +798,12 @@ function bottomNav(active) {
         } else {
           iconNode = el('span', { class: 'pill-ico' }, ico(it.icon, 'icon'));
         }
-        return el('a', { href: it.href, class: `navitem ${it.key === active ? 'active' : ''}` },
+        return el('a', {
+          href: it.href,
+          class: `navitem ${it.key === active ? 'active' : ''}`,
+          rel: it.external ? 'noopener noreferrer' : null,
+          'data-external': it.external ? '1' : null,
+        },
           iconNode,
           el('span', { class: 'nav-label' }, t(it.label)),
         );

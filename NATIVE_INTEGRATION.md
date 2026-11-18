@@ -160,6 +160,25 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
 ---
 
+### External links (e.g. the bottom «مكتبتي» button)
+
+The bottom bar item «مكتبتي» now opens `https://fiha1.blogspot.com/?m=1`.
+In the APK build this must load **inside the same WebView** (no external
+browser, no Custom Tab) so the bottom bar stays available:
+
+```java
+// keep everything inside the app
+webView.getSettings().setSupportMultipleWindows(false);
+webView.setWebViewClient(new WebViewClient() {
+  @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+    return false;                     // load in THIS WebView
+  }
+});
+```
+
+Add `fiha1.blogspot.com` to the SSL/domain exceptions only if you enable
+`shouldInterceptRequest` caching; no other change is required.
+
 ### In-app advertisement (must never leave the WebView)
 
 The download/update flow now shows the ad **inside the app**: `app.js` builds

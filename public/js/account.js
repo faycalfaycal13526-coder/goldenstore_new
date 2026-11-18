@@ -11,9 +11,9 @@
   // Download-manager tabs («تحميل إدارة») — declared before S.ready(), which can
   // run synchronously for a cached user.
   const DLM_TABS = [
-    { key: 'current', label: 'التنبيهات الحالية' },
+    { key: 'current', label: 'التنزيلات الحالية' },
     { key: 'downloaded', label: 'تم التنزيل' },
-    { key: 'library', label: 'المكتبة' },
+    { key: 'library', label: 'المثبة' },
   ];
   const DLM_EMPTY = 'لم يتم تنزيل أي تطبيقات';
 
@@ -51,7 +51,7 @@
   // --- «تحميل إدارة» — the download manager (bottom nav «مكتبتي») ---
   // Layout copied from the owner's screenshot: one row with the back arrow,
   // the title «تحميل إدارة» and a search icon; then three tabs
-  // (التنبيهات الحالية / تم التنزيل / المكتبة) with a green underline on the
+  // (التنزيلات الحالية / تم التنزيل / المثبة) with a green underline on the
   // active one; then the list — or, when there is nothing, the big download
   // glyph with «لم يتم تنزيل أي تطبيقات».
 

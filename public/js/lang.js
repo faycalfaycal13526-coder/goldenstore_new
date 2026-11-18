@@ -27,9 +27,9 @@
   var O = {
     // download manager («تحميل إدارة»)
     'تحميل إدارة': { en: 'Download manager', fr: 'Gestionnaire de téléchargements', es: 'Gestor de descargas' },
-    'التنبيهات الحالية': { en: 'Active downloads', fr: 'Téléchargements en cours', es: 'Descargas activas' },
+    'التنزيلات الحالية': { en: 'Current downloads', fr: 'Téléchargements en cours', es: 'Descargas actuales' },
     'تم التنزيل': { en: 'Downloaded', fr: 'Téléchargés', es: 'Descargados' },
-    'المكتبة': { en: 'Library', fr: 'Bibliothèque', es: 'Biblioteca' },
+    'المثبة': { en: 'Installed', fr: 'Installées', es: 'Instaladas' },
     'لم يتم تنزيل أي تطبيقات': { en: 'No apps have been downloaded', fr: 'Aucune application téléchargée', es: 'No se ha descargado ninguna aplicación' },
     'رجوع': { en: 'Back', fr: 'Retour', es: 'Atrás' },
     // in-app advertisement

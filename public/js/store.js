@@ -164,19 +164,7 @@ function el(tag, attrs = null, ...children) {
   return node;
 }
 
-function ico(name, extra = 'icon') {
-  if (name === 'blogLogo') {
-    const img = document.createElement('img');
-    img.src = window.GSIcons.BLOG_LOGO || '';
-    img.alt = '';
-    img.setAttribute('class', extra || 'icon');
-    img.setAttribute('loading', 'lazy');
-    img.setAttribute('decoding', 'async');
-    try { img.style.objectFit = 'contain'; } catch (e) {}
-    return img;
-  }
-  return window.GSIcons.iconEl(name, extra);
-}
+function ico(name, extra = 'icon') { return window.GSIcons.iconEl(name, extra); }
 function t(s) { try { return window.GSI18N.t(s); } catch { return s; } }
 
 /* --------------------------- Formatters --------------------------- */
@@ -718,9 +706,9 @@ function topbarNav(title = '', actions = []) {
 const NAV_ITEMS_RAW = [
   { key: 'games', label: 'الألعاب', icon: 'gamepad', href: '/' },
   { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/apps' },
-  // Owner request: this button is the blog itself — a NORMAL page inside the app,
-  // with the blog's own logo as its icon.
-  { key: 'library', label: 'مكتبتي', icon: 'blogLogo', href: '/articles' },
+  // Owner request: this button opens the blog, INSIDE the app, with a normal
+  // newspaper icon.
+  { key: 'library', label: 'مكتبتي', icon: 'newspaper', href: '/articles' },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];
 /* ---------------- Legal pages, footer & sign-in consent ------------------ */

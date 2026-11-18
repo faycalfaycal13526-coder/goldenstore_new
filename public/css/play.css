@@ -862,65 +862,33 @@ html[data-theme="light"] .dlm-empty-ico .icon { color: #000; }
 /* The blog logo used as a bottom-nav icon */
 .navitem .pill-ico img.icon { width: 26px; height: 26px; object-fit: contain; }
 
-/* ---------- «المقالات» — the blog as an in-app page ---------- */
-.art-page { padding: 0 0 24px; }
-.art-top {
-  display: flex; align-items: center; gap: 6px;
-  padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px 8px;
+/* ---------- «مكتبتي» = the blog embedded inside the app ---------- */
+.blog-page {
+  position: relative;
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--nav-h) - env(safe-area-inset-bottom, 0px));
+  height: calc(100dvh - var(--nav-h) - env(safe-area-inset-bottom, 0px));
 }
-.art-back, .art-refresh {
-  width: 42px; height: 42px; min-width: 42px; flex: 0 0 auto;
+.blog-frame {
+  flex: 1 1 auto; width: 100%; height: 100%;
+  border: 0; background: var(--surface);
+  opacity: 0; transition: opacity .18s ease;
+}
+.blog-frame.is-ready { opacity: 1; }
+.blog-loading {
+  position: absolute; inset-inline: 0; top: 0; bottom: 0;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; border: 0; border-radius: 50%;
-  color: var(--text); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  pointer-events: none;
 }
-.art-back:active, .art-refresh:active { background: var(--surface-2); }
-.art-back .icon, .art-refresh .icon { width: 24px; height: 24px; }
-.art-brand { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; }
-.art-logo { width: 34px; height: 34px; object-fit: contain; }
-.art-brand-txt { font-size: 20px; font-weight: 700; color: var(--text); }
-.art-body { padding: 0 0 8px; }
-
-.art-list { display: flex; flex-direction: column; gap: 14px; padding: 6px 14px 0; }
-.art-card {
-  display: block; background: var(--surface); border: 1px solid var(--line);
-  border-radius: 16px; overflow: hidden; color: var(--text);
-  transition: transform .12s;
+.blog-fail {
+  position: absolute; inset-inline: 24px; top: 30%;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  text-align: center; color: var(--text-2);
 }
-.art-card:active { transform: scale(.99); }
-.art-thumb { width: 100%; padding-top: 56.25%; position: relative; background: var(--surface-2); overflow: hidden; }
-.art-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.art-card-body { padding: 12px 14px 14px; }
-.art-card-title { font-size: 16px; font-weight: 700; line-height: 1.4; margin: 0 0 6px; }
-.art-card-excerpt { font-size: 13.5px; line-height: 1.6; color: var(--text-2); margin: 0 0 8px; }
-.art-card-meta { font-size: 12px; color: var(--text-3); }
+.blog-fail p { font-size: 15px; margin: 0; }
 
-.art-skel { display: flex; gap: 12px; padding: 0 0 14px; }
-.art-skel-img { width: 96px; height: 72px; border-radius: 12px; background: var(--surface-2); animation: shimmer 1.3s infinite;
-  background-image: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
-  background-size: 400% 100%; flex: 0 0 auto; }
-.art-skel-lines { flex: 1; display: flex; flex-direction: column; gap: 8px; padding-top: 6px; }
-.art-skel-lines span { height: 12px; border-radius: 6px; background: var(--surface-2);
-  background-image: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
-  background-size: 400% 100%; animation: shimmer 1.3s infinite; }
-.art-skel-lines span:last-child { width: 60%; }
-
-.art-post { padding: 4px 16px 0; }
-.art-post-title { font-size: 22px; font-weight: 800; line-height: 1.35; margin: 4px 0 6px; color: var(--text); }
-.art-post-meta { font-size: 12.5px; color: var(--text-3); margin-bottom: 12px; }
-.art-hero { margin: 0 0 14px; border-radius: 14px; overflow: hidden; background: var(--surface-2); }
-.art-hero img { width: 100%; height: auto; display: block; }
-.art-content { font-size: 15.5px; line-height: 1.9; color: var(--text); word-break: break-word; }
-.art-content img { border-radius: 12px; margin: 10px 0; }
-.art-content a { color: var(--nav); text-decoration: underline; }
-.art-content p { margin: 0 0 12px; }
-.art-content h2, .art-content h3 { font-size: 18px; margin: 18px 0 8px; }
-.art-content ul, .art-content ol { padding-inline-start: 22px; margin: 0 0 12px; }
-.art-post-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 22px 0 6px; }
-
-.art-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 70px 24px; text-align: center; }
-.art-empty-logo { width: 54px; height: 54px; border-radius: 12px; }
-.art-empty p { color: var(--text-2); font-size: 15px; margin: 0; }
+/* The blog logo used as a bottom-nav icon */
+.navitem .pill-ico img.icon { width: 26px; height: 26px; object-fit: contain; }
 
 /* ---------- States ---------- */
 .center { display: flex; align-items: center; justify-content: center; padding: 60px 24px; }

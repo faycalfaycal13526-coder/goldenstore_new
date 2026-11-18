@@ -16,7 +16,7 @@ const ICONS = {
   // Filled Material-style download glyph (legacy, kept for other screens).
   downloadBold: '<path d="M19 9h-4V3H9v6H5l7 7 7-7z" fill="currentColor" stroke="none"/><path d="M5 17v3h14v-3H5z" fill="currentColor" stroke="none"/>',
   // Thick OUTLINE «download into a tray» — traced from the owner's reference screen.
-  downloadThick: '<path d="M12 2.6v9.2" stroke-width="3.7" stroke-linecap="round"/><path d="m7.4 8.6 4.6 4.6 4.6-4.6" stroke-width="3.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.4 14.6v3.6c0 1 .8 1.8 1.8 1.8h11.6c1 0 1.8-.8 1.8-1.8v-3.6" stroke-width="3.7" stroke-linecap="round" stroke-linejoin="round"/>',
+  downloadThick: '<path d="M12 2.6v9.2" stroke-width="2.6" stroke-linecap="round"/><path d="m7.4 8.6 4.6 4.6 4.6-4.6" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.4 14.6v3.6c0 1 .8 1.8 1.8 1.8h11.6c1 0 1.8-.8 1.8-1.8v-3.6" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
   upload:      '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
   plus:        '<path d="M12 5v14M5 12h14"/>',
   minus:       '<path d="M5 12h14"/>',

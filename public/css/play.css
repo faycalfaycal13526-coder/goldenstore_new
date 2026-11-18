@@ -783,39 +783,34 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .navitem.active .icon { color: var(--nav); }
 
 /* ---------- Download manager «تحميل إدارة» (bottom nav «مكتبتي») ---------- */
-/* Measured from the owner's reference screenshot (597×1337 CSS px):
-   header ~72px tall with 30px icons and a 30px black title; three 20px tabs
-   underlined in dark green with NO full-width divider; empty state = 80px
-   thick outline download glyph + 20px grey text. */
+/* Same skin as the owner's reference, sized for a real phone: fixed mobile
+   values (no viewport scaling) so it never becomes «too big» on a narrow
+   screen nor tiny on a wide one. */
 .dlm { padding: 0; }
 .dlm-top {
-  display: flex; align-items: center; gap: 8px;
-  padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 20px;
-  min-height: 62px;
+  display: flex; align-items: center; gap: 4px;
+  padding: calc(env(safe-area-inset-top, 0px) + 6px) 10px 14px;
+  min-height: 56px;
 }
 .dlm-back, .dlm-search {
-  width: 48px; height: 48px; min-width: 48px; flex: 0 0 auto;
+  width: 42px; height: 42px; min-width: 42px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   background: transparent; border: 0; border-radius: 50%;
   color: var(--text); cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 .dlm-back:active, .dlm-search:active { background: var(--surface-2); }
-.dlm-back .icon, .dlm-search .icon { width: 30px; height: 30px; stroke-width: 2.2; }
+.dlm-back .icon, .dlm-search .icon { width: 25px; height: 25px; }
 .dlm-title {
-  flex: 1 1 auto; margin: 0; font-size: 33px; font-weight: 700;
-  line-height: 1.2; color: var(--text); text-align: start;
-  letter-spacing: -0.4px;
+  flex: 1 1 auto; margin: 0; font-size: 21px; font-weight: 700;
+  line-height: 1.25; color: var(--text); text-align: start;
+  letter-spacing: -0.2px;
 }
-.dlm-tabs {
-  display: flex; align-items: stretch;
-  padding: 0 2px; margin-top: 2px;
-  border-bottom: 0;                    /* the reference has no full-width rule */
-}
+.dlm-tabs { display: flex; align-items: stretch; padding: 0 2px; border-bottom: 0; }
 .dlm-tab {
   flex: 1 1 0; position: relative;
   background: transparent; border: 0; cursor: pointer;
-  padding: 22px 4px 26px; font-family: inherit;
-  font-size: 22px; font-weight: 600; color: var(--text-2);
+  padding: 12px 4px 16px; font-family: inherit;
+  font-size: 15px; font-weight: 600; color: var(--text-2);
   -webkit-tap-highlight-color: transparent; white-space: nowrap;
   transition: color .15s;
 }
@@ -823,7 +818,7 @@ html[data-theme="light"] .dlm-tab { color: #555; }
 .dlm-tab.active { color: #0a6b3c; }
 .dlm-tab .dlm-tab-in { position: relative; display: inline-block; }
 .dlm-tab.active .dlm-tab-in::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: -34px;
+  content: ''; position: absolute; left: 0; right: 0; bottom: -18px;
   height: 3px; border-radius: 0; background: #0a6b3c;
 }
 html[data-theme="dark"] .dlm-tab.active { color: #34c47a; }
@@ -832,19 +827,18 @@ html[data-theme="dark"] .dlm-tab.active .dlm-tab-in::after { background: #34c47a
 .dlm-list { padding: 0 16px; }
 .dlm-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-  padding: 140px 24px 24px; text-align: center;
+  padding: 64px 24px 24px; text-align: center;
 }
 .dlm-empty-ico { display: flex; align-items: center; justify-content: center; }
-.dlm-empty-ico .icon { width: 62px; height: 62px; color: var(--text); }
+.dlm-empty-ico .icon { width: 45px; height: 45px; color: var(--text); }
 html[data-theme="light"] .dlm-empty-ico .icon { color: #000; }
 .dlm-empty-txt {
-  margin: 22px 0 0; font-size: 22px; font-weight: 400;
+  margin: 16px 0 0; font-size: 15px; font-weight: 400;
   color: #757575; line-height: 1.45;
 }
-@media (max-width: 360px) {
-  .dlm-tab { font-size: 20px; }
-  .dlm-title { font-size: 29px; }
-  .dlm-empty-ico .icon { width: 50px; height: 50px; }
+@media (max-width: 340px) {
+  .dlm-tab { font-size: 13.5px; }
+  .dlm-title { font-size: 19px; }
 }
 
 /* ---------- States ---------- */

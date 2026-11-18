@@ -102,16 +102,78 @@
       );
     }
 
-    // Device truth for one library item — full fallback chain (v1.9):
-    // metadata package → native slug registry → resolved package learned
-    // from real installs. Returns { installed, pkg }.
+    /* Device truth for one library item — full fallback chain (v1.9):
+       metadata package → native slug registry → resolved package learned from
+       real installs.
+       SPEED: every call costs a synchronous round-trip into the Android bridge,
+       which is what made «مكتبتي» feel heavy. Results are memoised for this
+       page visit (and dropped whenever a package event fires), so re-rendering
+       a tab or scrolling a long list does no bridge work at all. */
+    const devCache = new Map();          // slug -> { installed, pkg, verified }
+
+    /* FAST PATH — localStorage slug registry only, no Android bridge call.
+       This is what the list paints with, so a long library renders instantly. */
+    function fastStateFor(item) {
+      const key = item.slug || item.package_name || '';
+      if (devCache.has(key)) return devCache.get(key);
+      const pkg = item.package_name || (S.resolvedPackageName ? S.resolvedPackageName(item.slug) : '') || '';
+      let installed = false;
+      try { installed = !!(S.isInstalledStored && S.isInstalledStored(item.slug)); } catch (e) { installed = false; }
+      const out = { installed, pkg, verified: false };
+      devCache.set(key, out);
+      return out;
+    }
+
+    /* SLOW PATH — ask the real device, but only for ONE item at a time
+       (used by the row buttons and by the background verification pass). */
     function deviceStateFor(item) {
-      const resolved = S.resolvedPackageName ? S.resolvedPackageName(item.slug) : '';
-      let deviceVer = S.installedVersionOnDevice(item.package_name || '');
-      if (!deviceVer && resolved) deviceVer = S.installedVersionOnDevice(resolved);
-      if (!deviceVer) deviceVer = S.isSlugInstalled(item.slug);
-      const pkg = resolved || item.package_name || '';
-      return { installed: !!deviceVer, pkg };
+      const key = item.slug || item.package_name || '';
+      const hit = devCache.get(key);
+      if (hit && hit.verified) return hit;
+      const base = fastStateFor(item);
+      let installed = base.installed;
+      if (!installed && S.isSlugInstalled) {
+        try { installed = !!S.isSlugInstalled(item.slug); } catch (e) {}
+      }
+      if (!installed && base.pkg && S.installedVersionOnDevice) {
+        try { installed = !!S.installedVersionOnDevice(base.pkg); } catch (e) {}
+      }
+      const out = { installed, pkg: base.pkg, verified: true };
+      devCache.set(key, out);
+      return out;
+    }
+    function forgetDeviceState(key) {
+      if (key) devCache.delete(key); else devCache.clear();
+    }
+
+    /* Background verification: checks every row against the device in small
+       animation-frame chunks and asks for ONE repaint if anything flipped.
+       The list is already on screen, so the user never waits for it. */
+    let verifying = false;
+    function verifyDeviceInBackground(merged, onFlip) {
+      if (verifying || !isNativeApp()) return;
+      verifying = true;
+      let i = 0, flipped = false;
+      const step = () => {
+        if (!panel.isConnected) { verifying = false; return; }
+        const end = Math.min(merged.length, i + 6);
+        for (; i < end; i++) {
+          const it = merged[i];
+          if (!it || !it.slug) continue;
+          const before = fastStateFor(it).installed;
+          const after = deviceStateFor(it).installed;
+          if (before !== after) flipped = true;
+        }
+        if (i < merged.length) {
+          if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(step);
+          else setTimeout(step, 0);
+          return;
+        }
+        verifying = false;
+        if (flipped && onFlip) onFlip();
+      };
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(step);
+      else setTimeout(step, 0);
     }
 
     // Google Play style end state for installed apps: Open + Uninstall
@@ -149,7 +211,10 @@
       const row = el('a', { href: `/app?slug=${encodeURIComponent(item.slug)}`, class: 'lib-row' },
         el('div', { class: 'art' },
           item.icon_url
-            ? el('img', { src: item.icon_url, alt: item.name, loading: 'lazy' })
+            ? el('img', {
+                src: item.icon_url, alt: item.name, loading: 'lazy',
+                decoding: 'async', width: '56', height: '56',
+              })
             : ico('package', 'icon icon-lg'),
         ),
         el('div', { class: 'lib-info' },
@@ -267,50 +332,35 @@
       libListRef = list;
     }
 
-    /* «المثبة» = what is REALLY installed on the device, plus a «سجل التحميلات»
-       section for apps that were downloaded but are not installed anymore.
-       Never the raw history dump that used to mix the two. */
-    async function renderLibraryPanel() {
-      panel.innerHTML = '';
-      panel.append(el('div', { class: 'dlm-loading' }, el('div', { class: 'spinner' })));
-      const hist = getItems();
-      const historyBySlug = {};
-      hist.forEach((h) => { if (h && h.slug) historyBySlug[h.slug] = h; });
+    /* «المثبة» = what is REALLY installed on the device, plus a SEPARATE
+       «سجل التحميلات» section.
 
-      // 1) Ask the API for the whole catalog (paginated) so an app installed
-      //    from the Play Store — never downloaded here — is still listed.
-      let catalog = [];
-      try {
-        for (let offset = 0; offset < 600; offset += 60) {
-          const res = await S.api(`/api/apps?limit=60&offset=${offset}`);
-          const batch = (res && res.apps) || [];
-          catalog = catalog.concat(batch);
-          if (batch.length < 60) break;
-        }
-      } catch (e) { catalog = []; }
+       SPEED (this is the «ثقيل» fix):
+       1. render at once from what is already known — history + cached device
+          state + the slug registry — with no network and no bridge calls;
+       2. ask the API for ONE page (60 apps) in the background, not the whole
+          catalog in a blocking loop;
+       3. verify those apps against the device in the same pass and repaint only
+          if something actually changed;
+       4. keep the catalog in memory for the rest of the visit. */
+    let catalogCache = null;      // apps already fetched this visit
+    let libRun = 0;               // guards against a stale repaint
+    let libVerified = false;      // device verification already scheduled once
 
-      const bySlug = {};
-      catalog.forEach((a) => { if (a && a.slug) bySlug[a.slug] = a; });
-      // Merge: catalog metadata wins, history fills the gaps.
-      const merged = Object.keys(bySlug).map((slug) => ({ ...historyBySlug[slug], ...bySlug[slug] }));
-      Object.keys(historyBySlug).forEach((slug) => {
-        if (!bySlug[slug]) merged.push(historyBySlug[slug]);
-      });
-
+    function paintInstalledPanel(merged, historyBySlug) {
+      const run = ++libRun;
       const installed = [];
       const notInstalled = [];
       merged.forEach((app) => {
-        const st = deviceStateFor(app);
-        if (st.installed) installed.push(app);
+        if (fastStateFor(app).installed) installed.push(app);
         else notInstalled.push(app);
       });
-      // Keep the order stable and readable: installed first, newest first.
       installed.sort((a, b) => (b.downloaded_at || 0) - (a.downloaded_at || 0));
+      if (run !== libRun || !panel.isConnected) return;
 
-      if (!panel.isConnected) return;
       panel.innerHTML = '';
-
-      if (!installed.length && !notInstalled.length) { panel.append(dlEmpty()); return; }
+      const rest = notInstalled.filter((it) => historyBySlug[it.slug]);
+      if (!installed.length && !rest.length) { panel.append(dlEmpty()); return; }
 
       if (installed.length) {
         panel.append(el('div', { class: 'dlm-sec' },
@@ -318,20 +368,19 @@
           el('span', null, t('المثبة على الجهاز')),
           el('span', { class: 'dlm-sec-count' }, String(installed.length))));
         const list = el('div', { class: 'lib-list dlm-list' });
-        installed.forEach((it) => list.append(libraryRow(it)));
         panel.append(list);
+        fillList(list, installed);
         libListRef = list;
       }
 
-      const rest = notInstalled.filter((it) => historyBySlug[it.slug]);
       if (rest.length) {
         panel.append(el('div', { class: 'dlm-sec' },
           ico('clock', 'icon icon-sm'),
           el('span', null, t('سجل التحميلات')),
           el('span', { class: 'dlm-sec-count' }, String(rest.length))));
         const list2 = el('div', { class: 'lib-list dlm-list' });
-        rest.forEach((it) => list2.append(libraryRow(it)));
         panel.append(list2);
+        fillList(list2, rest);
         panel.append(el('div', { class: 'dlm-clear' },
           el('button', {
             class: 'btn btn-sm btn-secondary', type: 'button',
@@ -343,8 +392,81 @@
             },
           }, ico('trash', 'icon icon-sm'), t('مسح السجل'))));
       }
+      // Honest verification after the fact: the list is already visible.
+      if (!libVerified) {
+        libVerified = true;
+        verifyDeviceInBackground(merged, () => { if (panel.isConnected) renderPanel(); });
+      }
+    }
 
-      if (!installed.length && !rest.length) panel.append(dlEmpty());
+    /* The first API page is cached for the visit AND for a short while across
+       visits, so opening «مكتبتي» again paints from memory instantly. */
+    const CATALOG_CACHE_KEY = 'gs_lib_catalog_v1';
+    function readCatalogCache() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY) || 'null');
+        if (!raw || !Array.isArray(raw.apps) || !raw.apps.length) return null;
+        if (Date.now() - (raw.ts || 0) > 10 * 60 * 1000) return null;   // 10 minutes
+        return raw.apps;
+      } catch (e) { return null; }
+    }
+    function writeCatalogCache(apps) {
+      try { localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({ ts: Date.now(), apps })); } catch (e) {}
+    }
+
+    function renderLibraryPanel() {
+      if (!catalogCache) catalogCache = readCatalogCache();
+      const hist = getItems();
+      const historyBySlug = {};
+      hist.forEach((h) => { if (h && h.slug) historyBySlug[h.slug] = h; });
+
+      // STEP 1 — instant paint, no await, no bridge storm.
+      const start = Object.keys(historyBySlug).map((slug) => ({ ...historyBySlug[slug] }));
+      const known = catalogCache
+        ? mergeCatalog(catalogCache, historyBySlug)
+        : start;
+      paintInstalledPanel(known, historyBySlug);
+      if (catalogCache) return;         // already warmed in this visit
+
+      // STEP 2 — one background page (60 apps), then verify + repaint once.
+      const run = libRun;
+      S.api('/api/apps?limit=60&sort=popular').then((res) => {
+        const batch = (res && res.apps) || [];
+        if (!batch.length) return;
+        catalogCache = batch;
+        writeCatalogCache(batch);
+        if (run !== libRun || !panel.isConnected) return;
+        paintInstalledPanel(mergeCatalog(batch, historyBySlug), historyBySlug);
+      }).catch(() => {});
+    }
+
+    function mergeCatalog(catalog, historyBySlug) {
+      const bySlug = {};
+      catalog.forEach((a) => { if (a && a.slug) bySlug[a.slug] = a; });
+      const merged = Object.keys(bySlug).map((slug) => ({ ...historyBySlug[slug], ...bySlug[slug] }));
+      Object.keys(historyBySlug).forEach((slug) => {
+        if (!bySlug[slug]) merged.push(historyBySlug[slug]);
+      });
+      return merged;
+    }
+
+    /* Renders rows in small chunks so a long list paints immediately and the
+       WebView is never blocked by one big DOM pass. */
+    function fillList(listEl, items, perChunk) {
+      const step = perChunk || 12;
+      let i = 0;
+      const slice = () => {
+        if (!listEl.isConnected) return;
+        const frag = document.createDocumentFragment();
+        const end = Math.min(items.length, i + step);
+        for (; i < end; i++) frag.append(libraryRow(items[i]));
+        listEl.append(frag);
+        if (i < items.length) {
+          if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(slice);
+          else setTimeout(slice, 0);
+        }
+      };
+      slice();
     }
 
     function renderPanel() {
@@ -368,6 +490,7 @@
     if (libEventsBound) return;
     libEventsBound = true;
     window.addEventListener('gs-package-uninstalled', (e) => {
+      forgetDeviceState(null);          // device truth changed: drop the cache
       const d = (e && e.detail) || {};
       const pkg = d.packageName;
       const slug = d.slug;
@@ -386,6 +509,7 @@
       S.onApkState((evt) => {
         const slug = evt && evt.slug;
         const status = evt && evt.status;
+        if (status === 'installed' || status === 'uninstalled') forgetDeviceState(slug);
         if (!slug || !libListRef || !libListRef.isConnected || !libRefreshRowRef) return;
         if (status === 'installed' || status === 'uninstalled') libRefreshRowRef(slug);
       });

@@ -571,7 +571,12 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 /* «ادعم قولدن ستور» — the round heart-in-hand button in the store TOP BAR,
    next to «مكتبتي» / «الإشعارات» / «بحث». Perfectly circular, same frame as
    its neighbours (40px on the home top bar), gold stroke icon. */
-.support-top-btn { border-radius: 50%; color: var(--gold, #f4c01f); }
+.support-top-btn { border-radius: 50%; }
+.support-top-img {
+  width: 25px; height: auto; display: block;
+  image-rendering: -webkit-optimize-contrast;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
+}
 .support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; overflow: visible; }
 .support-top-btn:hover { color: var(--gold-2, #ffd766); }
 .support-top-btn:active { transform: scale(.94); }
@@ -596,7 +601,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .support-sheet-close:hover { background: rgba(255, 255, 255, .07); color: var(--text); }
 .support-sheet-close .icon { width: 20px; height: 20px; }
-.support-sheet-glyph { font-size: 44px; line-height: 1.1; margin-bottom: 6px; }
+.support-sheet-glyph { margin-bottom: 6px; display: flex; justify-content: center; }
+.support-sheet-glyph img { width: 74px; height: auto; display: block; }
 .support-sheet-title { margin: 4px 0 14px; font-size: 19px; font-weight: 800; color: var(--text); }
 .support-sheet-text { margin: 0 0 12px; font-size: 13.5px; line-height: 1.85; color: var(--text-2); text-align: start; }
 .support-sheet-list { margin: 0 0 12px; padding-inline-start: 20px; text-align: start; }

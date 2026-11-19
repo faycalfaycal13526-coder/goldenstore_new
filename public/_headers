@@ -23,3 +23,5 @@
 
 /images/*
   Cache-Control: public, max-age=31536000, immutable
+/images/support-heart-hand.png
+  Cache-Control: public, max-age=31536000, immutable

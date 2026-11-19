@@ -731,7 +731,8 @@ function openSupportSheet() {
     ico('share', 'icon'), el('span', null, t('شارك الموقع')));
   const card = el('div', { class: 'support-sheet-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gs-support-title' },
     el('button', { class: 'support-sheet-close', type: 'button', 'aria-label': t('إغلاق'), onclick: close }, ico('close', 'icon')),
-    el('div', { class: 'support-sheet-glyph', 'aria-hidden': 'true' }, '🫶'),
+    el('div', { class: 'support-sheet-glyph', 'aria-hidden': 'true' },
+      el('img', { src: '/images/support-heart-hand.png', alt: '', width: '86', height: '80', decoding: 'async' })),
     el('h2', { class: 'support-sheet-title', id: 'gs-support-title' }, t('حافظ على قولدن ستور آمناً ومجانياً')),
     el('p', { class: 'support-sheet-text' }, t('نعمل كل يوم على تحديث التطبيقات ومراجعة الملفات قبل نشرها. طلبك للتحديث ومساهمتك في نشر الموقع هما ما يُبقيه مجانياً:')),
     el('ul', { class: 'support-sheet-list' },
@@ -758,7 +759,9 @@ function openSupportSheet() {
 }
 
 /* Round «heart in hand» button for the store top bar — same .icon-btn circle
-   as «مكتبتي» and «الإشعارات», with the icon from the owner's reference. */
+   as «مكتبتي» and «الإشعارات». The artwork is the owner's own picture
+   (public/images/support-heart-hand.png), keyed to transparent and shipped at
+   3x so it stays sharp on every phone. */
 function supportTopButton() {
   const muted = supportSheetHidden();
   return el('button', {
@@ -767,7 +770,7 @@ function supportTopButton() {
     'aria-label': t('ادعم قولدن ستور'),
     title: t('ادعم قولدن ستور'),
     onclick: () => { openSupportSheet(); },
-  }, ico('heartHand'));
+  }, el('img', { class: 'support-top-img', src: '/images/support-heart-hand.png', alt: '', width: '46', height: '43', decoding: 'async' }));
 }
 
 function topbarSearch(user) {

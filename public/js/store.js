@@ -682,6 +682,94 @@ async function loadNotificationsForPage() {
 }
 
 
+/* «ادعم قولدن ستور» — the hand-with-heart panel from the owner's reference.
+   It is opened from the round heart button that now sits in the store top bar
+   (next to «مكتبتي» / «الإشعارات» / «بحث»), so the markup lives here where every
+   page can reach it. Only a tap opens it — never automatically. */
+const SUPPORT_HIDE_KEY = 'gs_support_sheet_hidden';
+const CANONICAL_HOST = 'goldenstore.online';
+const TELEGRAM_URL = 'https://t.me/goldenstore_10';
+
+function supportSheetHidden() {
+  try { return localStorage.getItem(SUPPORT_HIDE_KEY) === '1'; } catch (e) { return false; }
+}
+function hideSupportSheet(on) {
+  try { if (on) localStorage.setItem(SUPPORT_HIDE_KEY, '1'); else localStorage.removeItem(SUPPORT_HIDE_KEY); } catch (e) {}
+}
+function openCanonicalSite() {
+  const url = `https://${CANONICAL_HOST}/`;
+  const bridge = window.GSAndroid;
+  if (bridge && typeof bridge.openExternal === 'function') {
+    try { bridge.openExternal(url); return; } catch (e) {}
+  }
+  window.location.href = url;
+}
+function shareStore(onDone) {
+  const url = `https://${CANONICAL_HOST}/`;
+  const data = { title: 'Golden Store', text: t('متجر قولدن ستور — تطبيقات وألعاب بأمان وبدون إعلانات مزعجة.'), url };
+  if (navigator.share) { navigator.share(data).then(() => onDone && onDone()).catch(() => {}); return; }
+  const done = (copied) => {
+    toast(copied ? t('تم نسخ رابط الموقع') : t('انسخ الرابط من شريط العنوان'), copied ? 'success' : 'info');
+    if (onDone) onDone();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => done(true)).catch(() => done(false));
+  } else done(false);
+}
+
+function openSupportSheet() {
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  const secondary = el('button', { class: 'support-sheet-btn secondary', type: 'button',
+    onclick: () => shareStore(() => { secondary.lastChild.textContent = t('تمت المشاركة، شكراً لك'); }) },
+    ico('share', 'icon'), el('span', null, t('شارك الموقع')));
+  const card = el('div', { class: 'support-sheet-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gs-support-title' },
+    el('button', { class: 'support-sheet-close', type: 'button', 'aria-label': t('إغلاق'), onclick: close }, ico('close', 'icon')),
+    el('div', { class: 'support-sheet-glyph', 'aria-hidden': 'true' }, '🫶'),
+    el('h2', { class: 'support-sheet-title', id: 'gs-support-title' }, t('حافظ على قولدن ستور آمناً ومجانياً')),
+    el('p', { class: 'support-sheet-text' }, t('نعمل كل يوم على تحديث التطبيقات ومراجعة الملفات قبل نشرها. طلبك للتحديث ومساهمتك في نشر الموقع هما ما يُبقيه مجانياً:')),
+    el('ul', { class: 'support-sheet-list' },
+      el('li', null, t('تغطية تكاليف السيرفر والنطاق')),
+      el('li', null, t('تحديث أسرع للإصدارات الجديدة')),
+      el('li', null, t('حجب المواقع المزيفة والملفات الخطرة')),
+    ),
+    el('p', { class: 'support-sheet-text' }, t('الموقع الرسمي الوحيد هو') + ' ' + CANONICAL_HOST + ' — ' + t('أي رابط آخر ليس تابعاً لنا، ومشاركتك للرابط الرسمي هي أهم دعم.')),
+    el('div', { class: 'support-sheet-actions' },
+      el('button', { class: 'support-sheet-btn primary', type: 'button', onclick: openCanonicalSite }, t('زيارة الموقع الرسمي')),
+      secondary,
+    ),
+    el('a', { class: 'support-sheet-link', href: TELEGRAM_URL, target: '_blank', rel: 'noopener' }, ico('send', 'icon'), t('انضم الى المجموعة')),
+    el('label', { class: 'support-sheet-never' },
+      el('input', { type: 'checkbox', onchange: (e) => hideSupportSheet(e.target.checked) }),
+      el('span', null, t('لا تُظهر هذه الرسالة مرة أخرى')),
+    ),
+  );
+  const overlay = el('div', { class: 'dialog-overlay support-sheet-overlay', onclick: (e) => { if (e.target === overlay) close(); } }, card);
+  document.body.append(overlay);
+  document.addEventListener('keydown', onKey);
+  const first = card.querySelector('.support-sheet-close');
+  if (first) first.focus();
+}
+
+/* Round «heart in hand» button for the store top bar — same .icon-btn circle
+   as «مكتبتي» and «الإشعارات», with the icon from the owner's reference. */
+function supportTopButton() {
+  const muted = supportSheetHidden();
+  return el('button', {
+    class: 'icon-btn support-top-btn' + (muted ? ' is-muted' : ''),
+    type: 'button',
+    'aria-label': t('ادعم قولدن ستور'),
+    title: t('ادعم قولدن ستور'),
+    onclick: () => { openSupportSheet(); },
+  }, ico('heartHand'));
+}
+
 function topbarSearch(user) {
   const bellBadge = el('span', { class: 'bell-badge hidden' });
   const searchBtn = el('button', {
@@ -715,6 +803,7 @@ function topbarSearch(user) {
       libraryBtn,
       bellBtn,
       searchBtn,
+      supportTopButton(),
     ),
   );
 }
@@ -2265,6 +2354,7 @@ window.Store = {
   topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, notifSeenAt, setNotifSeenAt, openNotifications, loadNotificationsForPage,
   ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
+  openSupportSheet, supportTopButton,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,

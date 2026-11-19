@@ -116,6 +116,7 @@ input, select { font-family: inherit; }
 }
 .topbar-home .icon-btn:hover { background: var(--surface-3); }
 .topbar-home .icon-btn .icon { width: 22px; height: 22px; }
+.topbar-home .icon-btn.support-top-btn { border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
 /* «أنت» and «مكتبتي» share data-page="account": no store topbar at all,
    while home/games/featured keep it. Scoped so no other page is affected. */
 body[data-page="account"] .topbar,
@@ -567,27 +568,15 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
    The big split «جاهز للتثبيت» button must never coexist with it (no glitch). */
 .detail.gs-downloaded-mode > .d-actions { display: none !important; }
 .d-actions .btn { flex: 1; }
-/* «ادعم قولدن ستور» — round button sitting right next to the install CTA,
-   plus the sheet it opens (layout follows the owner's reference screenshot). */
-.d-support-btn {
-  flex: 0 0 52px; width: 52px; min-width: 52px; height: auto; min-height: 52px;
-  align-self: stretch; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center; position: relative;
-  border-radius: 14px; cursor: pointer;
-  color: var(--gold, #f4c01f);
-  background: rgba(244, 192, 31, .10);
-  border: 1px solid rgba(244, 192, 31, .45);
-  transition: background .18s ease, transform .12s ease;
-}
-.d-support-btn:hover { background: rgba(244, 192, 31, .18); }
-.d-support-btn:active { transform: scale(.96); }
-.d-support-btn .icon { width: 25px; height: 25px; }
-.d-support-btn.is-muted { color: var(--text-2); border-color: var(--border); background: transparent; }
-.d-support-dot {
-  position: absolute; top: 7px; inset-inline-end: 8px;
-  width: 7px; height: 7px; border-radius: 50%; background: #ff4d6a;
-}
-.d-support-btn.is-muted .d-support-dot { display: none; }
+/* «ادعم قولدن ستور» — the round heart-in-hand button in the store TOP BAR,
+   next to «مكتبتي» / «الإشعارات» / «بحث». Perfectly circular, same frame as
+   its neighbours (40px on the home top bar), gold stroke icon. */
+.support-top-btn { border-radius: 50%; color: var(--gold, #f4c01f); }
+.support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; }
+.support-top-btn:hover { color: var(--gold-2, #ffd766); }
+.support-top-btn:active { transform: scale(.94); }
+.support-top-btn.is-muted { opacity: .55; }
+@media (max-width: 380px) { .support-top-btn .icon { width: 20px; height: 20px; } }
 
 .support-sheet-overlay { z-index: 9000; }
 .support-sheet-card {
@@ -636,7 +625,6 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 }
 .support-sheet-never input { accent-color: var(--gold, #f4c01f); width: 15px; height: 15px; }
 @media (max-width: 380px) {
-  .d-support-btn { flex-basis: 46px; width: 46px; min-width: 46px; height: 46px; }
   .support-sheet-card { padding: 22px 16px 16px; }
   .support-sheet-title { font-size: 17px; }
 }

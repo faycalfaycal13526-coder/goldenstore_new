@@ -573,17 +573,18 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
    its neighbours (40px on the home top bar), gold stroke icon. */
 .support-top-btn { border-radius: 50%; }
 .support-top-img {
-  width: 34px; height: auto; display: block;
+  width: 28px; height: auto; display: block;
   /* the artwork is a small bitmap: let the browser resample it smoothly and
      give it a whisper of shadow so it reads clearly on the dark circle */
   image-rendering: auto;
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .55));
 }
 .topbar-home .icon-btn.support-top-btn {
+  /* exactly the same frame as «بحث» / «الإشعارات» / «مكتبتي» — no gold ring,
+     same dark plate, same 40px circle */
   width: 40px; height: 40px;
-  /* a touch lighter than its neighbours so the coloured artwork reads clearly */
-  background: var(--surface-3);
-  border-color: rgba(244, 192, 31, .38);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
 }
 .support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; overflow: visible; }
 .support-top-btn:hover { color: var(--gold-2, #ffd766); }

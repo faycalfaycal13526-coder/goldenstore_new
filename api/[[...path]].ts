@@ -21,7 +21,8 @@ import {
   searchApps, suggestApps,
   createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
   addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
-  ensureSupportSchema,
+  ensureSupportSchema, ensureUserNotificationSchema, hasRecentUserNotification,
+  insertNotificationRow,
   ensureVideosSchema, listAppVideos, addAppVideo, updateAppVideo,
   deleteAppVideo, deleteAppVideos, listVideoThumbKeys,
 } from '../lib/d1.js';
@@ -515,6 +516,60 @@ async function addNotification(env: Env, data: any) {
   return { id, push };
 }
 
+/* -------------------------------------------------------------------------
+   PER-USER NOTIFICATIONS
+   -------------------------------------------------------------------------
+   Two real events create a PRIVATE notification row (uid set), which only the
+   signed-in owner can see in «مركز إعلام»:
+     1) a support reply   → fires when the USER sends a message in /support
+                            (type 'support', tap opens /support?thread=…)
+     2) a like received   → fires for the AUTHOR of a review when somebody
+                            else likes it (type 'like', tap opens the app page)
+   Rows are written with insertNotificationRow() (same `notifications` table, so
+   the existing bell badge, list API and page need no second source of truth),
+   and pushed to that one uid through the unified engine (segment.mode='users').
+   A failure here must never break the user-facing request.
+   ------------------------------------------------------------------------- */
+const SUPPORT_NOTIFY_COOLDOWN = 1800;   // 30 min per support thread
+const LIKE_NOTIFY_COOLDOWN = 3600;      // 1 h per review
+
+async function notifyUser(
+  env: Env, uid: string,
+  // `type` is one of the three values the store already understands — that is
+  // what makes the page's three quick buttons filter these rows:
+  //   announcement → «اشعار رسمي»   (support)
+  //   new_app      → «تلقى الإعجابات» (likes)
+  // The exact kind is kept in data.kind.
+  note: { type: 'announcement' | 'new_app'; title: string; body: string; app_slug?: string;
+          click_url?: string; data?: Record<string, any>; },
+): Promise<{ id: string; created: boolean; push?: any }> {
+  const owner = String(uid || '').trim();
+  if (!owner) return { id: '', created: false };
+  await ensureUserNotificationSchema(env);
+  const id = randomId();
+  await insertNotificationRow(env, {
+    id, title: note.title, body: note.body, type: note.type,
+    app_slug: note.app_slug || '', uid: owner, created_at: nowSec(),
+    data: { ...(note.data || {}), click_url: note.click_url || '' },
+  });
+  let push: any = null;
+  try {
+    const settings = await readAllSettings(env).catch(() => ({ ...SETTING_DEFAULTS }));
+    if (settings.push_enabled === '1' && !inQuietHours(settings)) {
+      push = await deliverNotification(env, {
+        id, title: note.title, body: note.body, type: note.type,
+        app_slug: note.app_slug || '',
+        click_url: note.click_url || '',
+        image: '', image_url: '',
+        data: note.data || {},
+      }, { mode: 'users', uids: [owner] }, { force: true });
+    }
+  } catch (error: any) {
+    console.error('[notify-user] push failed, row saved:', error?.message || error);
+  }
+  return { id, created: true, push };
+}
+
 // ============================================================
 // Public Routes
 // ============================================================
@@ -701,9 +756,22 @@ app.get('/auth/token', async (c) => {
 
 app.get('/notifications', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') || '30'), 50);
-  const notifs = await listNotifications(c.env, limit);
-  c.header('Cache-Control', 'public, max-age=60');
-  return c.json({ notifications: notifs.map(n => ({ ...n, data: n.data ? JSON.parse(n.data) : null })) });
+  // The per-user column is created lazily; on an existing database this ALTER
+  // is what makes the private-row queries below possible.
+  await ensureUserNotificationSchema(c.env).catch(() => {});
+  // A signed-in caller also receives their own PRIVATE rows (support replies,
+  // likes received). Without a token the response is the public broadcast only,
+  // exactly as before — and it must never be cached across users.
+  const user = await requireFirebaseUser(c).catch(() => null);
+  const uid = user ? String(user.uid) : '';
+  const notifs = await listNotifications(c.env, limit, uid);
+  c.header('Cache-Control', uid ? 'private, no-store' : 'public, max-age=60');
+  return c.json({
+    notifications: notifs.map(n => ({ ...n, data: n.data ? JSON.parse(n.data) : null })),
+    // Tells the client whether this response already contains its private rows,
+    // so the page can skip the extra authenticated request.
+    personal: !!uid,
+  });
 });
 
 // Notifications Tokens (D1)
@@ -1270,7 +1338,31 @@ app.post('/apps/:slug/reviews/:reviewId/like', async (c) => {
   if (!review) return c.json({ error: 'review_not_found' }, 404);
 
   const result = await toggleReviewLike(c.env, String(review.id), userId);
-  return c.json({ ok: true, ...result });
+  // Likes received: the AUTHOR of the review gets a private notification.
+  // Never for self-likes, never on un-like, and never more than once an hour
+  // per review so a double tap cannot spam the feed.
+  let notified = false;
+  try {
+    const author = String(review.uid || '').trim();
+    if (result.liked && author && author !== userId) {
+      const ref = `${c.req.param('slug')}:${review.id}`;
+      if (!(await hasRecentUserNotification(c.env, author, 'like', ref, LIKE_NOTIFY_COOLDOWN))) {
+        const slug = c.req.param('slug');
+        const res = await notifyUser(c.env, author, {
+          type: 'new_app',
+          title: 'أعجب أحدهم بتعليقك',
+          body: 'تلقّى تعليقك إعجاباً جديداً على ' + slug,
+          app_slug: slug,
+          click_url: `/app?slug=${encodeURIComponent(slug)}`,
+          data: { ref, kind: 'like', app_slug: slug, review_id: String(review.id) },
+        });
+        notified = res.created;
+      }
+    }
+  } catch (error: any) {
+    console.error('[reviews] like notification failed:', error?.message || error);
+  }
+  return c.json({ ok: true, ...result, notified });
 });
 
 app.post('/apps/:slug/reviews/:reviewId/report', async (c) => {
@@ -1397,8 +1489,27 @@ app.post('/support/threads/:id/messages', async (c) => {
   if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
   const out = await addSupportMessage(c.env, c.req.param('id'), 'user', message, user.uid);
   if (!out) return c.json({ error: 'thread_not_found_or_closed' }, 404);
+  // Every message the user sends opens a REAL entry in their own notification
+  // centre («تم استلام رسالتك») so support is verifiable from inside the app.
+  // Cooldown per thread keeps a long chat from flooding the feed.
+  const threadId = String(out.thread.id);
+  let notified = false;
+  try {
+    if (!(await hasRecentUserNotification(c.env, user.uid, 'support', threadId, SUPPORT_NOTIFY_COOLDOWN))) {
+      const res = await notifyUser(c.env, user.uid, {
+        type: 'announcement',
+        title: 'تم استلام رسالتك في الدعم',
+        body: message.length > 120 ? message.slice(0, 120) + '…' : message,
+        click_url: `/support?thread=${encodeURIComponent(threadId)}`,
+        data: { ref: threadId, kind: 'support', thread_id: threadId, subject: out.thread.subject },
+      });
+      notified = res.created;
+    }
+  } catch (error: any) {
+    console.error('[support] notification failed:', error?.message || error);
+  }
   c.header('Cache-Control', 'no-store');
-  return c.json({ thread: out.thread, messages: out.messages }, 201);
+  return c.json({ thread: out.thread, messages: out.messages, notified }, 201);
 });
 
 app.post('/support/threads/:id/read', async (c) => {
@@ -1640,6 +1751,22 @@ app.post('/admin/support/threads/:id/messages', async (c) => {
   if (message.length < 2) return c.json({ error: 'invalid_message' }, 400);
   const out = await addSupportMessage(c.env, c.req.param('id'), 'admin', message);
   if (!out) return c.json({ error: 'not_found' }, 404);
+  // The reply reaches the thread owner as a private notification as well, so a
+  // user who left /support still learns an answer arrived.
+  try {
+    const owner = String(out.thread.uid || '').trim();
+    if (owner) {
+      await notifyUser(c.env, owner, {
+        type: 'announcement',
+        title: 'ردّ الدعم على رسالتك',
+        body: message.length > 120 ? message.slice(0, 120) + '…' : message,
+        click_url: `/support?thread=${encodeURIComponent(String(out.thread.id))}`,
+        data: { ref: String(out.thread.id), kind: 'support_reply', thread_id: String(out.thread.id) },
+      });
+    }
+  } catch (error: any) {
+    console.error('[admin/support] notification failed:', error?.message || error);
+  }
   c.header('Cache-Control', 'no-store');
   return c.json({ thread: out.thread, messages: out.messages }, 201);
 });

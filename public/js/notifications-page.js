@@ -17,6 +17,19 @@
     return v === 'new_app' || v === 'update' || v === 'announcement' ? v : 'announcement';
   }
   function tsOf(n) { return Number((n && n.created_at) || 0) || 0; }
+  /* What a row really IS, independent of the storage `type`:
+       support → the user's support conversation (own message or the reply)
+       like    → a like received on the user's review
+       official→ everything the store itself publishes (notices + app updates) */
+  function kindOf(n) {
+    const d = (n && n.data) || {};
+    const extra = d.extra && typeof d.extra === 'object' ? d.extra : {};
+    const kind = String(d.kind || extra.kind || '');
+    if (kind === 'support' || kind === 'support_reply') return 'support';
+    if (kind === 'like') return 'like';
+    if (/^\/support(\?|$)/.test(String(d.click_url || extra.click_url || ''))) return 'support';
+    return 'official';
+  }
   function isUnread(n) { return tsOf(n) > (S.notifSeenAt ? S.notifSeenAt() : 0); }
 
   /* «منذ ٣٨ دقيقة» / «منذ ٦ ساعات» / a plain date — relative, Play style. */
@@ -37,10 +50,15 @@
   /* ---------------------------- quick links ---------------------------- */
   let filter = '';
   function quickBar(onPick) {
+    /* The three quick actions filter the SAME real feed. Their names describe
+       exactly what each button shows — nothing decorative:
+         announcement → official notices from the store AND support messages
+         update       → «رسائل الدعم»  (the user's own support conversation)
+         new_app      → «الإعجابات»    (a like received on the user's review) */
     const items = [
-      { key: 'announcement', label: 'اشعار رسمي', icon: 'bell', tone: 'violet' },
-      { key: 'update', label: 'ردود على التعليقات', icon: 'message', tone: 'amber' },
-      { key: 'new_app', label: 'تلقى الإعجابات', icon: 'heart', tone: 'rose' },
+      { key: 'official', label: 'اشعار رسمي', icon: 'bell', tone: 'violet' },
+      { key: 'support', label: 'رسائل الدعم', icon: 'message', tone: 'amber' },
+      { key: 'like', label: 'الإعجابات', icon: 'heart', tone: 'rose' },
     ];
     const bar = el('div', { class: 'noi-quick', role: 'tablist' });
     items.forEach((it) => {
@@ -67,22 +85,44 @@
       const img = el('img', { src: String(url), alt: '', loading: 'lazy', decoding: 'async' });
       img.addEventListener('error', () => {
         img.remove();
-        art.append(icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell'));
+        art.append(icon(kindOf(n) === 'like' ? 'heart'
+          : kindOf(n) === 'support' ? 'message'
+          : type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell'));
       });
       art.append(img);
       art.classList.add('has-img');
       return art;
     }
-    art.append(icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell'));
+    art.append(icon(kindOf(n) === 'like' ? 'heart'
+      : kindOf(n) === 'support' ? 'message'
+      : type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell'));
     return art;
+  }
+
+  /* Support notifications: tapping opens the SAME conversation thread, so the
+     row is a real action and never a dead end. The target is taken from the
+     row itself (data.click_url / data.thread_id) with a safe fallback. */
+  function supportTarget(n) {
+    const d = (n && n.data) || {};
+    const extra = d.extra && typeof d.extra === 'object' ? d.extra : {};
+    const raw = String(d.click_url || extra.click_url || '');
+    if (/^\/support(\?|$)/.test(raw)) return raw;
+    const thread = String(d.thread_id || extra.thread_id || d.ref || '');
+    return thread ? `/support?thread=${encodeURIComponent(thread)}` : '/support';
   }
 
   function row(n) {
     const type = typeOf(n);
     const updateData = type === 'update' && n.data && n.data.apk_url ? n.data : null;
     const unread = isUnread(n);
+    /* Support rows carry data.kind = support|support_reply; they must open the
+       chat, not an app page. */
+    const isSupport = kindOf(n) === 'support';
     let node;
-    if (updateData) {
+    if (isSupport && !updateData) {
+      node = el('a', { class: `noi-row is-support`, href: supportTarget(n),
+        onclick: () => markRead(n) });
+    } else if (updateData) {
       node = el('a', { class: 'noi-row is-update', href: '#',
         onclick: (e) => { e.preventDefault(); markRead(n); S.showUpdateDialog(updateData, { manual: true }); } });
     } else if (n.app_slug) {
@@ -98,7 +138,9 @@
         el('span', { class: 'noi-row-sub' },
           el('span', { class: 'noi-row-time' }, when(tsOf(n))),
           el('span', { class: 'noi-row-cta' },
-            updateData ? t('انقر للتنزيل') : (n.app_slug ? t('انقر للفتح') : t('انقر للتفاصيل'))),
+            updateData ? t('انقر للتنزيل')
+              : isSupport ? t('انقر لفتح المحادثة')
+              : (n.app_slug ? t('انقر للفتح') : t('انقر للتفاصيل'))),
         ),
       ),
       el('span', { class: 'noi-dot' + (unread ? ' is-new' : ''), 'aria-hidden': 'true' }),
@@ -160,13 +202,23 @@
         el('p', null, t('ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.')),
       ));
     } else {
-      const shown = (filter ? all.filter((n) => typeOf(n) === filter) : all)
+      const shown = (filter ? all.filter((n) => kindOf(n) === filter) : all)
         .slice().sort((a, b) => tsOf(b) - tsOf(a));
       if (!shown.length) {
+        const supportEmpty = filter === 'support';
+        const likeEmpty = filter === 'like';
         list.append(el('div', { class: 'noi-empty' },
-          el('span', { class: 'noi-empty-ico' }, icon('list')),
-          el('h2', null, t('لا توجد إشعارات في هذا القسم')),
-          el('p', null, t('اضغط نفس الزر مرة أخرى لعرض كل الإشعارات.')),
+          el('span', { class: 'noi-empty-ico' }, icon(supportEmpty ? 'message' : likeEmpty ? 'heart' : 'list')),
+          el('h2', null, t(supportEmpty ? 'لا توجد رسائل دعم بعد'
+            : likeEmpty ? 'لا توجد إعجابات بعد'
+            : 'لا توجد إشعارات في هذا القسم')),
+          el('p', null, t(supportEmpty
+            ? 'ستظهر هنا رسائلك مع الدعم وردود الإدارة عليها.'
+            : likeEmpty
+              ? 'ستظهر هنا إعجابات المستخدمين بتعليقاتك.'
+              : 'اضغط نفس الزر مرة أخرى لعرض كل الإشعارات.')),
+          supportEmpty ? el('a', { class: 'btn btn-secondary noi-empty-cta', href: '/support' },
+            t('افتح صفحة الدعم')) : null,
         ));
       }
       shown.forEach((n) => list.append(row(n)));

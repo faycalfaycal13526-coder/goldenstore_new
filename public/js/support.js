@@ -180,7 +180,12 @@
       const data = await S.authedApi('/api/support/threads');
       const threads = Array.isArray(data && data.threads) ? data.threads : [];
       // One ongoing conversation: the newest open thread, or a fresh one.
-      const next = threads.find((th) => th.status !== 'closed') || null;
+      // `?thread=<id>` (the target of a support notification) prefers that exact
+      // thread when it belongs to the signed-in user.
+      let wanted = '';
+      try { wanted = new URLSearchParams(location.search).get('thread') || ''; } catch (e) {}
+      const next = (wanted && threads.find((th) => String(th.id) === wanted))
+        || threads.find((th) => th.status !== 'closed') || null;
       const list = next && Array.isArray(next.messages) ? next.messages : [];
       const signature = (next ? next.id + ':' + next.status : 'new') + '|'
         + list.map((m) => m.id + ':' + m.sender + ':' + m.created_at).join('|');

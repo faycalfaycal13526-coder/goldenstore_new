@@ -632,9 +632,17 @@ function notifUnreadCount(list) {
   const seen = notifSeenAt();
   return (list || []).reduce((count, n) => count + (Number(n && n.created_at || 0) > seen ? 1 : 0), 0);
 }
+/* The feed carries the signed-in user's PRIVATE rows too (support replies,
+   likes received). They are only returned when the Authorization header is
+   present, so the request is authenticated whenever a session exists and falls
+   back to the plain public feed otherwise. */
 async function fetchNotifications() {
   try {
-    const res = await api('/api/notifications?limit=30');
+    let res;
+    try {
+      if (window.GAuth && window.GAuth.getIdToken) res = await authedApi('/api/notifications?limit=30');
+    } catch (e) { res = null; }
+    if (!res) res = await api('/api/notifications?limit=30');
     return Array.isArray(res.notifications) ? res.notifications : [];
   } catch {
     return [];

@@ -166,12 +166,58 @@ export async function listScreenshots(env: Env, app_id: string): Promise<any[]> 
   return result.results || [];
 }
 
-export async function listNotifications(env: Env, limit?: number): Promise<any[]> {
-  let sql = 'SELECT * FROM notifications ORDER BY created_at DESC';
-  if (limit) sql += ' LIMIT ?';
+/* A notification row with a non-empty `uid` is PRIVATE: it was produced by a
+   per-user event (support reply, a like on your review) and must never be
+   listed by the public feed. Broadcast notifications keep uid = ''. */
+export async function listNotifications(env: Env, limit?: number, uid = ''): Promise<any[]> {
+  const privateClause = "COALESCE(uid, '') <> ''";
+  const rows = async (sql: string, args: any[]) => {
+    const r: any = await env.DB.prepare(sql).bind(...args).all().catch(() => null);
+    return r?.results || null;
+  };
+  // Legacy database without the `uid` column: degrade to the old behaviour
+  // (broadcast rows only) instead of returning a 500 to the whole store.
+  const legacy = async () => {
+    const r: any = await env.DB.prepare(
+      `SELECT * FROM notifications ORDER BY created_at DESC${limit ? ' LIMIT ?' : ''}`,
+    ).bind(...(limit ? [Math.min(Number(limit) || 50, 50)] : [])).all().catch(() => ({ results: [] }));
+    return r.results || [];
+  };
+  if (uid) {
+    const publicRows = await rows(
+      `SELECT * FROM notifications WHERE NOT (${privateClause}) ORDER BY created_at DESC LIMIT ?`,
+      [Math.min(Number(limit) || 50, 50)],
+    );
+    const ownRows = await rows(
+      `SELECT * FROM notifications WHERE uid = ? ORDER BY created_at DESC LIMIT ?`,
+      [uid, Math.min(Number(limit) || 50, 50)],
+    );
+    return [...publicRows, ...ownRows]
+      .sort((a: any, b: any) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))
+      .slice(0, Math.min(Number(limit) || 50, 50));
+  }
+  const sql = `SELECT * FROM notifications WHERE NOT (${privateClause})
+    ORDER BY created_at DESC${limit ? ' LIMIT ?' : ''}`;
   const stmt = env.DB.prepare(sql);
-  const result = limit ? await stmt.bind(limit).all() : await stmt.all();
-  return result.results || [];
+  const result: any = await (limit ? stmt.bind(limit).all() : stmt.all()).catch(() => null);
+  return result ? (result.results || []) : legacy();
+}
+
+/** Insert one notification row (public broadcast, or private when uid given).
+    The owner's own `data` JSON is preserved byte-for-byte as a JSON string. */
+export async function insertNotificationRow(env: Env, row: {
+  id: string; title: string; body?: string; type?: string;
+  app_slug?: string; data?: any; uid?: string; created_at?: number;
+}): Promise<void> {
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO notifications (id, title, body, type, app_slug, data, created_at, uid)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    String(row.id), String(row.title || '').slice(0, 200), String(row.body || '').slice(0, 1000),
+    String(row.type || 'announcement'), String(row.app_slug || ''),
+    row.data ? JSON.stringify(row.data) : null,
+    Number(row.created_at) || nowSec(), String(row.uid || ''),
+  ).run();
 }
 
 export async function getStoreSettings(env: Env): Promise<{ notify_new_publications: boolean }> {
@@ -457,6 +503,56 @@ export async function ensureSupportSchema(env: Env): Promise<void> {
   if (supportSchemaReady.has(db)) return;
   for (const sql of SUPPORT_SCHEMA) await db.prepare(sql).run();
   supportSchemaReady.add(db);
+}
+
+/* =========================================================================
+   PER-USER NOTIFICATIONS  («support reply», «someone liked your review»)
+   -------------------------------------------------------------------------
+   The shared `notifications` table gains one nullable column, `uid`:
+     uid = ''   → broadcast row, listed for everybody (unchanged behaviour)
+     uid = <id> → private row, listed only for that signed-in user
+   The column is added lazily with an idempotent ALTER, so no manual
+   migration is needed on an existing D1 database.
+   ========================================================================= */
+const userNotifSchemaReady = new WeakSet<object>();
+export async function ensureUserNotificationSchema(env: Env): Promise<void> {
+  const db: any = env.DB;
+  if (!db || userNotifSchemaReady.has(db)) return;
+  userNotifSchemaReady.add(db);
+  const ddl = [
+    `ALTER TABLE notifications ADD COLUMN uid TEXT NOT NULL DEFAULT ''`,
+    `CREATE INDEX IF NOT EXISTS idx_notifications_uid ON notifications(uid, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC)`,
+  ];
+  for (const sql of ddl) { try { await db.prepare(sql).run(); } catch { /* already exists */ } }
+}
+
+/** True when a user already has this exact event notification (dedupe+cooldown).
+    Same event (same kind + reference) within `windowSec` is not re-notified, so
+    toggling a like off/on repeatedly cannot spam the review author. */
+export async function hasRecentUserNotification(
+  env: Env, uid: string, kind: string, ref: string, windowSec = 3600,
+): Promise<boolean> {
+  await ensureUserNotificationSchema(env);
+  const since = nowSec() - Math.max(60, Number(windowSec) || 3600);
+  // `kind` lives inside the JSON (data.kind), NOT in the storage `type` column,
+  // so it is compared in JS after a bounded SQL pre-filter (uid + time window).
+  // This keeps the match independent of JSON key order and of LIKE escaping.
+  const rows: any = await env.DB.prepare(
+    `SELECT data FROM notifications
+      WHERE uid = ? AND created_at >= ?
+      ORDER BY created_at DESC LIMIT 200`,
+  ).bind(uid, since).all().catch(() => null);
+  for (const row of ((rows && rows.results) || []) as any[]) {
+    let data: any = {};
+    try { data = JSON.parse(row.data || '{}'); } catch { continue; }
+    if (!data || typeof data !== 'object') continue;
+    const extra = data.extra && typeof data.extra === 'object' ? data.extra : {};
+    const rowKind = String(data.kind || extra.kind || '');
+    const rowRef = String(data.ref || extra.ref || '');
+    if ((!rowKind || rowKind === kind) && rowRef === ref) return true;
+  }
+  return false;
 }
 
 function supportThreadFromRow(r: any): SupportThread {

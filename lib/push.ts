@@ -834,8 +834,11 @@ function safeJson(raw: any): any { try { return JSON.parse(raw || '[]'); } catch
    * overflow is queued and drained automatically by the Cron trigger
    ========================================================================= */
 export type DeliverySegment = {
-  mode?: 'all' | 'uid' | 'token' | 'platform' | 'app' | 'active';
+  /* 'users' targets an explicit list of uids — used for per-user events such as
+     «support reply» and «someone liked your review». */
+  mode?: 'all' | 'uid' | 'token' | 'platform' | 'app' | 'active' | 'users';
   uid?: string; token?: string; platform?: string; app_slug?: string; days?: number;
+  uids?: string[];
 };
 export type DeliveryOptions = {
   force?: boolean;           // bypass the "already delivered" short-circuit
@@ -854,12 +857,18 @@ export async function resolveUnifiedAudience(
   await ensurePushSchema(env);
   await backfillDevices(env);
   const db: any = env.DB;
-  const modes = ['all', 'uid', 'token', 'platform', 'app', 'active'];
+  const modes = ['all', 'uid', 'token', 'platform', 'app', 'active', 'users'];
   const mode = modes.includes(String(segment.mode || 'all')) ? String(segment.mode || 'all') : 'all';
   let where = `COALESCE(notifications_enabled, 1) = 1
     AND COALESCE(permission, 'granted') != 'denied' AND token != ''`;
   const args: any[] = [];
-  if (mode === 'uid') { where += ' AND uid = ?'; args.push(String(segment.uid || '')); }
+  if (mode === 'users') {
+    const list = Array.from(new Set((segment.uids || []).map((u) => String(u || '').trim()).filter(Boolean))).slice(0, 50);
+    if (!list.length) return { entries: [], native_count: 0, web_count: 0, targeted: 0, duplicates_suppressed: 0 };
+    where += ` AND uid IN (${list.map(() => '?').join(',')})`;
+    args.push(...list);
+  }
+  else if (mode === 'uid') { where += ' AND uid = ?'; args.push(String(segment.uid || '')); }
   else if (mode === 'token') { where += ' AND token = ?'; args.push(String(segment.token || '')); }
   else if (mode === 'platform') {
     const pl = String(segment.platform || 'android').toLowerCase();

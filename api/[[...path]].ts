@@ -18,7 +18,7 @@ import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
   getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport, deleteReview,
-  searchApps, suggestApps, trendingSearches,
+  searchApps, suggestApps, trendingSearches, recordSearchQuery, ensureSearchQuerySchema,
   createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
   addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
   ensureSupportSchema, ensureUserNotificationSchema, hasRecentUserNotification,
@@ -1179,9 +1179,11 @@ app.get('/categories', async (c) => {
 app.get('/search/trending', async (c) => {
   try {
     const limit = safeInt(c.req.query('limit') || '14', 1, 24);
+    await ensureSearchQuerySchema(c.env);
     const items = await trendingSearches(c.env, limit);
-    c.header('Cache-Control', 'public, max-age=120');
-    return c.json({ terms: items });
+    c.header('Cache-Control', 'public, max-age=60');
+    /* `real:true` only when the terms come from actual searches. */
+    return c.json({ terms: items, real: true, count: items.length });
   } catch (e: any) {
     return c.json({ terms: [], error: e?.message || 'error' }, 200);
   }
@@ -1221,6 +1223,10 @@ app.get('/search', async (c) => {
   const limit = safeInt(c.req.query('limit') || '24', 1, 60);
   const offset = safeInt(c.req.query('offset') || '0', 0, 1000000);
 
+  if (q && q.length >= 2 && offset === 0) {
+    // Real activity log for «عمليات البحث الرائجة» — never blocks the answer.
+    try { await ensureSearchQuerySchema(c.env); await recordSearchQuery(c.env, q); } catch {}
+  }
   try {
     const result = await searchApps(c.env, { q, category, type, sort, minRating, limit, offset });
     const hidden = await hiddenSlugs(c.env);

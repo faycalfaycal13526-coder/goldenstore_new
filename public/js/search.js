@@ -18,12 +18,6 @@
   const PAGE_SIZE = 20;
   const DEBOUNCE = 250;
 
-  const TYPES = [
-    { key: '', label: 'الكل' },
-    { key: 'app', label: 'التطبيقات' },
-    { key: 'game', label: 'ألعاب' },
-  ];
-
   const qs0 = new URLSearchParams(location.search);
   const state = {
     q: (qs0.get('q') || '').trim().slice(0, 120),
@@ -85,19 +79,6 @@
     ),
   );
 
-  // Type tabs — the only extra control on the page: 3 words, nothing else.
-  const tabsEl = el('div', { class: 'ms-tabs', role: 'tablist' });
-  function paintTabs() {
-    tabsEl.textContent = '';
-    TYPES.forEach((k) => {
-      tabsEl.append(el('button', {
-        class: 'ms-tab' + (k.key === state.type ? ' on' : ''), type: 'button', role: 'tab',
-        'aria-selected': k.key === state.type ? 'true' : 'false',
-        onclick: () => { if (state.type === k.key) return; state.type = k.key; state.offset = 0; syncUrl(); paintTabs(); run(); },
-      }, t(k.label)));
-    });
-  }
-
   /* --- «سجل البحث» and «عمليات البحث الرائجة» — shown while the field is
      empty, exactly like the reference layout: a header row per section, then
      wrapping pill chips. Tapping a chip searches for it immediately. --- */
@@ -148,7 +129,12 @@
       const data = await api('/api/search/trending?limit=14');
       const terms = (data && data.terms) || [];
       row.textContent = '';
-      if (!terms.length) { trendingSection.classList.add('hidden'); return; }
+      if (!terms.length) {
+        /* Nothing to invent: say it plainly instead of showing fake chips. */
+        trendingSection.classList.remove('hidden');
+        trendingSection.append(el('p', { class: 'ms-sec-empty' }, t('لا توجد عمليات بحث رائجة بعد.')));
+        return;
+      }
       trendingSection.classList.remove('hidden');
       terms.forEach((item) => row.append(chip(item.term, { hot: true })));
       chipsWrap.textContent = '';
@@ -211,7 +197,9 @@
   );
   const listEl = el('div', { class: 'ms-list', role: 'list' });
   const moreEl = el('div', { class: 'ms-more' });
-  const main = el('main', { class: 'ms-main' }, tabsEl, historySection, trendingSection, suggestEl, head, listEl, moreEl);
+  /* Order, exactly as the owner asked: «سجل البحث» first, then
+     «عمليات البحث الرائجة», then the results. */
+  const main = el('main', { class: 'ms-main' }, historySection, trendingSection, suggestEl, head, listEl, moreEl);
 
   /* ----------------------------- Results -------------------------------- */
   let seq = 0;
@@ -355,14 +343,12 @@
     state.q = (p.get('q') || '').trim().slice(0, 120);
     state.type = ['app', 'game'].indexOf(p.get("type")) >= 0 ? p.get("type") : '';
     input.value = state.q;
-    paintTabs();
     run();
   });
 
   S.ready(() => {
     root.textContent = '';
     root.append(bar, main);
-    paintTabs();
     paintHeader();
     run();
     if (!state.q) input.focus();

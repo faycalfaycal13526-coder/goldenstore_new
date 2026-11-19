@@ -2929,6 +2929,7 @@ html[dir="ltr"] .ms-back .icon, html[dir="ltr"] .ms-go { transform: scaleX(-1); 
 .ms-chip.is-hot { background: var(--surface-2); }
 .ms-chip.is-hot .ms-chip-label { font-weight: 700; }
 .ms-chip-flame { font-size: 13px; line-height: 1; }
+.ms-sec-empty { margin: 0; font-size: 13px; color: var(--text-3); line-height: 1.7; }
 .ms-chips-history .ms-chip { color: var(--text-2); }
 .ms-chip-skel {
   display: inline-block; height: 38px; width: 108px; border-radius: 999px;

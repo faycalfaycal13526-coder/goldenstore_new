@@ -145,30 +145,64 @@ export async function searchApps(env: Env, opts: SearchAppsOptions = {}): Promis
    written reviews decide the order, and the short display name is taken from
    the row itself. Nothing is hard-coded, so the list can never drift away
    from what the store actually has. */
-export async function trendingSearches(env: Env, limit = 14): Promise<{ term: string; slug: string; icon_url?: string }[]> {
+export async function trendingSearches(env: Env, limit = 14): Promise<{ term: string; slug: string; count: number }[]> {
   const n = Math.min(Math.max(Number(limit) || 14, 1), 24);
+  /* REAL search activity only: /api/search logs what people actually typed, and
+     this reads those rows back. A term is listed only if it was really typed at
+     least twice — no catalogue filler, nothing hard-coded. */
   try {
     const res = await env.DB.prepare(
-      `SELECT a.slug, a.name, a.icon_key,
-              COALESCE(a.downloads, 0) AS dl,
-              (SELECT COUNT(*) FROM reviews r WHERE r.app_slug = a.slug) AS rv
-         FROM apps a
-        ORDER BY (COALESCE(a.downloads, 0) + 5000 * (SELECT COUNT(*) FROM reviews r WHERE r.app_slug = a.slug)) DESC,
-                 a.name_lower ASC
+      `SELECT term, COUNT(*) AS hits, MAX(created_at) AS last_at
+         FROM search_queries
+        WHERE created_at >= ?
+        GROUP BY term
+       HAVING COUNT(*) >= 2
+        ORDER BY hits DESC, last_at DESC
         LIMIT ?`
-    ).bind(n).all();
-    return (res.results || []).map((r: any) => ({
-      term: displayTerm(String(r.name || r.slug || '')),
-      slug: String(r.slug || ''),
-      ...(r.icon_key ? { icon_key: String(r.icon_key) } : {}),
-    })).filter((r) => r.term && r.slug);
+    ).bind(Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30, n).all();
+    const rows = (res.results || []) as any[];
+    if (!rows.length) return [];
+    // Attach a real app slug when the typed term matches an app in the catalogue.
+    const out: { term: string; slug: string; count: number }[] = [];
+    for (const r of rows) {
+      const term = String(r.term || '').trim();
+      if (!term) continue;
+      let slug = '';
+      try {
+        const hit: any = await env.DB.prepare(
+          'SELECT slug FROM apps WHERE name_lower LIKE ? ORDER BY downloads DESC LIMIT 1'
+        ).bind(`%${likeEscape(term.toLowerCase())}%`).first();
+        slug = hit ? String(hit.slug || '') : '';
+      } catch { slug = ''; }
+      out.push({ term, slug, count: Number(r.hits) || 0 });
+    }
+    return out;
   } catch {
-    // Fallback: still real rows, simply ordered by name.
-    try {
-      const res = await env.DB.prepare('SELECT slug, name FROM apps ORDER BY name_lower ASC LIMIT ?').bind(n).all();
-      return (res.results || []).map((r: any) => ({ term: displayTerm(String(r.name || '')), slug: String(r.slug || '') }));
-    } catch { return []; }
+    // Table missing (older database): honestly report «no trending data yet».
+    return [];
   }
+}
+
+/** Idempotent schema for the real search log (safe on every deploy). */
+export async function ensureSearchQuerySchema(env: Env): Promise<void> {
+  try {
+    await env.DB.prepare(
+      'CREATE TABLE IF NOT EXISTS search_queries (id INTEGER PRIMARY KEY AUTOINCREMENT, term TEXT NOT NULL, created_at INTEGER NOT NULL)'
+    ).run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_search_queries_term ON search_queries(term)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_search_queries_time ON search_queries(created_at)').run();
+  } catch { /* already there */ }
+}
+
+/** Record one real search so the trending list is built from activity. */
+export async function recordSearchQuery(env: Env, rawTerm: string): Promise<void> {
+  const term = String(rawTerm || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (term.length < 2) return;
+  try {
+    await env.DB.prepare(
+      'INSERT INTO search_queries (term, created_at) VALUES (?, ?)'
+    ).bind(term, Math.floor(Date.now() / 1000)).run();
+  } catch { /* logging must never break a search */ }
 }
 
 /** Shorten a long store name into the term people actually type

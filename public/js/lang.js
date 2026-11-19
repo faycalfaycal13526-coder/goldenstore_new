@@ -133,6 +133,7 @@
     'تعذّر تحميل الإشعارات': { en: 'Could not load the notifications', fr: 'Impossible de charger les notifications', es: 'No se pudieron cargar las notificaciones' },
     'سجل البحث': { en: 'Search history', fr: 'Historique des recherches', es: 'Historial de búsqueda' },
     'حذف السجل': { en: 'Delete history', fr: 'Supprimer l’historique', es: 'Borrar historial' },
+    'لا توجد عمليات بحث رائجة بعد.': { en: 'No trending searches yet.', fr: 'Aucune recherche à chaud pour le moment.', es: 'Aún no hay búsquedas populares.' },
     'عمليات البحث الرائجة': { en: 'Trending searches', fr: 'Recherches à chaud', es: 'Búsquedas populares' },
     'ادعم قولدن ستور': { en: 'Support Golden Store', fr: 'Soutenir Golden Store', es: 'Apoyar Golden Store' },
     'حافظ على قولدن ستور آمناً ومجانياً': { en: 'Keep Golden Store Safe and Free', fr: 'Gardez Golden Store sûr et gratuit', es: 'Mantén Golden Store seguro y gratis' },

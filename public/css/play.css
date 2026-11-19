@@ -805,18 +805,23 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   line-height: 1.25; color: var(--text); text-align: start;
   letter-spacing: -0.2px;
 }
-.dlm-tabs { display: flex; align-items: stretch; padding: 0 2px; border-bottom: 0; }
+.dlm-tabs {
+  display: flex; align-items: stretch; justify-content: space-between;
+  padding: 0 8px; border-bottom: 0; gap: 14px;
+}
 .dlm-tab {
-  flex: 1 1 0; position: relative;
+  flex: 1 1 auto; position: relative;
   background: transparent; border: 0; cursor: pointer;
-  padding: 12px 3px 16px; font-family: inherit;
-  font-size: 13px; font-weight: 600; color: var(--text-2);
+  padding: 12px 2px 16px; font-family: inherit;
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
   -webkit-tap-highlight-color: transparent; white-space: nowrap;
   transition: color .15s;
 }
 html[data-theme="light"] .dlm-tab { color: #555; }
 .dlm-tab.active { color: var(--gold); }
-.dlm-tab .dlm-tab-in { position: relative; display: inline-block; }
+.dlm-tab .dlm-tab-in {
+  position: relative; display: inline-block; padding: 0 2px;
+}
 .dlm-tab.active .dlm-tab-in::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: -18px;
   height: 3px; border-radius: 0; background: var(--gold);
@@ -864,8 +869,12 @@ html[data-theme="light"] .dlm-empty-ico .icon { color: #000; }
   margin: 16px 0 0; font-size: 15px; font-weight: 400;
   color: #757575; line-height: 1.45;
 }
+@media (max-width: 370px) {
+  .dlm-tabs { gap: 10px; padding: 0 6px; }
+  .dlm-tab { font-size: 11.5px; }
+}
 @media (max-width: 340px) {
-  .dlm-tab { font-size: 12px; }
+  .dlm-tab { font-size: 11.5px; }
   .dlm-title { font-size: 19px; }
 }
 

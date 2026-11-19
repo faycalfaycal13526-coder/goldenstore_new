@@ -852,14 +852,14 @@
     // Telegram card, containing nothing but the button itself. A DocumentFragment
     // keeps the two sections as siblings without adding a wrapper <div>, so the
     // Telegram card stays exactly as it was and supportEntry() still follows.
-    const shareCard = el('section', { class: 'share-store-card', 'aria-label': t('مشاركة المتجر') },
+    const shareCard = el('section', { class: 'share-store-card', 'aria-label': t('نشر قولدن ستور') },
       el('button', {
         class: 'share-store-cta', type: 'button',
-        'aria-label': t('مشاركة المتجر'),
+        'aria-label': t('نشر قولدن ستور'),
         onclick: shareStore,
       },
         ico('share', 'icon'),
-        el('span', null, t('مشاركة المتجر')),
+        el('span', null, t('نشر قولدن ستور')),
       ),
     );
     const group = document.createDocumentFragment();

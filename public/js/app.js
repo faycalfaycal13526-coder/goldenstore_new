@@ -657,12 +657,15 @@
         : location.href;
       const pageUrl = origin ? `${origin}/app?slug=${encodeURIComponent(slugValue)}` : '';
       const name = (a && a.name) || 'Golden Store';
+      const isGame = !!(a && a.type === 'game');
       const payload = {
         title: name,
-        // Promotional text that invites people to install the app.
-        text: `${t('حمّل التطبيق الآن من Golden Store')} — ${name}`,
+        // Wording matches the kind: a game is never called «تطبيق».
+        text: isGame
+          ? `${t('العبها الآن من Golden Store')} — ${name}`
+          : `${t('حمّل التطبيق الآن من Golden Store')} — ${name}`,
         url, pageUrl, icon: (a && a.icon_url) || '',
-        kind: (a && a.type === 'game') ? 'game' : 'app',
+        kind: isGame ? 'game' : 'app',
       };
       if (window.GSShare && typeof window.GSShare.open === 'function') {
         window.GSShare.open(payload);

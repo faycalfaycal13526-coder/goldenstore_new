@@ -1,9 +1,12 @@
 /* =========================================================================
-   Golden Store — Professional publish/share sheet (2026-11-08)
-   * Standalone: opened only on click, never mounted at page load.
-   * Download link is the shared URL; a promotional text invites installing.
-   * Several external destinations are offered alongside native OS sharing.
-   * Dependency-free, keyboard accessible, RTL-aware, safe URL handling.
+   Golden Store — publish / share sheet (rebuilt)
+   * Mounted only on click, never at page load (dependency-free).
+   * Two clear lanes: instant destinations (WhatsApp, Telegram, Facebook, X,
+     Email) and a compact link box with one copy button — no duplicated
+     "copy link" buttons.
+   * Works for an app/game AND for the store itself (`kind: 'store'`), which
+     gets its own branded header, wording and logo tile.
+   * RTL-aware, keyboard accessible, http(s)-only links.
    Exposes window.GSShare.open({ title, text, url, pageUrl, icon, kind }).
    ========================================================================= */
 (function () {
@@ -82,8 +85,7 @@
   function onKey(e) { if (e.key === 'Escape') close(); }
 
   /* Brand names are language-neutral, so they are intentionally NOT routed
-     through the Arabic dictionary (the account page keeps its own strict
-     no-social-list contract; this sheet is mounted only on demand). */
+     through the Arabic dictionary. */
   function destinations(url, text, title) {
     var u = encodeURIComponent(url);
     var body = encodeURIComponent(text + '\n' + url);
@@ -101,74 +103,90 @@
     close();
     var url = safeUrl(o.url);                       // DOWNLOAD link
     var pageUrl = o.pageUrl ? safeUrl(o.pageUrl) : '';
+    var isStore = o.kind === 'store';
     var title = String(o.title || 'Golden Store');
     var text = String(o.text || t('حمّل التطبيق الآن من Golden Store'));
+    var kindLabel = isStore ? t('المتجر') : (o.kind === 'game' ? t('لعبة') : t('تطبيق'));
+
     var sheet = node('div', { class: 'gs-share-sheet', role: 'dialog',
       'aria-modal': 'true', 'aria-label': t('نشر ومشاركة') });
 
-    var closeBtn = node('button', { class: 'icon-btn gs-share-close', type: 'button',
-      'aria-label': t('إغلاق'), title: t('إغلاق'), onclick: close }, [ico('close')]);
+    /* ---- header: one line, no long paragraph ---- */
     var head = node('div', { class: 'gs-share-head' }, [
-      node('span', { class: 'gs-share-head-icon' }, [ico('share')]),
       node('div', { class: 'gs-share-head-text' }, [
         node('h2', { text: t('نشر ومشاركة') }),
-        node('p', { text: t('شارك رابط التنزيل مع نص يدعو للتثبيت') }),
+        node('p', { text: isStore ? t('انشر المتجر مع أصدقائك') : t('شارك التطبيق مع أصدقائك') }),
       ]),
-      closeBtn,
+      node('button', { class: 'gs-share-close', type: 'button',
+        'aria-label': t('إغلاق'), title: t('إغلاق'), onclick: close }, [ico('close')]),
     ]);
 
+    /* ---- preview: small tile + name + one quiet line ---- */
     var previewIcon;
     if (o.icon) {
       previewIcon = node('img', { class: 'gs-share-preview-icon', src: String(o.icon), alt: '' });
-      previewIcon.addEventListener('error', function () { previewIcon.style.visibility = 'hidden'; });
+      previewIcon.addEventListener('error', function () {
+        previewIcon.style.visibility = 'hidden';
+        previewIcon.parentNode.classList.add('is-fallback');
+      });
     } else {
-      previewIcon = node('span', { class: 'gs-share-preview-icon is-fallback' }, [ico(o.kind === 'game' ? 'gamepad' : 'package')]);
+      previewIcon = node('span', { class: 'gs-share-preview-icon is-glyph' },
+        [ico(isStore ? 'spark' : (o.kind === 'game' ? 'gamepad' : 'package'))]);
     }
-    var preview = node('div', { class: 'gs-share-preview' }, [
+    var preview = node('div', { class: 'gs-share-preview' + (isStore ? ' is-store' : '') }, [
       previewIcon,
       node('div', { class: 'gs-share-preview-text' }, [
         node('strong', { text: title }),
-        node('span', { text: text }),
+        node('span', { text: kindLabel + ' • Golden Store' }),
       ]),
     ]);
 
+    /* ---- destinations: round brand tiles ---- */
+    var targets = node('div', { class: 'gs-share-targets' });
+    destinations(url, text, title).forEach(function (d) {
+      var img = node('img', { class: 'gs-share-target-icon', src: d.icon,
+        alt: '', width: '24', height: '24', loading: 'lazy' });
+      img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
+      targets.appendChild(node('a', { class: 'gs-share-target', 'data-net': d.net,
+        href: d.href, target: '_blank', rel: 'noopener noreferrer', title: d.label,
+        'aria-label': d.label },
+        [node('span', { class: 'gs-share-target-art' }, [img]), node('span', { class: 'gs-share-target-name', text: d.label })]));
+    });
+
+    /* ---- one link box: field + icon copy button ---- */
     var urlInput = node('input', { class: 'gs-share-url-input', type: 'text',
       readonly: 'readonly', value: url, 'aria-label': t('رابط التنزيل'), dir: 'ltr' });
-    var copyBtn = node('button', { class: 'btn btn-secondary btn-sm gs-share-copy', type: 'button',
-      onclick: function () { doCopy(url, copyBtn); } }, [ico('copy'), t('نسخ')]);
+    var copyBtn = node('button', { class: 'gs-share-copy', type: 'button',
+      'aria-label': t('نسخ الرابط'), title: t('نسخ الرابط'),
+      onclick: function () { doCopy(url, copyBtn); } }, [ico('copy')]);
     var urlRow = node('div', { class: 'gs-share-url-row' }, [urlInput, copyBtn]);
 
+    /* ---- the promotional text stays available, folded away ---- */
     var textArea = node('textarea', { class: 'gs-share-text', readonly: 'readonly',
-      rows: '3', 'aria-label': t('نص المشاركة') });
+      rows: '2', 'aria-label': t('نص المشاركة') });
     textArea.value = text + '\n' + url;
-    var copyTextBtn = node('button', { class: 'btn btn-secondary btn-sm', type: 'button',
+    var copyTextBtn = node('button', { class: 'gs-share-text-copy', type: 'button',
       onclick: function () { doCopy(text + '\n' + url, copyTextBtn); } },
       [ico('copy'), t('نسخ النص')]);
+    var textFold = node('details', { class: 'gs-share-fold' }, [
+      node('summary', null, [t('نص المشاركة')]),
+      textArea,
+      node('div', { class: 'gs-share-text-actions' }, [copyTextBtn]),
+    ]);
 
     function doCopy(value, btn) {
       copyText(value).then(function (okCopy) {
         if (!okCopy) { toast(t('تعذّر نسخ الرابط'), 'error'); return; }
         toast(t('تم نسخ الرابط'), 'success');
         if (btn) {
-          var old = btn.textContent;
-          btn.textContent = t('تم النسخ');
           btn.classList.add('is-copied');
-          setTimeout(function () { btn.textContent = old; btn.classList.remove('is-copied'); }, 1600);
+          try { btn.setAttribute('data-done', t('تم النسخ')); } catch (e) {}
+          setTimeout(function () { btn.classList.remove('is-copied'); btn.removeAttribute('data-done'); }, 1500);
         }
       });
     }
 
-    var targets = node('div', { class: 'gs-share-targets' });
-    destinations(url, text, title).forEach(function (d) {
-      // Real brand SVG files instead of the old coloured dot placeholder.
-      var img = node('img', { class: 'gs-share-target-icon', src: d.icon,
-        alt: '', width: '20', height: '20', loading: 'lazy' });
-      img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
-      targets.appendChild(node('a', { class: 'gs-share-target', 'data-net': d.net,
-        href: d.href, target: '_blank', rel: 'noopener noreferrer', title: d.label },
-        [img, node('span', { text: d.label })]));
-    });
-
+    /* ---- actions: native share first, then a plain look at the link ---- */
     var actions = node('div', { class: 'gs-share-actions' });
     if (navigator.share) {
       actions.appendChild(node('button', { class: 'btn btn-primary btn-block', type: 'button',
@@ -181,31 +199,24 @@
             });
         } }, [ico('share'), t('مشاركة عبر النظام')]));
     }
-    actions.appendChild(node('button', { class: 'btn btn-secondary btn-block', type: 'button',
-      onclick: function () { doCopy(url, copyBtn); } }, [ico('copy'), t('نسخ الرابط')]));
-    actions.appendChild(node('a', { class: 'btn btn-secondary btn-block', href: url,
-      target: '_blank', rel: 'noopener noreferrer' }, [ico('download'), t('فتح رابط التنزيل')]));
+    actions.appendChild(node('a', { class: 'btn btn-secondary', href: url,
+      target: '_blank', rel: 'noopener noreferrer' }, [ico('download'), isStore ? t('فتح صفحة التحميل') : t('فتح رابط التنزيل')]));
     if (pageUrl) {
-      actions.appendChild(node('a', { class: 'btn btn-secondary btn-block', href: pageUrl,
-        target: '_blank', rel: 'noopener noreferrer' }, [ico('external'), t('فتح صفحة التطبيق')]));
+      actions.appendChild(node('a', { class: 'btn btn-secondary', href: pageUrl,
+        target: '_blank', rel: 'noopener noreferrer' }, [ico('external'), isStore ? t('فتح المتجر') : t('فتح صفحة التطبيق')]));
     }
-
-    var footer = node('p', { class: 'gs-share-foot' }, [
-      t('الرابط عام وآمن، ويمكن مشاركته مع أي شخص.'),
-    ]);
 
     sheet.appendChild(node('div', { class: 'gs-share-grip' }));
     sheet.appendChild(head);
     sheet.appendChild(preview);
-    sheet.appendChild(node('label', { class: 'gs-share-label', text: t('رابط التنزيل') }));
-    sheet.appendChild(urlRow);
-    sheet.appendChild(node('label', { class: 'gs-share-label', text: t('نص المشاركة') }));
-    sheet.appendChild(textArea);
-    sheet.appendChild(node('div', { class: 'gs-share-text-actions' }, [copyTextBtn]));
-    sheet.appendChild(node('label', { class: 'gs-share-label', text: t('مواقع أخرى للنشر') }));
+    sheet.appendChild(node('div', { class: 'gs-share-label', text: t('انشر عبر') }));
     sheet.appendChild(targets);
+    sheet.appendChild(node('div', { class: 'gs-share-label', text: t('رابط التنزيل') }));
+    sheet.appendChild(urlRow);
+    sheet.appendChild(textFold);
     sheet.appendChild(actions);
-    sheet.appendChild(footer);
+    sheet.appendChild(node('p', { class: 'gs-share-foot' },
+      [isStore ? t('رابط المتجر الرسمي، يعمل مع أي شخص.') : t('الرابط عام وآمن، ويمكن مشاركته مع أي شخص.')]));
 
     var overlay = node('div', { class: 'gs-share-overlay' }, [sheet]);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });

@@ -987,6 +987,102 @@
     setTimeout(() => a.remove(), 30000);
   }
 
+  /* «ادعم قولدن ستور» — a sheet modelled on the owner's reference screenshot:
+     hand-with-heart glyph, a title, two short paragraphs, two full-width
+     buttons (visit the real site / share it) and a close button.
+     Everything here is real: the visit button opens the canonical domain,
+     the share button uses the Web Share API with a clipboard fallback, and
+     «لا تُظهر هذه الرسالة مرة أخرى» is stored locally. */
+  const SUPPORT_HIDE_KEY = 'gs_support_sheet_hidden';
+  const CANONICAL_HOST = 'goldenstore.online';
+  const TELEGRAM_URL = 'https://t.me/goldenstore_10';
+
+  function supportSheetHidden() {
+    try { return localStorage.getItem(SUPPORT_HIDE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function hideSupportSheet() {
+    try { localStorage.setItem(SUPPORT_HIDE_KEY, '1'); } catch (e) {}
+  }
+
+  /* Open the official site. In the browser we navigate in place (no pop-up
+     window); inside the Android shell we hand the URL to the native browser. */
+  function openCanonicalSite() {
+    const url = `https://${CANONICAL_HOST}/`;
+    const bridge = window.GSAndroid;
+    if (bridge && typeof bridge.openExternal === 'function') {
+      try { bridge.openExternal(url); return; } catch (e) { /* fall through */ }
+    }
+    window.location.href = url;
+  }
+
+  function shareStore(onDone) {
+    const url = `https://${CANONICAL_HOST}/`;
+    const data = {
+      title: 'Golden Store',
+      text: t('متجر قولدن ستور — تطبيقات وألعاب بأمان وبدون إعلانات مزعجة.'),
+      url,
+    };
+    const finish = () => { if (onDone) onDone(); };
+    if (navigator.share) {
+      navigator.share(data).then(finish).catch(() => {});
+      return;
+    }
+    const copy = () => navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(url).then(() => true).catch(() => false)
+      : Promise.resolve(false);
+    copy().then((copied) => {
+      toast(copied ? t('تم نسخ رابط الموقع') : t('انسخ الرابط من شريط العنوان'), copied ? 'success' : 'info');
+      finish();
+    });
+  }
+
+  function openSupportSheet() {
+    let closed = false;
+    const close = () => { if (closed) return; closed = true; overlay.remove(); };
+    const primary = el('button', { class: 'support-sheet-btn primary', type: 'button',
+      onclick: () => { openCanonicalSite(); } },
+      t('زيارة الموقع الرسمي'));
+    const secondary = el('button', { class: 'support-sheet-btn secondary', type: 'button',
+      onclick: () => shareStore(() => secondary.textContent = t('تمت المشاركة، شكراً لك')) },
+      ico('share', 'icon'), t('شارك الموقع'));
+    const never = el('label', { class: 'support-sheet-never' },
+      el('input', { type: 'checkbox', onchange: (e) => { if (e.target.checked) hideSupportSheet(); else { try { localStorage.removeItem(SUPPORT_HIDE_KEY); } catch (err) {} } } }),
+      el('span', null, t('لا تُظهر هذه الرسالة مرة أخرى')),
+    );
+    const card = el('div', { class: 'support-sheet-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gs-support-title' },
+      el('button', { class: 'support-sheet-close', type: 'button', 'aria-label': t('إغلاق'), onclick: close }, ico('close', 'icon')),
+      el('div', { class: 'support-sheet-glyph', 'aria-hidden': 'true' }, '🫶'),
+      el('h2', { class: 'support-sheet-title', id: 'gs-support-title' }, t('حافظ على قولدن ستور آمناً ومجانياً')),
+      el('p', { class: 'support-sheet-text' }, t('نعمل كل يوم على تحديث التطبيقات ومراجعة الملفات قبل نشرها. طلبك للتحديث ومساهمتك في نشر الموقع هما ما يُبقيه مجانياً:')),
+      el('ul', { class: 'support-sheet-list' },
+        el('li', null, t('تغطية تكاليف السيرفر والنطاق')),
+        el('li', null, t('تحديث أسرع للإصدارات الجديدة')),
+        el('li', null, t('حجب المواقع المزيفة والملفات الخطرة')),
+      ),
+      el('p', { class: 'support-sheet-text' }, t('الموقع الرسمي الوحيد هو') + ' ' + CANONICAL_HOST + ' — ' + t('أي رابط آخر ليس تابعاً لنا، ومشاركتك للرابط الرسمي هي أهم دعم.')),
+      el('div', { class: 'support-sheet-actions' }, primary, secondary),
+      el('a', { class: 'support-sheet-link', href: TELEGRAM_URL, target: '_blank', rel: 'noopener' }, ico('send', 'icon'), t('انضم الى المجموعة')),
+      never,
+    );
+    const overlay = el('div', { class: 'dialog-overlay support-sheet-overlay', onclick: (e) => { if (e.target === overlay) close(); } }, card);
+    document.body.append(overlay);
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+    });
+    primary.focus();
+  }
+
+  /* The round badge next to «تثبيت» — same visual weight as the reference. */
+  function supportButton() {
+    const hidden = supportSheetHidden();
+    const btn = el('button', { class: 'd-support-btn' + (hidden ? ' is-muted' : ''), type: 'button',
+      'aria-label': t('ادعم قولدن ستور'), title: t('ادعم قولدن ستور'), onclick: () => { openSupportSheet(); } },
+      ico('heart', 'icon'),
+      el('span', { class: 'd-support-dot' }),
+    );
+    return btn;
+  }
+
   function installControl(app) {
     const label = el('span', { class: 'install-label', 'data-noi18n': '' }, t('تثبيت'));
     const fill = el('span', { class: 'install-fill' });
@@ -997,7 +1093,7 @@
     // Local, stable anchor: resolveInstallState() may run BEFORE this wrapper
     // is attached to .detail. Never use .detail.prepend() as a fallback —
     // that put the «تثبيت / حذف الملف» bar above the app icon (the glitch).
-    const actionsWrap = el('div', { class: 'd-actions' }, group);
+    const actionsWrap = el('div', { class: 'd-actions' }, group, supportButton());
     let pendingActionsBar = null;
     const cancelBtn = el('button', {
       class: 'btn btn-secondary btn-lg download-cancel-btn hidden',

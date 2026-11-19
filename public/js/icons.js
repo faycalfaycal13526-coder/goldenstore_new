@@ -13,7 +13,9 @@ const ICONS = {
 
   // Actions
   download:    '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
-  // Plain newspaper glyph — the «مكتبتي» (blog) button in the bottom bar.
+  // «مكتبتي» (blog) button in the bottom bar — plain news list, the owner's choice.
+  newsList:    '<path d="M4 6h10"/><path d="M4 12h16"/><path d="M4 18h13"/>',
+  // Plain newspaper glyph (previous choice, kept unused by the nav).
   newspaper:   '<path d="M4 5h13a1 1 0 0 1 1 1v12a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2z"/><path d="M4 5a1 1 0 0 1 1-1h1v17"/><path d="M8 8h7M8 11h7M8 14h4"/>',
   // Filled Material-style download glyph (legacy, kept for other screens).
   downloadBold: '<path d="M19 9h-4V3H9v6H5l7 7 7-7z" fill="currentColor" stroke="none"/><path d="M5 17v3h14v-3H5z" fill="currentColor" stroke="none"/>',

@@ -708,7 +708,7 @@ const NAV_ITEMS_RAW = [
   { key: 'apps', label: 'التطبيقات', icon: 'apps', href: '/apps' },
   // Owner request: this button opens the blog, INSIDE the app, with a normal
   // newspaper icon.
-  { key: 'library', label: 'مكتبتي', icon: 'newspaper', href: '/articles' },
+  { key: 'library', label: 'مكتبتي', icon: 'newsList', href: '/articles' },
   { key: 'account', label: 'أنت', icon: 'user', href: '/account' },
 ];
 /* ---------------- Legal pages, footer & sign-in consent ------------------ */

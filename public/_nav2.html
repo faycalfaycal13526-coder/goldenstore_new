@@ -1,0 +1,19 @@
+<!doctype html><html lang="ar" dir="rtl" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/play.css">
+</head><body>
+<nav class="bottomnav"><div class="bottomnav-inner">
+<a class="navitem" href="/"><span class="pill-ico" id="i1"></span><span class="nav-label">الألعاب</span></a>
+<a class="navitem" href="/apps"><span class="pill-ico" id="i2"></span><span class="nav-label">التطبيقات</span></a>
+<a class="navitem active" href="/articles"><span class="pill-ico" id="i3"></span><span class="nav-label">مكتبتي</span></a>
+<a class="navitem" href="/account"><span class="pill-ico" id="i4"></span><span class="nav-label">أنت</span></a>
+</div></nav>
+<script src="/js/icons.js"></script>
+<script>
+  ['i1:gamepad','i2:apps','i3:newsList','i4:user'].forEach(p => {
+    const [id, n] = p.split(':');
+    document.getElementById(id).appendChild(window.GSIcons.iconEl(n));
+  });
+</script>
+</body></html>

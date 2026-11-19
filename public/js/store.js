@@ -779,7 +779,11 @@ function renderSiteFooter() {
   if (document.querySelector('.site-footer')) return;
   // Per-page opt-out. Owner request: the notification centre ends with its
   // feed — no «© Golden Store» line and no legal-links footer underneath it.
-  if (document.body && document.body.dataset && document.body.dataset.noFooter === '1') return;
+  if (document.body && document.body.dataset && document.body.dataset.noFooter === '1') {
+    // Belt and braces: drop anything a previous (cached) bundle already put there.
+    document.querySelectorAll('.site-footer, #siteFooter').forEach((n) => n.remove());
+    return;
+  }
   const shell = document.querySelector('.shell') || document.body;
   const nav = el('nav', { class: 'legal-links', 'aria-label': t('روابط قانونية'), 'data-noi18n': '' },
     ...LEGAL_LINKS.map((l) => el('a', { class: 'legal-link', href: l.href }, t(l.label))));

@@ -3540,6 +3540,21 @@ body.has-update-banner { padding-top: calc(58px + env(safe-area-inset-top, 0px))
 .gs-notif-empty { padding: 54px 20px; text-align: center; color: var(--text-2); }
 
 /* =====================================================================
+   Notification center — NO site footer (owner request, twice).
+   store.js already skips renderSiteFooter() on this page via
+   <body data-no-footer="1">; this rule is the second safety net: even a stale
+   cached bundle that still injects .site-footer cannot show it here.
+   ===================================================================== */
+body[data-page="notifications"] .site-footer,
+body[data-page="notifications"] #siteFooter,
+body[data-page="notifications"] .legal-links {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important; margin: 0 !important; padding: 0 !important;
+  border: 0 !important; overflow: hidden !important;
+}
+
+/* =====================================================================
    Notification center — dense feed (owner reference):
    header → 3 quick round actions → rows [icon][title / time · tap hint][dot]
    ===================================================================== */

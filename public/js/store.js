@@ -800,10 +800,10 @@ function topbarSearch(user) {
     el('div', { class: 'topbar-home' },
       el('a', { href: '/', class: 'brand', 'aria-label': 'Golden Store' }, el('img', { src: '/images/logo.png', alt: 'Golden Store' })),
       el('div', { class: 'tb-spacer' }),
+      supportTopButton(),
       libraryBtn,
       bellBtn,
       searchBtn,
-      supportTopButton(),
     ),
   );
 }

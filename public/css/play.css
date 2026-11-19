@@ -572,7 +572,7 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
    next to «مكتبتي» / «الإشعارات» / «بحث». Perfectly circular, same frame as
    its neighbours (40px on the home top bar), gold stroke icon. */
 .support-top-btn { border-radius: 50%; color: var(--gold, #f4c01f); }
-.support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; }
+.support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; overflow: visible; }
 .support-top-btn:hover { color: var(--gold-2, #ffd766); }
 .support-top-btn:active { transform: scale(.94); }
 .support-top-btn.is-muted { opacity: .55; }

@@ -1,13 +1,14 @@
-// Minimal search — one field, one clean result list. No sidebar, no filters,
-// no autocomplete popup. Instant results with debounce + URL sync, no reload.
+// Search — Play-Store style: one field, a short row of type tabs right under it
+// (الكل / تطبيقات / ألعاب), then a clean result list. Instant (debounced) with
+// URL sync, no reload, no popup, no sidebar.
 (function () {
   const S = window.Store;
   const { el, ico, api, t } = S;
+  const appName = (a) => (typeof S.appName === 'function' ? S.appName(a) : ((a && a.name_t) || (a && a.name) || ''));
   const root = document.getElementById('root');
   S.bottomNav('');
 
   // Static head strings are translated too (lang.js only walks <body>).
-  // This runs at parse time, before lang.js' DOMContentLoaded title pass.
   document.title = t('بحث') + ' — Golden Store';
   try {
     const desc = document.querySelector('meta[name="description"]');
@@ -17,8 +18,16 @@
   const PAGE_SIZE = 20;
   const DEBOUNCE = 250;
 
+  const TYPES = [
+    { key: '', label: 'الكل' },
+    { key: 'app', label: 'التطبيقات' },
+    { key: 'game', label: 'ألعاب' },
+  ];
+
+  const qs0 = new URLSearchParams(location.search);
   const state = {
-    q: (new URLSearchParams(location.search).get('q') || '').trim().slice(0, 120),
+    q: (qs0.get('q') || '').trim().slice(0, 120),
+    type: ['app', 'game'].indexOf(qs0.get("type")) >= 0 ? qs0.get("type") : '',
     offset: 0,
   };
 
@@ -33,8 +42,6 @@
     class: 'ms-ico', type: 'button', 'aria-label': t('مسح'), title: t('مسح'),
     onclick: () => { input.value = ''; state.q = ''; syncUrl(); run(); input.focus(); },
   }, ico('close'));
-  // Language switcher lives inside the bar so the page is fully translated
-  // without having to leave it. Uses the shared GSI18N control when available.
   const langBox = el('div', { class: 'ms-lang' });
   let switcher = null;
   try { if (typeof S.langSwitcherEl === 'function') switcher = S.langSwitcherEl(); } catch (e) {}
@@ -58,13 +65,30 @@
     ),
   );
 
-  const kicker = el('div', { class: 'ms-kicker' }, 'Golden Store · ' + t('بحث'));
-  const titleEl = el('h1', { class: 'ms-title' });
-  const countEl = el('div', { class: 'ms-count' });
-  const header = el('div', { class: 'ms-header' }, kicker, titleEl, countEl);
+  // Type tabs — the only extra control on the page: 3 words, nothing else.
+  const tabsEl = el('div', { class: 'ms-tabs', role: 'tablist' });
+  function paintTabs() {
+    tabsEl.textContent = '';
+    TYPES.forEach((k) => {
+      tabsEl.append(el('button', {
+        class: 'ms-tab' + (k.key === state.type ? ' on' : ''), type: 'button', role: 'tab',
+        'aria-selected': k.key === state.type ? 'true' : 'false',
+        onclick: () => { if (state.type === k.key) return; state.type = k.key; state.offset = 0; syncUrl(); paintTabs(); run(); },
+      }, t(k.label)));
+    });
+  }
+
+  const kickerEl = el('div', { class: 'ms-kicker' }, 'Golden Store · ' + t('بحث'));
+  const head = el('div', { class: 'ms-header' },
+    kickerEl,
+    el('div', { class: 'ms-head-row' },
+      el('h1', { class: 'ms-title' }),
+      el('span', { class: 'ms-count' }),
+    ),
+  );
   const listEl = el('div', { class: 'ms-list', role: 'list' });
   const moreEl = el('div', { class: 'ms-more' });
-  const main = el('main', { class: 'ms-main' }, header, listEl, moreEl);
+  const main = el('main', { class: 'ms-main' }, tabsEl, head, listEl, moreEl);
 
   /* ----------------------------- Results -------------------------------- */
   let seq = 0;
@@ -87,10 +111,10 @@
       href: '/app?slug=' + encodeURIComponent(a.slug),
     },
       el('span', { class: 'ms-art' },
-        a.icon_url ? el('img', { src: a.icon_url, alt: '', loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+        a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
       el('span', { class: 'ms-info' },
-        el('span', { class: 'ms-name' }, el('bdi', null, a.name)),
-        el('span', { class: 'ms-sub' }, a.developer || S.categoryName(a.category) || t('تطبيق')),
+        el('span', { class: 'ms-name' }, el('bdi', { 'data-i18n-app': a.name || '' }, appName(a))),
+        el('span', { class: 'ms-sub' }, el('bdi', null, a.developer || S.categoryName(a.category) || t('تطبيق'))),
         meta.length ? el('span', { class: 'ms-meta' }, ...meta) : null,
       ),
       ico('chevronStart', 'icon icon-sm ms-go'),
@@ -99,8 +123,8 @@
 
   function paintHeader() {
     const unit = (one, many) => t(total === 1 ? one : many);
-    titleEl.textContent = state.q ? t('نتائج البحث') : t('الأكثر تحميلاً');
-    countEl.textContent = state.q
+    head.querySelector('.ms-title').textContent = state.q ? t('نتائج البحث') : t('الأكثر تحميلاً');
+    head.querySelector('.ms-count').textContent = state.q
       ? '«' + state.q + '» · ' + S.formatCount(total) + ' ' + unit('نتيجة', 'نتائج')
       : S.formatCount(total) + ' ' + unit('تطبيق', 'تطبيقات');
     clearBtn.classList.toggle('hidden', !state.q);
@@ -134,6 +158,7 @@
     }
     const qs = new URLSearchParams({ sort: 'popular', limit: String(PAGE_SIZE), offset: String(state.offset) });
     if (state.q) qs.set('q', state.q);
+    if (state.type) qs.set('type', state.type);
     try {
       const data = await api('/api/search?' + qs.toString(), { signal: ctrl.signal });
       if (mySeq !== seq) return;
@@ -161,8 +186,11 @@
 
   /* ------------------------------- Events ------------------------------- */
   function syncUrl() {
-    const qs = state.q ? '?q=' + encodeURIComponent(state.q) : '';
-    try { history.replaceState(null, '', '/search' + qs); } catch (e) {}
+    const p = new URLSearchParams();
+    if (state.q) p.set('q', state.q);
+    if (state.type) p.set('type', state.type);
+    const s = p.toString();
+    try { history.replaceState(null, '', '/search' + (s ? '?' + s : '')); } catch (e) {}
   }
 
   let timer = null;
@@ -179,14 +207,18 @@
     }
   });
   window.addEventListener('popstate', () => {
-    state.q = (new URLSearchParams(location.search).get('q') || '').trim().slice(0, 120);
+    const p = new URLSearchParams(location.search);
+    state.q = (p.get('q') || '').trim().slice(0, 120);
+    state.type = ['app', 'game'].indexOf(p.get("type")) >= 0 ? p.get("type") : '';
     input.value = state.q;
+    paintTabs();
     run();
   });
 
   S.ready(() => {
     root.textContent = '';
     root.append(bar, main);
+    paintTabs();
     paintHeader();
     run();
     if (!state.q) input.focus();

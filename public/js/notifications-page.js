@@ -1,11 +1,19 @@
-/* Golden Store — standalone full-page notification center.
-   Replaces the old small dialog. Uses the same curated baseline as the bell. */
+/* Golden Store — notification center (full page).
+   Layout: header → one-line summary → filter chips → grouped list.
+   Only real notifications are listed (no placeholder rows). */
 (function () {
   'use strict';
   const S = window.Store;
   if (!S) return;
   const { el, ico, t, formatDate } = S;
   const root = document.getElementById('root');
+
+  const KINDS = [
+    { key: 'all', label: 'الكل', icon: 'bell' },
+    { key: 'new_app', label: 'تطبيق جديد', icon: 'package' },
+    { key: 'update', label: 'تحديثات', icon: 'download' },
+    { key: 'announcement', label: 'إعلان', icon: 'message' },
+  ];
 
   function icon(name, extra) { return ico(name, extra || 'icon'); }
 
@@ -14,52 +22,78 @@
     return v === 'new_app' || v === 'update' || v === 'announcement' ? v : 'announcement';
   }
 
-  function summaryCard(count) {
-    return el('section', { class: 'gs-notif-summary', 'data-noi18n': '' },
-      el('div', { class: 'gs-notif-summary-ico' }, icon('bell')),
-      el('div', null,
-        el('h2', null, t('مركز الإشعارات')),
-        el('p', null, t('آخر أخبار المتجر والتحديثات والتطبيقات الجديدة.')),
+  function typeLabel(type) {
+    return type === 'new_app' ? t('تطبيق جديد')
+      : type === 'update' ? t('تحديث المتجر') : t('إعلان');
+  }
+
+  /* ------------------------------- pieces ------------------------------- */
+  function summary(list) {
+    const unread = list.filter((n) => !n.read_at && !n.seen).length;
+    return el('section', { class: 'noi-sum' },
+      el('div', { class: 'noi-sum-main' },
+        el('span', { class: 'noi-sum-ico' }, icon('bell')),
+        el('div', { class: 'noi-sum-text' },
+          el('strong', null, S.formatCount(list.length)),
+          el('span', null, t(list.length === 1 ? 'إشعار' : 'إشعارات')),
+        ),
       ),
-      el('span', { class: 'gs-check-version', style: { margin: '0', flex: '0 0 auto' } }, String(count)),
+      el('span', { class: 'noi-sum-dot' + (unread ? ' is-new' : ''), title: t('غير مقروء') },
+        unread ? S.formatCount(unread) : '✓'),
     );
+  }
+
+  function chips(active, counts, onPick) {
+    const bar = el('div', { class: 'noi-chips', role: 'tablist' });
+    KINDS.forEach((k) => {
+      const n = k.key === 'all' ? counts.all : (counts[k.key] || 0);
+      const b = el('button', {
+        class: 'noi-chip' + (k.key === active ? ' on' : ''), type: 'button', role: 'tab',
+        'aria-selected': k.key === active ? 'true' : 'false',
+        onclick: () => onPick(k.key),
+      },
+        el('span', null, t(k.label)),
+        el('span', { class: 'noi-chip-n' }, S.formatCount(n)),
+      );
+      bar.append(b);
+    });
+    return bar;
   }
 
   function item(n) {
     const type = typeOf(n);
-    let node;
     const updateData = type === 'update' && n.data && n.data.apk_url ? n.data : null;
+    let node;
     if (updateData) {
-      node = el('a', { class: `gs-notif-item is-update`, href: '#', 'data-noi18n': '',
+      node = el('a', { class: 'noi-item is-update', href: '#',
         onclick: (e) => { e.preventDefault(); S.showUpdateDialog(updateData, { manual: true }); } });
     } else if (n.app_slug) {
-      node = el('a', { class: `gs-notif-item is-${type}`, 'data-noi18n': '',
+      node = el('a', { class: `noi-item is-${type}`,
         href: `/app?slug=${encodeURIComponent(n.app_slug)}` });
     } else {
-      node = el('div', { class: `gs-notif-item is-${type}`, 'data-noi18n': '' });
+      node = el('div', { class: `noi-item is-${type}` });
     }
-    const label = type === 'new_app' ? t('تطبيق جديد')
-      : type === 'update' ? t('تحديث المتجر') : t('إعلان');
     node.append(
-      el('div', { class: 'gs-notif-ico' },
-        icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell')),
-      el('div', { class: 'gs-notif-info' },
-        el('div', { class: 'gs-notif-top' },
+      el('span', { class: 'noi-ico' },
+        icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'message')),
+      el('span', { class: 'noi-info' },
+        el('span', { class: 'noi-top' },
           el('strong', null, n.title || ''),
-          el('span', { class: 'gs-notif-type' }, label),
+          el('span', { class: 'noi-type' }, typeLabel(type)),
         ),
-        n.body ? el('div', { class: 'gs-notif-body' }, n.body) : null,
-        el('div', { class: 'gs-notif-meta' }, formatDate(n.created_at)),
-        updateData ? el('div', { class: 'gs-notif-meta' }, t('تحميل التحديث')) : null,
+        n.body ? el('span', { class: 'noi-body' }, n.body) : null,
+        el('span', { class: 'noi-meta' }, formatDate(n.created_at)),
       ),
+      updateData ? el('span', { class: 'noi-go' }, t('تحميل التحديث')) : null,
     );
     return node;
   }
 
+  /* -------------------------------- shell -------------------------------- */
   function build() {
     root.innerHTML = '';
     root.className = 'shell';
-    const body = el('main', { class: 'gs-page-body' });
+    const body = el('main', { class: 'gs-page-body noi-body' });
     const refreshBtn = el('button', {
       class: 'icon-btn', type: 'button', title: t('تحديث الإشعارات'),
       'aria-label': t('تحديث الإشعارات'),
@@ -78,27 +112,56 @@
     return { body, refreshBtn };
   }
 
-  async function load(body, refreshBtn) {
+  /* -------------------------------- render ------------------------------- */
+  let all = [];
+  let filter = 'all';
+
+  function paint(body, refreshBtn) {
     body.innerHTML = '';
-    body.append(el('div', { class: 'gs-notif-empty' }, el('div', { class: 'spinner' }),
-      el('p', null, t('جارٍ تحميل الإشعارات…'))));
-    let list = [];
-    try { list = await S.loadNotificationsForPage(); } catch (e) { list = []; }
-    body.innerHTML = '';
-    body.append(summaryCard(list.length));
+    const counts = { all: all.length, new_app: 0, update: 0, announcement: 0 };
+    all.forEach((n) => { counts[typeOf(n)] = (counts[typeOf(n)] || 0) + 1; });
+    counts.all = all.length;
+    body.append(summary(all));
+    const onPick = (k) => { filter = k; paint(body, refreshBtn); };
+    body.append(chips(filter, counts, onPick));
+
+    const list = filter === 'all' ? all : all.filter((n) => typeOf(n) === filter);
     if (!list.length) {
-      body.append(el('div', { class: 'gs-notif-empty', 'data-noi18n': '' },
-        icon('bell', 'icon'),
-        el('h2', null, t('لا توجد إشعارات بعد')),
-        el('p', null, t('ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.')),
+      const isFiltered = filter !== 'all';
+      body.append(el('div', { class: 'noi-empty' },
+        el('span', { class: 'noi-empty-ico' }, icon(isFiltered ? 'list' : 'bell')),
+        el('h2', null, isFiltered ? t('لا توجد إشعارات في هذا القسم') : t('لا توجد إشعارات بعد')),
+        el('p', null, isFiltered
+          ? t('جرّب قسم «الكل».')
+          : t('ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.')),
       ));
     } else {
-      const wrap = el('div', { class: 'gs-notif-list' });
+      const wrap = el('div', { class: 'noi-list' });
       list.forEach((n) => wrap.append(item(n)));
       body.append(wrap);
     }
-    // No update-check control here: it lives in Account, the download page
-    // and the update dialog only (user request).
+    refreshBtn.classList.remove('is-busy');
+  }
+
+  // The page marks notifications as seen when it loads, so the list it returns
+  // is remembered here — the refresh button must not empty the page.
+  let loadedOnce = false;
+
+  async function load(body, refreshBtn) {
+    refreshBtn.classList.add('is-busy');
+    if (!loadedOnce) {
+      body.innerHTML = '';
+      body.append(el('div', { class: 'noi-empty' }, el('div', { class: 'spinner' }),
+        el('p', null, t('جارٍ تحميل الإشعارات…'))));
+    }
+    try {
+      const fresh = await S.loadNotificationsForPage();
+      all = (fresh || []).filter(Boolean);
+      loadedOnce = true;
+    } catch (e) {
+      if (!loadedOnce) all = [];
+    }
+    paint(body, refreshBtn);
     refreshBtn.onclick = () => load(body, refreshBtn);
   }
 

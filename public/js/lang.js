@@ -22,9 +22,97 @@
   document.documentElement.lang = lang;
   document.documentElement.dir = dir;
 
+  // ---- App & game names ------------------------------------------------------
+  // Keyed by the canonical name stored in the database (English most of the
+  // time, Arabic for a few). Brand names stay untouched in every language;
+  // only descriptive titles are localised. Unknown names fall back to the
+  // stored name, so a new app is never broken by a missing entry.
+  var APP_NAMES = {
+    // The one entry stored in Arabic: everyone else reads CapCut.
+    'كاب كات': { ar: 'كاب كات', en: 'CapCut', fr: 'CapCut', es: 'CapCut' },
+    // A generic English title gets a real Arabic name for Arabic visitors.
+    'Speed test': { ar: 'اختبار السرعة', en: 'Speed Test', fr: 'Test de vitesse', es: 'Prueba de velocidad' },
+    // Branded titles stay in their own script — Google Play does the same.
+    'Good pizza, great pizza': { ar: 'Good pizza, great pizza', en: 'Good Pizza, Great Pizza', fr: 'Good Pizza, Great Pizza', es: 'Good Pizza, Great Pizza' },
+    'The Walking Zombie': { ar: 'The Walking Zombie', en: 'The Walking Zombie', fr: 'The Walking Zombie', es: 'The Walking Zombie' },
+    'Film Maker Pro': { ar: 'Film Maker Pro', en: 'Film Maker Pro', fr: 'Film Maker Pro', es: 'Film Maker Pro' },
+    'Hole.io - Original Hole Game': { ar: 'Hole.io - Original Hole Game', en: 'Hole.io - Original Hole Game', fr: 'Hole.io - Original Hole Game', es: 'Hole.io - Original Hole Game' },
+    '8 Ball Pool': { ar: '8 Ball Pool', en: '8 Ball Pool', fr: '8 Ball Pool', es: '8 Ball Pool' },
+    'Stick War: Saga': { ar: 'Stick War: Saga', en: 'Stick War: Saga', fr: 'Stick War: Saga', es: 'Stick War: Saga' },
+    'Dynamons World': { ar: 'Dynamons World', en: 'Dynamons World', fr: 'Dynamons World', es: 'Dynamons World' },
+    'Jurassic World™: The Game': { ar: 'Jurassic World™: The Game', en: 'Jurassic World™: The Game', fr: 'Jurassic World™: The Game', es: 'Jurassic World™: The Game' },
+    'Subway Surfers': { ar: 'Subway Surfers', en: 'Subway Surfers', fr: 'Subway Surfers', es: 'Subway Surfers' },
+    'Snake.io': { ar: 'Snake.io', en: 'Snake.io', fr: 'Snake.io', es: 'Snake.io' },
+    'Firefight': { ar: 'Firefight', en: 'Firefight', fr: 'Firefight', es: 'Firefight' },
+    'Aite': { ar: 'Aite', en: 'Aite', fr: 'Aite', es: 'Aite' },
+    'Drama Box': { ar: 'Drama Box', en: 'Drama Box', fr: 'Drama Box', es: 'Drama Box' },
+    'NetShort': { ar: 'NetShort', en: 'NetShort', fr: 'NetShort', es: 'NetShort' },
+    'CamScanner': { ar: 'CamScanner', en: 'CamScanner', fr: 'CamScanner', es: 'CamScanner' },
+    'PhotoRoom': { ar: 'PhotoRoom', en: 'PhotoRoom', fr: 'PhotoRoom', es: 'PhotoRoom' },
+  };
+  // Normalise a stored name (Blogger/APK metadata often carries an RTL mark).
+  function nameKey(n) {
+    return String(n || '').replace(/[\u200e\u200f\u061c]/g, '').trim();
+  }
+  function appName(name) {
+    var raw = String(name || '');
+    if (!raw) return '';
+    var hit = APP_NAMES[nameKey(raw)];
+    if (hit && hit[lang]) {
+      // keep any trailing RTL mark the store put there for mixed-direction text
+      return hit[lang] + (/[\u200f]$/.test(raw) ? '\u200f' : '');
+    }
+    return raw;
+  }
+  // Fill [data-i18n-app] holders after a render or a language switch.
+  function applyAppNames(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    if (!scope.querySelectorAll) return;
+    var list = scope.querySelectorAll('[data-i18n-app]');
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      var src = e.getAttribute('data-i18n-app') || '';
+      if (!src) continue;
+      var out = appName(src);
+      if (e.textContent !== out) e.textContent = out;
+    }
+  }
+
   // ---- Curated overrides: exact Arabic text -> per-language translation. ----
   // Used for short UI terms where machine translation is ambiguous/risky.
   var O = {
+    // notification center
+    'مركز الإشعارات': { en: 'Notification center', fr: 'Centre de notifications', es: 'Centro de notificaciones' },
+    'كل الإشعارات': { en: 'All notifications', fr: 'Toutes les notifications', es: 'Todas las notificaciones' },
+    'أحدث أولاً': { en: 'Newest first', fr: 'Plus récentes', es: 'Más recientes' },
+    'الكل': { en: 'All', fr: 'Tout', es: 'Todo' },
+    'تحديثات': { en: 'Updates', fr: 'Mises à jour', es: 'Actualizaciones' },
+    'جديد': { en: 'New', fr: 'Nouveau', es: 'Nuevo' },
+    'تطبيق جديد': { en: 'New app', fr: 'Nouvelle application', es: 'Nueva aplicación' },
+    'تحديث المتجر': { en: 'Store update', fr: 'Mise à jour du store', es: 'Actualización del store' },
+    'تحديث الإشعارات': { en: 'Refresh notifications', fr: 'Actualiser les notifications', es: 'Actualizar notificaciones' },
+    'جارٍ تحميل الإشعارات…': { en: 'Loading notifications…', fr: 'Chargement des notifications…', es: 'Cargando notificaciones…' },
+    'لا توجد إشعارات بعد': { en: 'No notifications yet', fr: 'Aucune notification pour le moment', es: 'Aún no hay notificaciones' },
+    'ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.': { en: 'Published notifications and automatic alerts will appear here.', fr: 'Les notifications publiées et les alertes automatiques apparaîtront ici.', es: 'Las notificaciones publicadas y las alertas automáticas aparecerán aquí.' },
+    'آخر أخبار المتجر والتحديثات والتطبيقات الجديدة.': { en: 'Store news, updates and new apps.', fr: 'Les actualités du store, les mises à jour et les nouvelles applications.', es: 'Noticias del store, actualizaciones y aplicaciones nuevas.' },
+    'كل ما وصل حديثاً': { en: 'Everything new', fr: 'Tout ce qui est nouveau', es: 'Todo lo nuevo' },
+    'تحميل التحديث': { en: 'Download the update', fr: 'Télécharger la mise à jour', es: 'Descargar la actualización' },
+    'تصفية': { en: 'Filter', fr: 'Filtrer', es: 'Filtrar' },
+    'إشعار': { en: 'notification', fr: 'notification', es: 'notificación' },
+    'إشعارات': { en: 'notifications', fr: 'notifications', es: 'notificaciones' },
+    'لا توجد إشعارات في هذا القسم': { en: 'Nothing in this section', fr: 'Rien dans cette section', es: 'Nada en esta sección' },
+    'جرّب قسم «الكل».': { en: 'Try the “All” tab.', fr: 'Essayez l’onglet « Tout ».', es: 'Prueba la pestaña «Todo».' },
+    'غير مقروء': { en: 'Unread', fr: 'Non lues', es: 'Sin leer' },
+    'تعذّر تحميل الإشعارات': { en: 'Could not load the notifications', fr: 'Impossible de charger les notifications', es: 'No se pudieron cargar las notificaciones' },
+    // search
+    'اكتب للبحث في المتجر': { en: 'Type to search the store', fr: 'Tapez pour rechercher dans le store', es: 'Escribe para buscar en la tienda' },
+    'ابحث في Golden Store': { en: 'Search Golden Store', fr: 'Rechercher dans Golden Store', es: 'Buscar en Golden Store' },
+    'نتائج': { en: 'results', fr: 'résultats', es: 'resultados' },
+    'أفضل النتائج': { en: 'Top results', fr: 'Meilleurs résultats', es: 'Mejores resultados' },
+    'لم نجد أي تطبيق بهذا الاسم': { en: 'No app with that name', fr: 'Aucune application avec ce nom', es: 'Ninguna aplicación con ese nombre' },
+    'جرّب الاسم بالإنجليزية أو ابحث عن المطوّر.': { en: 'Try the English name, or search for the developer.', fr: 'Essayez le nom en anglais ou cherchez l’éditeur.', es: 'Prueba el nombre en inglés o busca el desarrollador.' },
+    'الأكثر شعبية': { en: 'Most popular', fr: 'Les plus populaires', es: 'Los más populares' },
+    'ألعاب': { en: 'Games', fr: 'Jeux', es: 'Juegos' },
     // download manager («تحميل إدارة»)
     'تحميل إدارة': { en: 'Download manager', fr: 'Gestionnaire de téléchargements', es: 'Gestor de descargas' },
     'التنزيلات الحالية': { en: 'Current downloads', fr: 'Téléchargements en cours', es: 'Descargas actuales' },
@@ -307,6 +395,7 @@
     'أندرويد': { en: 'Android', fr: 'Android', es: 'Android' },
     'شريحة': { en: 'Slide', fr: 'Diapositive', es: 'Diapositiva' },
     'تطبيق': { en: 'app', fr: 'application', es: 'aplicación' },
+    'تطبيقات': { en: 'apps', fr: 'applications', es: 'aplicaciones' },
     'اكتمل التحميل وحفظ الملف في جهازك': { en: 'Download complete, file saved', fr: 'Téléchargement terminé, fichier enregistré', es: 'Descarga completa, archivo guardado' },
     'سيتم تنزيل ملف APK': { en: 'APK file will be downloaded', fr: 'Le fichier APK sera téléchargé', es: 'Se descargará el archivo APK' },
     'تعذر عرض شريط التقدم، وبدأ التنزيل بالطريقة العادية': { en: 'Progress bar unavailable, download started normally', fr: 'Barre de progression indisponible, téléchargement lancé', es: 'Barra de progreso no disponible, descarga iniciada' },
@@ -338,7 +427,6 @@
     'ستظهر التطبيقات هنا فور إضافتها.': { en: 'Apps will appear here as soon as they are added.', fr: 'Les applications apparaîtront ici dès leur ajout.', es: 'Las apps aparecerán aquí en cuanto se añadan.' },
     'نتيجة': { en: 'result', fr: 'résultat', es: 'resultado' },
     'نتائج': { en: 'results', fr: 'résultats', es: 'resultados' },
-    'تطبيقات': { en: 'apps', fr: 'applications', es: 'aplicaciones' },
     'بحث — Golden Store': { en: 'Search — Golden Store', fr: 'Recherche — Golden Store', es: 'Buscar — Golden Store' },
     'ابحث عن التطبيقات والألعاب في Golden Store.': {
       en: 'Search apps and games on Golden Store.',
@@ -1396,6 +1484,7 @@
   });
 
   function start() {
+    applyAppNames(document);
     if (lang === 'ar') return;
     walk(document.body);
     observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
@@ -1457,6 +1546,8 @@
 
   window.GSI18N = {
     lang: lang,
+    appName: appName,
+    applyAppNames: applyAppNames,
     isRTL: dir === 'rtl',
     setLang: setLang,
     switcherEl: switcherEl,

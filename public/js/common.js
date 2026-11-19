@@ -155,7 +155,7 @@ function appCard(a) {
       a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-xl')
     ),
     el('div', { class: 'meta' },
-      el('div', { class: 'name' }, a.name),
+      el('div', { class: 'name' }, el('bdi', { 'data-i18n-app': a.name || '' }, (a.name_t || a.name))),
       a.developer ? el('div', { class: 'dev' }, a.developer) : null,
     ),
     el('div', { class: 'stats' },

@@ -165,7 +165,13 @@ function el(tag, attrs = null, ...children) {
 }
 
 function ico(name, extra = 'icon') { return window.GSIcons.iconEl(name, extra); }
-function t(s) { try { return window.GSI18N.t(s); } catch { return s; } }
+function t(s) {
+  try {
+    const g = window.GSI18N;
+    if (g && typeof g.t === 'function') return g.t(s);
+  } catch (e) {}
+  return s;
+}
 
 /* --------------------------- Formatters --------------------------- */
 function i18nUnits(kind) {
@@ -236,8 +242,8 @@ function toast(msg, type = 'info', ms = 3000) {
 function posterCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'poster' },
-    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
-    el('div', { class: 'nm' }, el('bdi', null, a.name)),
+    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+    el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
     rt
       ? el('div', { class: 'rt' }, el('span', null, rt), ico('star', 'icon fill'))
       : el('div', { class: 'rt' }, el('span', null, t('جديد'))),
@@ -248,9 +254,9 @@ function listRow(a, opts = {}) {
   const cat = categoryName(a.category);
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'approw' },
-    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'info' },
-      el('div', { class: 'nm' }, el('bdi', null, a.name)),
+      el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
       el('div', { class: 'sub' }, el('bdi', null, a.developer || cat || STORE.name)),
       el('div', { class: 'meta-line' },
         rt ? el('span', null, rt) : el('span', null, t('جديد')),
@@ -268,9 +274,9 @@ function listRow(a, opts = {}) {
 function gridCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'grid-card' },
-    el('div', { class: 'grid-art' }, a.icon_url ? el('img', { src: a.icon_url, alt: a.name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+    el('div', { class: 'grid-art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'grid-info' },
-      el('div', { class: 'grid-name' }, el('bdi', null, a.name)),
+      el('div', { class: 'grid-name' }, el('bdi', appNameAttrs(a), appName(a))),
       el('div', { class: 'grid-meta' }, `${a.version_name ? 'v' + a.version_name : ''}${a.version_name ? ' • ' : ''}${formatBytes(a.size_bytes || 0)}`),
       el('div', { class: 'grid-rating' },
         rt ? el('span', null, rt) : el('span', null, t('جديد')),
@@ -284,7 +290,7 @@ function featureSlide(a) {
   const slide = el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'fc-slide' });
   const media = el('div', { class: 'fc-media' });
   if (a.feature_url) {
-    media.append(el('img', { src: a.feature_url, alt: a.name, loading: 'lazy', class: 'fc-media-img' }));
+    media.append(el('img', { src: a.feature_url, alt: appName(a), loading: 'lazy', class: 'fc-media-img' }));
   } else {
     media.classList.add('fc-media-fallback');
     media.append(a.icon_url
@@ -301,7 +307,7 @@ function featureSlide(a) {
     el('div', { class: 'fc-bar' },
       el('div', { class: 'fc-bar-ico' }, a.icon_url ? el('img', { src: a.icon_url, alt: '' }) : ico('package', 'icon')),
       el('div', { class: 'fc-bar-text' },
-        el('div', { class: 'fc-bar-name' }, a.name),
+        el('div', { class: 'fc-bar-name' }, appName(a)),
         el('div', { class: 'fc-bar-sub' },
           el('span', null, a.developer || ''),
           rt ? el('span', { class: 'fc-bar-rate' }, rt, ico('star', 'icon fill')) : null,
@@ -415,6 +421,20 @@ const CAT_NAMES = {
   game_role_playing: 'ألعاب جماعية',
   games: 'ألعاب',
 };
+// App/game name in the visitor's language. The canonical (often English) name
+// stays in `name`; the translated one is added by /api/i18n-names under `name_t`.
+const NAME_ATTR = 'data-i18n-app';
+function appName(a) {
+  if (!a) return '';
+  const raw = (a.name_t && String(a.name_t)) || a.name || '';
+  const g = window.GSI18N;
+  return (g && typeof g.appName === 'function') ? g.appName(raw) : raw;
+}
+function appNameAttrs(a) {
+  // Lets the translation layer fill the name in when the language changes.
+  const nm = a && a.name ? String(a.name) : '';
+  return nm ? { 'data-i18n-app': nm } : {};
+}
 function categoryName(slug) {
   if (!slug) return '';
   const known = CAT_NAMES[slug];
@@ -2225,7 +2245,7 @@ window.Store = {
   STORE, api, authedApi, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
   publicOrigin,
-  posterCard, listRow, gridCard, featureCarousel, categoryName,
+  posterCard, listRow, gridCard, featureCarousel, categoryName, appName, appNameAttrs,
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, openNotifications, loadNotificationsForPage,

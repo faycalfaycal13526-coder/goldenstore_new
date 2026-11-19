@@ -687,11 +687,11 @@
       return;
     }
 
-    document.title = `${app.name} — Golden Store`;
+    document.title = `${S.appName(app)} — Golden Store`;
     nav.querySelector('.title') && (nav.querySelector('.title').textContent = '');
     content.innerHTML = '';
 
-    const iconInner = app.icon_url ? el('img', { src: app.icon_url, alt: app.name }) : ico('package', 'icon icon-lg');
+    const iconInner = app.icon_url ? el('img', { src: app.icon_url, alt: S.appName(app) }) : ico('package', 'icon icon-lg');
     const iconBtn = app.icon_url ? el('button', {
       class: 'd-icon is-zoomable', type: 'button',
       'aria-label': t('اضغط لتكبير صورة التطبيق'), title: t('اضغط لتكبير صورة التطبيق'),
@@ -703,7 +703,7 @@
     content.append(el('div', { class: 'd-head' },
       iconBtn,
       el('div', { class: 'd-titles' },
-        el('div', { class: 'd-name' }, app.name),
+        el('div', { class: 'd-name', 'data-i18n-app': app.name }, S.appName(app)),
         el('div', { class: 'd-dev' }, app.developer || S.STORE.name),
         el('div', { class: 'd-sub' }, S.categoryName(app.category) || S.STORE.name),
       ),

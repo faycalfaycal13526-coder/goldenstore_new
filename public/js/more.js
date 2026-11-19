@@ -201,7 +201,7 @@
     const SNAP_KEY = `gs_more_${[sectionKey, type, category, exclude].join('|')}`;
     const SNAP_TTL_MS = 30 * 60 * 1000;
     const slim = (a) => ({
-      slug: a.slug, name: a.name, icon_url: a.icon_url || null, developer: a.developer || '', category: a.category || '',
+      slug: a.slug, name: a.name, name_t: a.name_t || '', icon_url: a.icon_url || null, developer: a.developer || '', category: a.category || '',
       version_name: a.version_name || '', size_bytes: a.size_bytes || 0,
       rating: a.rating || 0, rating_count: a.rating_count || 0, stars: a.stars || 0,
     });

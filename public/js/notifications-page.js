@@ -10,8 +10,6 @@
   const { el, ico, t, formatDate } = S;
   const root = document.getElementById('root');
 
-  const TELEGRAM_URL = 'https://t.me/goldenstore_10';
-
   function icon(name, extra) { return ico(name, extra || 'icon'); }
 
   function typeOf(n) {
@@ -60,6 +58,25 @@
   }
 
   /* ------------------------------- rows -------------------------------- */
+  /* The row icon is the real app icon when the notification carries one
+     (app_icon / data.icon_url / a known catalog entry), otherwise a type glyph. */
+  function artFor(n, type) {
+    const art = el('span', { class: 'noi-row-art' });
+    const url = (n && (n.app_icon || n.icon_url || (n.data && (n.data.icon_url || n.data.app_icon)))) || '';
+    if (url) {
+      const img = el('img', { src: String(url), alt: '', loading: 'lazy', decoding: 'async' });
+      img.addEventListener('error', () => {
+        img.remove();
+        art.append(icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell'));
+      });
+      art.append(img);
+      art.classList.add('has-img');
+      return art;
+    }
+    art.append(icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell'));
+    return art;
+  }
+
   function row(n) {
     const type = typeOf(n);
     const updateData = type === 'update' && n.data && n.data.apk_url ? n.data : null;
@@ -75,8 +92,7 @@
       node = el('div', { class: `noi-row is-${type}` });
     }
     node.append(
-      el('span', { class: 'noi-row-art' },
-        icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell')),
+      artFor(n, type),
       el('span', { class: 'noi-row-info' },
         el('span', { class: 'noi-row-title' }, n.title || t('إشعار')),
         el('span', { class: 'noi-row-sub' },
@@ -114,6 +130,7 @@
           class: 'noi-back', type: 'button', 'aria-label': t('رجوع'), title: t('رجوع'),
           onclick: () => (history.length > 1 ? history.back() : (location.href = '/')),
         }, icon('arrowRight')),
+        refreshBtn,
       ),
       body,
     );
@@ -127,7 +144,14 @@
 
   function paint(body, refreshBtn) {
     body.innerHTML = '';
-    body.append(quickBar((key) => { filter = filter === key ? '' : key; paint(body, refreshBtn); }));
+    body.append(quickBar((key) => {
+      filter = filter === key ? '' : key;
+      paint(body, refreshBtn);
+      try {
+        const feed = body.querySelector('.noi-feed');
+        if (feed && feed.scrollIntoView) feed.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      } catch (e) {}
+    }));
     const list = el('div', { class: 'noi-feed' });
     if (!all.length) {
       list.append(el('div', { class: 'noi-empty' },
@@ -148,10 +172,6 @@
       shown.forEach((n) => list.append(row(n)));
     }
     body.append(list);
-    body.append(el('div', { class: 'noi-foot' },
-      el('a', { class: 'btn btn-secondary btn-sm', href: TELEGRAM_URL, target: '_blank', rel: 'noopener noreferrer' },
-        icon('telegram', 'icon icon-sm'), t('انضم الى المجموعة')),
-    ));
     refreshBtn.classList.remove('is-busy');
   }
 

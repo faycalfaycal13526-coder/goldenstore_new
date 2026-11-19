@@ -3563,8 +3563,15 @@ html[dir="ltr"] .noi-back .icon { transform: scaleX(-1); }
   flex: 1 1 auto; margin: 0; font-size: 20px; font-weight: 800; line-height: 1.3;
   text-align: start; color: var(--text);
 }
-.noi-refresh { display: none; }
-.noi-refresh.is-busy { display: grid; }
+.noi-refresh {
+  width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+  color: var(--text-2);
+}
+.noi-refresh:hover { background: var(--surface-2); color: var(--text); }
+.noi-refresh .icon { width: 20px; height: 20px; }
+.noi-refresh.is-busy { color: var(--gold); }
+.noi-refresh.is-busy .icon { animation: gs-spin 900ms linear infinite; }
 
 /* three quick actions */
 .noi-quick {
@@ -3607,6 +3614,8 @@ html[dir="ltr"] .noi-back .icon { transform: scaleX(-1); }
   background: rgba(244,192,31,.13); color: var(--gold);
 }
 .noi-row-art .icon { width: 22px; height: 22px; }
+.noi-row-art.has-img { background: transparent; overflow: hidden; }
+.noi-row-art.has-img img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
 .noi-row.is-update .noi-row-art { color: #7ed6a5; background: rgba(126,214,165,.13); }
 .noi-row.is-new_app .noi-row-art { color: #7bb8ff; background: rgba(123,184,255,.13); }
 .noi-row-info {
@@ -3637,8 +3646,6 @@ html[dir="ltr"] .noi-back .icon { transform: scaleX(-1); }
 .noi-empty-ico .icon { width: 30px; height: 30px; }
 .noi-empty h2 { font-size: 16px; font-weight: 800; color: var(--text); margin: 0 0 6px; }
 .noi-empty p { font-size: 13px; margin: 0; line-height: 1.6; }
-.noi-foot { padding: 22px 16px; display: flex; justify-content: center; }
-.noi-foot .btn { gap: 8px; }
 
 .noi-spinner { padding: 56px 0; display: flex; justify-content: center; }
 .icon-btn.is-busy .icon { animation: gs-spin 900ms linear infinite; }

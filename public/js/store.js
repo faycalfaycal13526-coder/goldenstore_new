@@ -667,8 +667,8 @@ async function loadNotificationsForPage() {
   let list = await fetchNotifications();
   const base = notifBaseline(_user && _user.uid);
   if (base) list = list.filter((n) => Number(n.created_at || 0) > base);
-  const seen = maxNotifCreated(list);
-  if (seen) setNotifSeenAt(Math.max(notifSeenAt(), seen));
+  // NOTE: the page no longer marks everything read on load — it keeps the red
+  // «unread» dots visible (owner request) and marks read on tap instead.
   await refreshBellBadge();
   return list;
 }
@@ -2248,7 +2248,7 @@ window.Store = {
   posterCard, listRow, gridCard, featureCarousel, categoryName, appName, appNameAttrs,
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
-  fetchNotifications, notifUnreadCount, openNotifications, loadNotificationsForPage,
+  fetchNotifications, notifUnreadCount, notifSeenAt, setNotifSeenAt, openNotifications, loadNotificationsForPage,
   ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,

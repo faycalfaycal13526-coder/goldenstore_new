@@ -1,6 +1,8 @@
-/* Golden Store — notification center (full page).
-   Layout: header → one-line summary → filter chips → grouped list.
-   Only real notifications are listed (no placeholder rows). */
+/* Golden Store — notification center («مركز إعلام»).
+   Layout follows the owner's reference: a compact header, three quick links,
+   then one dense reverse-chronological feed where every row is
+   [icon] [title / time · «انقر للتنزيل»] [red unread dot].
+   Only real notifications are listed — nothing is fabricated. */
 (function () {
   'use strict';
   const S = window.Store;
@@ -8,12 +10,7 @@
   const { el, ico, t, formatDate } = S;
   const root = document.getElementById('root');
 
-  const KINDS = [
-    { key: 'all', label: 'الكل', icon: 'bell' },
-    { key: 'new_app', label: 'تطبيق جديد', icon: 'package' },
-    { key: 'update', label: 'تحديثات', icon: 'download' },
-    { key: 'announcement', label: 'إعلان', icon: 'message' },
-  ];
+  const TELEGRAM_URL = 'https://t.me/goldenstore_10';
 
   function icon(name, extra) { return ico(name, extra || 'icon'); }
 
@@ -21,90 +18,102 @@
     const v = n && n.type;
     return v === 'new_app' || v === 'update' || v === 'announcement' ? v : 'announcement';
   }
+  function tsOf(n) { return Number((n && n.created_at) || 0) || 0; }
+  function isUnread(n) { return tsOf(n) > (S.notifSeenAt ? S.notifSeenAt() : 0); }
 
-  function typeLabel(type) {
-    return type === 'new_app' ? t('تطبيق جديد')
-      : type === 'update' ? t('تحديث المتجر') : t('إعلان');
+  /* «منذ ٣٨ دقيقة» / «منذ ٦ ساعات» / a plain date — relative, Play style. */
+  function when(ts) {
+    if (!ts) return '';
+    const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+    const mins = Math.floor(diff / 60);
+    const t1 = (ar) => t(ar);
+    if (mins < 1) return t1('الآن');
+    if (mins < 60) return t1('منذ') + ' ' + S.formatCount(mins) + ' ' + t1(mins === 1 ? 'دقيقة' : 'دقائق');
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return t1('منذ') + ' ' + S.formatCount(hours) + ' ' + t1(hours === 1 ? 'ساعة' : 'ساعات');
+    const days = Math.floor(hours / 24);
+    if (days < 7) return t1('منذ') + ' ' + S.formatCount(days) + ' ' + t1(days === 1 ? 'يوم' : 'أيام');
+    return formatDate(ts);
   }
 
-  /* ------------------------------- pieces ------------------------------- */
-  function summary(list) {
-    const unread = list.filter((n) => !n.read_at && !n.seen).length;
-    return el('section', { class: 'noi-sum' },
-      el('div', { class: 'noi-sum-main' },
-        el('span', { class: 'noi-sum-ico' }, icon('bell')),
-        el('div', { class: 'noi-sum-text' },
-          el('strong', null, S.formatCount(list.length)),
-          el('span', null, t(list.length === 1 ? 'إشعار' : 'إشعارات')),
-        ),
-      ),
-      el('span', { class: 'noi-sum-dot' + (unread ? ' is-new' : ''), title: t('غير مقروء') },
-        unread ? S.formatCount(unread) : '✓'),
-    );
-  }
-
-  function chips(active, counts, onPick) {
-    const bar = el('div', { class: 'noi-chips', role: 'tablist' });
-    KINDS.forEach((k) => {
-      const n = k.key === 'all' ? counts.all : (counts[k.key] || 0);
-      const b = el('button', {
-        class: 'noi-chip' + (k.key === active ? ' on' : ''), type: 'button', role: 'tab',
-        'aria-selected': k.key === active ? 'true' : 'false',
-        onclick: () => onPick(k.key),
+  /* ---------------------------- quick links ---------------------------- */
+  let filter = '';
+  function quickBar(onPick) {
+    const items = [
+      { key: 'announcement', label: 'اشعار رسمي', icon: 'bell', tone: 'violet' },
+      { key: 'update', label: 'ردود على التعليقات', icon: 'message', tone: 'amber' },
+      { key: 'new_app', label: 'تلقى الإعجابات', icon: 'heart', tone: 'rose' },
+    ];
+    const bar = el('div', { class: 'noi-quick', role: 'tablist' });
+    items.forEach((it) => {
+      bar.append(el('button', {
+        class: 'noi-quick-item' + (filter === it.key ? ' is-on' : ''), type: 'button',
+        role: 'tab', 'data-tone': it.tone,
+        'aria-selected': filter === it.key ? 'true' : 'false',
+        onclick: () => onPick(it.key),
       },
-        el('span', null, t(k.label)),
-        el('span', { class: 'noi-chip-n' }, S.formatCount(n)),
-      );
-      bar.append(b);
+        el('span', { class: 'noi-quick-ico' }, icon(it.icon)),
+        el('span', { class: 'noi-quick-label' }, t(it.label)),
+      ));
     });
     return bar;
   }
 
-  function item(n) {
+  /* ------------------------------- rows -------------------------------- */
+  function row(n) {
     const type = typeOf(n);
     const updateData = type === 'update' && n.data && n.data.apk_url ? n.data : null;
+    const unread = isUnread(n);
     let node;
     if (updateData) {
-      node = el('a', { class: 'noi-item is-update', href: '#',
-        onclick: (e) => { e.preventDefault(); S.showUpdateDialog(updateData, { manual: true }); } });
+      node = el('a', { class: 'noi-row is-update', href: '#',
+        onclick: (e) => { e.preventDefault(); markRead(n); S.showUpdateDialog(updateData, { manual: true }); } });
     } else if (n.app_slug) {
-      node = el('a', { class: `noi-item is-${type}`,
-        href: `/app?slug=${encodeURIComponent(n.app_slug)}` });
+      node = el('a', { class: `noi-row is-${type}`, href: `/app?slug=${encodeURIComponent(n.app_slug)}`,
+        onclick: () => markRead(n) });
     } else {
-      node = el('div', { class: `noi-item is-${type}` });
+      node = el('div', { class: `noi-row is-${type}` });
     }
     node.append(
-      el('span', { class: 'noi-ico' },
-        icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'message')),
-      el('span', { class: 'noi-info' },
-        el('span', { class: 'noi-top' },
-          el('strong', null, n.title || ''),
-          el('span', { class: 'noi-type' }, typeLabel(type)),
+      el('span', { class: 'noi-row-art' },
+        icon(type === 'new_app' ? 'package' : type === 'update' ? 'download' : 'bell')),
+      el('span', { class: 'noi-row-info' },
+        el('span', { class: 'noi-row-title' }, n.title || t('إشعار')),
+        el('span', { class: 'noi-row-sub' },
+          el('span', { class: 'noi-row-time' }, when(tsOf(n))),
+          el('span', { class: 'noi-row-cta' },
+            updateData ? t('انقر للتنزيل') : (n.app_slug ? t('انقر للفتح') : t('انقر للتفاصيل'))),
         ),
-        n.body ? el('span', { class: 'noi-body' }, n.body) : null,
-        el('span', { class: 'noi-meta' }, formatDate(n.created_at)),
       ),
-      updateData ? el('span', { class: 'noi-go' }, t('تحميل التحديث')) : null,
+      el('span', { class: 'noi-dot' + (unread ? ' is-new' : ''), 'aria-hidden': 'true' }),
     );
+    node.setAttribute('data-unread', unread ? '1' : '0');
     return node;
   }
 
-  /* -------------------------------- shell -------------------------------- */
+  function markRead(n) {
+    try {
+      const ts = tsOf(n);
+      if (ts && S.setNotifSeenAt) S.setNotifSeenAt(ts);
+    } catch (e) {}
+  }
+
+  /* -------------------------------- shell ------------------------------- */
   function build() {
     root.innerHTML = '';
     root.className = 'shell';
     const body = el('main', { class: 'gs-page-body noi-body' });
     const refreshBtn = el('button', {
-      class: 'icon-btn', type: 'button', title: t('تحديث الإشعارات'),
+      class: 'noi-refresh', type: 'button', title: t('تحديث الإشعارات'),
       'aria-label': t('تحديث الإشعارات'),
     }, icon('refresh'));
     root.append(
-      el('div', { class: 'gs-page-head' },
-        el('a', { class: 'icon-btn', href: '/', 'aria-label': t('العودة إلى الرئيسية'), title: t('العودة إلى الرئيسية') },
-          icon('chevronEnd')),
-        el('img', { class: 'gs-page-logo', src: '/images/logo.png', alt: 'Golden Store' }),
-        el('h1', { class: 'gs-page-title' }, t('مركز الإشعارات')),
-        refreshBtn,
+      el('div', { class: 'noi-head' },
+        el('h1', { class: 'noi-title' }, t('مركز إعلام')),
+        el('button', {
+          class: 'noi-back', type: 'button', 'aria-label': t('رجوع'), title: t('رجوع'),
+          onclick: () => (history.length > 1 ? history.back() : (location.href = '/')),
+        }, icon('arrowRight')),
       ),
       body,
     );
@@ -112,40 +121,39 @@
     return { body, refreshBtn };
   }
 
-  /* -------------------------------- render ------------------------------- */
+  /* ------------------------------- render ------------------------------- */
   let all = [];
-  let filter = 'all';
+  let loadedOnce = false;
 
   function paint(body, refreshBtn) {
     body.innerHTML = '';
-    const counts = { all: all.length, new_app: 0, update: 0, announcement: 0 };
-    all.forEach((n) => { counts[typeOf(n)] = (counts[typeOf(n)] || 0) + 1; });
-    counts.all = all.length;
-    body.append(summary(all));
-    const onPick = (k) => { filter = k; paint(body, refreshBtn); };
-    body.append(chips(filter, counts, onPick));
-
-    const list = filter === 'all' ? all : all.filter((n) => typeOf(n) === filter);
-    if (!list.length) {
-      const isFiltered = filter !== 'all';
-      body.append(el('div', { class: 'noi-empty' },
-        el('span', { class: 'noi-empty-ico' }, icon(isFiltered ? 'list' : 'bell')),
-        el('h2', null, isFiltered ? t('لا توجد إشعارات في هذا القسم') : t('لا توجد إشعارات بعد')),
-        el('p', null, isFiltered
-          ? t('جرّب قسم «الكل».')
-          : t('ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.')),
+    body.append(quickBar((key) => { filter = filter === key ? '' : key; paint(body, refreshBtn); }));
+    const list = el('div', { class: 'noi-feed' });
+    if (!all.length) {
+      list.append(el('div', { class: 'noi-empty' },
+        el('span', { class: 'noi-empty-ico' }, icon('bell')),
+        el('h2', null, t('لا توجد إشعارات بعد')),
+        el('p', null, t('ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.')),
       ));
     } else {
-      const wrap = el('div', { class: 'noi-list' });
-      list.forEach((n) => wrap.append(item(n)));
-      body.append(wrap);
+      const shown = (filter ? all.filter((n) => typeOf(n) === filter) : all)
+        .slice().sort((a, b) => tsOf(b) - tsOf(a));
+      if (!shown.length) {
+        list.append(el('div', { class: 'noi-empty' },
+          el('span', { class: 'noi-empty-ico' }, icon('list')),
+          el('h2', null, t('لا توجد إشعارات في هذا القسم')),
+          el('p', null, t('اضغط نفس الزر مرة أخرى لعرض كل الإشعارات.')),
+        ));
+      }
+      shown.forEach((n) => list.append(row(n)));
     }
+    body.append(list);
+    body.append(el('div', { class: 'noi-foot' },
+      el('a', { class: 'btn btn-secondary btn-sm', href: TELEGRAM_URL, target: '_blank', rel: 'noopener noreferrer' },
+        icon('telegram', 'icon icon-sm'), t('انضم الى المجموعة')),
+    ));
     refreshBtn.classList.remove('is-busy');
   }
-
-  // The page marks notifications as seen when it loads, so the list it returns
-  // is remembered here — the refresh button must not empty the page.
-  let loadedOnce = false;
 
   async function load(body, refreshBtn) {
     refreshBtn.classList.add('is-busy');

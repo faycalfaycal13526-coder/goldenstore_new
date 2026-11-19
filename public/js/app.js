@@ -127,9 +127,16 @@
     pendingLikes.add(id);
     applyReviewState(id, optimistic);
     try {
-      const res = await api(`/api/apps/${encodeURIComponent(slug)}/reviews/${encodeURIComponent(id)}/like`, {
-        method: 'POST', body: { userId: viewerId() },
-      });
+      // The token (when signed in) lets the API know the real viewer account, so
+      // a like can never notify its own author. Tapping the like is never
+      // blocked by this: if the token call fails we retry anonymously.
+      const likePath = `/api/apps/${encodeURIComponent(slug)}/reviews/${encodeURIComponent(id)}/like`;
+      let res;
+      try {
+        res = await S.authedApi(likePath, { method: 'POST', body: { userId: viewerId() } });
+      } catch (authErr) {
+        res = await api(likePath, { method: 'POST', body: { userId: viewerId() } });
+      }
       applyReviewState(id, {
         liked: !!res.liked,
         likes_count: Math.max(0, Number(res.likes_count) || 0),
@@ -140,6 +147,20 @@
     } finally {
       pendingLikes.delete(id);
     }
+  }
+
+  /* Owner question: «لماذا الإعجاب على تعليقي لا يعمل؟».
+     A like is delivered as a notification to the review's AUTHOR, which needs
+     that author to have an account. Reviews written without signing in cannot
+     receive one, so the composer states it plainly instead of failing silently. */
+  function likeHintNode() {
+    let signed = false;
+    try { signed = !!(S.isLoggedIn && S.isLoggedIn()); } catch (e) { signed = false; }
+    if (signed) return null;
+    return el('div', { class: 'rate-like-hint' },
+      ico('bell', 'icon icon-sm'),
+      el('span', null, t('ستصلك إشعارات الإعجابات بتعليقك عندما تسجّل الدخول قبل النشر.')),
+    );
   }
 
   function openReviewMenu(wrap, btn, list) {
@@ -2555,6 +2576,8 @@
     }
 
     const rateBody = el('div', { class: 'rate-collapse-body' });
+    const hint = likeHintNode();
+    if (hint) rateBody.append(hint);
     rateBody.append(
       el('div', { style: { marginTop: '18px' } },
         pickerHint,

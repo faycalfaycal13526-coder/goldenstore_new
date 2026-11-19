@@ -299,8 +299,21 @@ export async function getRatingDistribution(env: Env, app_id: string | string[])
 /** Fetch a single vote. Used to verify that a like/report targets a real
  *  review belonging to the app in the URL. */
 export async function getReviewById(env: Env, reviewId: string): Promise<any | null> {
-  const row = await env.DB.prepare('SELECT id, app_id, uid, comment FROM star_votes WHERE id = ?').bind(reviewId).first();
-  return row || null;
+  const row: any = await env.DB.prepare(
+    `SELECT v.id, v.app_id, v.uid, v.comment, v.rating, a.name AS app_name
+       FROM star_votes v LEFT JOIN apps a ON a.id = v.app_id
+      WHERE v.id = ?`,
+  ).bind(reviewId).first().catch(() => null);
+  if (!row) return null;
+  // A vote written without signing in has no account: its `uid` is either empty
+  // or a client-generated pseudo id ('gs_…'). Nobody can be notified for it.
+  const uid = String(row.uid || '').trim();
+  return {
+    ...row,
+    uid,
+    uid_is_anonymous: !uid || /^gs_[a-z0-9]{6,}$/i.test(uid),
+    app_name: String(row.app_name || ''),
+  };
 }
 
 /** Toggle a like for (review, viewer). The DELETE-first / conditional-INSERT

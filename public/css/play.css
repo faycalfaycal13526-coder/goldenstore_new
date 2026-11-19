@@ -3539,6 +3539,18 @@ body.has-update-banner { padding-top: calc(58px + env(safe-area-inset-top, 0px))
 .gs-notif-item { display: flex; gap: 12px; padding: 14px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); text-decoration: none; color: inherit; }
 .gs-notif-empty { padding: 54px 20px; text-align: center; color: var(--text-2); }
 
+/* Likes received: the composer tells a guest that an account is required for
+   the like notification to reach them (honest, matches the API behaviour). */
+.rate-like-hint {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 10px 0 2px; padding: 9px 11px;
+  border: 1px solid rgba(244, 192, 31, .28);
+  background: rgba(244, 192, 31, .08);
+  border-radius: 12px;
+  color: var(--text-2); font-size: 12.5px; line-height: 1.6;
+}
+.rate-like-hint .icon { color: var(--gold); flex: 0 0 auto; margin-top: 1px; }
+
 /* =====================================================================
    Notification center — NO site footer (owner request, twice).
    store.js already skips renderSiteFooter() on this page via

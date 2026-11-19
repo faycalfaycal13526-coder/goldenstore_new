@@ -101,7 +101,7 @@
     'إشعار': { en: 'notification', fr: 'notification', es: 'notificación' },
     'مركز إعلام': { en: 'Notification center', fr: 'Centre de notifications', es: 'Centro de notificaciones' },
     'اشعار رسمي': { en: 'Official notices', fr: 'Annonces officielles', es: 'Avisos oficiales' },
-    'رسائل الدعم': { en: 'Support messages', fr: 'Messages du support', es: 'Mensajes de soporte' },
+    'رسائل الدعم': { en: 'Support messages', fr: 'Messages d’assistance', es: 'Mensajes de soporte' },
     'الإعجابات': { en: 'Likes', fr: '« J’aime »', es: 'Me gusta' },
     'لا توجد رسائل دعم بعد': { en: 'No support messages yet', fr: 'Aucun message du support pour l’instant', es: 'Aún no hay mensajes de soporte' },
     'لا توجد إعجابات بعد': { en: 'No likes yet', fr: 'Aucun « j’aime » pour l’instant', es: 'Aún no hay me gusta' },

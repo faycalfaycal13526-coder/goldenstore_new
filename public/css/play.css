@@ -2596,10 +2596,7 @@ html[dir="ltr"] .support-entry-chevron { transform: scaleX(-1); }
    ===================================================================== */
 
 /* --- Legal page shell + store-like top bar ------------------------------- */
-.legal-shell { min-height: 100vh; display: flex; flex-direction: column; }
-/* The legal pages end right after the content — no footer. Flex column keeps
-   the top bar at the top and stops the shell from stretching oddly. */
-.legal-shell > .legal-page { flex: 1 0 auto; }
+.legal-shell { min-height: 100vh; }
 .legal-topbar {
   gap: 6px; border-bottom: 1px solid var(--line); background: var(--surface);
 }
@@ -2609,7 +2606,7 @@ html[dir="ltr"] .legal-back .icon { transform: scaleX(-1); }
 .legal-lang { flex: 0 0 auto; }
 .legal-lang .lang-btn.icon-btn { height: 36px; min-width: 36px; }
 
-.legal-page { max-width: var(--maxw); margin: 0 auto; padding: 16px 16px 20px; }
+.legal-page { max-width: var(--maxw); margin: 0 auto; padding: 16px 16px 8px; }
 
 /* --- Hero card (gold accent, same --radius as store cards) --------------- */
 .legal-hero {
@@ -2691,10 +2688,7 @@ html[dir="ltr"] .legal-back .icon { transform: scaleX(-1); }
   text-align: center; margin-top: 16px;
 }
 
-/* --- Site footer (store pages only; the legal pages have none) ---------- */
-/* Owner request: no footer at the bottom of «من نحن» / «سياسة الخصوصية» /
-   «شروط الخدمة» — no brand line, no legal-links row, no official-site link.
-   The block below is still used by the store pages themselves. */
+/* --- Shared site footer (legal pages + all store pages) ------------------ */
 .site-footer {
   max-width: var(--maxw); margin: 32px auto 0;
   border-top: 1px solid var(--line); padding: 22px 16px 28px;

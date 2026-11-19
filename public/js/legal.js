@@ -1,7 +1,6 @@
 /* Golden Store — shared legal UI helpers.
+   - Mounts the site footer / compact legal-links row.
    - Builds the mandatory Terms + Privacy consent checkbox used before sign-in.
-   - Mounts the compact legal-links row (login gate only).
-   - The legal pages themselves have NO footer (owner request).
    Loaded by the legal pages and the login page (after lang.js).
 ------------------------------------------------------------------------------ */
 (function () {
@@ -43,6 +42,23 @@
       nav.appendChild(a);
     });
     return nav;
+  }
+
+  /* Full site footer — used by the three legal HTML pages. */
+  function footerEl(active) {
+    var f = make('footer', 'site-footer');
+    f.setAttribute('data-noi18n', '');
+    var inner = make('div', 'site-footer-inner');
+    inner.appendChild(make('div', 'site-footer-brand', '© Golden Store — ' + T('جميع الحقوق محفوظة')));
+    inner.appendChild(linksEl(active));
+    var site = make('div', 'site-footer-site');
+    site.appendChild(document.createTextNode(T('الموقع الرسمي') + ': '));
+    var official = link('https://goldenstore.online', 'goldenstore.online', 'legal-link', true);
+    official.setAttribute('dir', 'ltr');
+    site.appendChild(official);
+    inner.appendChild(site);
+    f.appendChild(inner);
+    return f;
   }
 
   /* Mandatory consent row. Links are siblings of the <label> (never inside it)
@@ -93,11 +109,13 @@
       var h = document.getElementById(id);
       if (h) h.setAttribute('data-noi18n', '');
     });
-    // Owner request: the legal pages no longer carry a site footer
-    // (no «© Golden Store» line, no legal-links row, no official-site link).
-    // Any legacy host left in an old cached HTML is emptied and removed.
     var footerHost = document.getElementById('siteFooter');
-    if (footerHost) { footerHost.innerHTML = ''; footerHost.remove(); }
+    if (footerHost && footerHost.getAttribute('data-mounted') !== '1') {
+      footerHost.setAttribute('data-mounted', '1');
+      var built = footerEl(footerHost.getAttribute('data-active') || '');
+      while (built.firstChild) footerHost.appendChild(built.firstChild);
+      footerHost.className = 'site-footer';
+    }
     var linksHost = document.getElementById('legalLinks');
     if (linksHost && linksHost.getAttribute('data-mounted') !== '1') {
       linksHost.setAttribute('data-mounted', '1');
@@ -120,6 +138,7 @@
     LINKS: LINKS,
     links: LINKS,
     linksEl: linksEl,
+    footerEl: footerEl,
     consentEl: consentEl,
     accepted: accepted,
     recordConsent: recordConsent,

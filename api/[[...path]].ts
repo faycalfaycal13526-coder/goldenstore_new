@@ -18,7 +18,7 @@ import {
   listApps, getAppBySlug, listScreenshots, listReviews, countReviews,
   getRatingDistribution, listNotifications, getStoreSettings,
   getReviewById, toggleReviewLike, reportReview, getAllReports, deleteReport, deleteReview,
-  searchApps, suggestApps,
+  searchApps, suggestApps, trendingSearches,
   createSupportThread, listUserSupportThreads, listAdminSupportThreads, getSupportThread,
   addSupportMessage, setSupportThreadStatus, markSupportThreadRead, deleteSupportThread,
   ensureSupportSchema, ensureUserNotificationSchema, hasRecentUserNotification,
@@ -1174,6 +1174,19 @@ app.get('/categories', async (c) => {
    limit        1..60 (default 24), offset >= 0
    All values are bound; sort uses a whitelist in lib/d1.ts.
    ========================================================================= */
+/* «عمليات البحث الرائجة» — real rows from the catalogue, ordered by what the
+   store actually has (downloads + reviews). Cached for two minutes. */
+app.get('/search/trending', async (c) => {
+  try {
+    const limit = safeInt(c.req.query('limit') || '14', 1, 24);
+    const items = await trendingSearches(c.env, limit);
+    c.header('Cache-Control', 'public, max-age=120');
+    return c.json({ terms: items });
+  } catch (e: any) {
+    return c.json({ terms: [], error: e?.message || 'error' }, 200);
+  }
+});
+
 app.get('/search/suggest', async (c) => {
   const ip = getClientIp(c);
   if (!rateLimit(ip, 'search-suggest', 90, 60)) return c.json({ error: 'rate_limited' }, 429);

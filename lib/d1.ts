@@ -140,6 +140,47 @@ export async function searchApps(env: Env, opts: SearchAppsOptions = {}): Promis
   return { apps: (result.results || []).map(rowToApp), total };
 }
 
+/* ------------------------------ Trending --------------------------------
+   «عمليات البحث الرائجة» is computed from REAL data only: downloads and
+   written reviews decide the order, and the short display name is taken from
+   the row itself. Nothing is hard-coded, so the list can never drift away
+   from what the store actually has. */
+export async function trendingSearches(env: Env, limit = 14): Promise<{ term: string; slug: string; icon_url?: string }[]> {
+  const n = Math.min(Math.max(Number(limit) || 14, 1), 24);
+  try {
+    const res = await env.DB.prepare(
+      `SELECT a.slug, a.name, a.icon_key,
+              COALESCE(a.downloads, 0) AS dl,
+              (SELECT COUNT(*) FROM reviews r WHERE r.app_slug = a.slug) AS rv
+         FROM apps a
+        ORDER BY (COALESCE(a.downloads, 0) + 5000 * (SELECT COUNT(*) FROM reviews r WHERE r.app_slug = a.slug)) DESC,
+                 a.name_lower ASC
+        LIMIT ?`
+    ).bind(n).all();
+    return (res.results || []).map((r: any) => ({
+      term: displayTerm(String(r.name || r.slug || '')),
+      slug: String(r.slug || ''),
+      ...(r.icon_key ? { icon_key: String(r.icon_key) } : {}),
+    })).filter((r) => r.term && r.slug);
+  } catch {
+    // Fallback: still real rows, simply ordered by name.
+    try {
+      const res = await env.DB.prepare('SELECT slug, name FROM apps ORDER BY name_lower ASC LIMIT ?').bind(n).all();
+      return (res.results || []).map((r: any) => ({ term: displayTerm(String(r.name || '')), slug: String(r.slug || '') }));
+    } catch { return []; }
+  }
+}
+
+/** Shorten a long store name into the term people actually type
+    (drop a trailing «World»/«Mobile»/«Mod» and anything after a dash). */
+export function displayTerm(name: string): string {
+  const cleaned = name.replace(/\s*[|:\-–—]\s*.*$/, ' ').replace(/\s+/g, ' ').trim();
+  const words = cleaned.split(' ').filter(Boolean);
+  const stop = new Set(['world', 'mobile', 'game', 'games', 'the', 'and', 'for', 'pro', 'plus', 'mod', 'mods', 'apk', 'new', 'life', 'story', 'chapter', 'edition', 'online', 'free']);
+  const kept = words.filter((w, i) => i === 0 || !stop.has(w.toLowerCase())).slice(0, 3);
+  return (kept.length ? kept.join(' ') : words.slice(0, 2).join(' ')).trim();
+}
+
 /** Lightweight autocomplete rows (no description / keys in the payload). */
 export async function suggestApps(env: Env, q: string, limit = 8): Promise<any[]> {
   const query = (q || '').trim().toLowerCase();

@@ -31,6 +31,26 @@
     offset: 0,
   };
 
+  /* ---------------------- history & trending (real data) ---------------- */
+  const HISTORY_KEY = 'gs_search_history';
+  const HISTORY_MAX = 8;
+  function readHistory() {
+    try {
+      const v = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).slice(0, HISTORY_MAX) : [];
+    } catch (e) { return []; }
+  }
+  function pushHistory(term) {
+    const q = String(term || '').trim();
+    if (q.length < 1) return;
+    const next = [q, ...readHistory().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, HISTORY_MAX);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch (e) {}
+  }
+  function clearHistory() {
+    try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
+    paintHistory();
+  }
+
   /* ------------------------------- DOM ---------------------------------- */
   const input = el('input', {
     class: 'ms-input', type: 'search', value: state.q,
@@ -78,6 +98,109 @@
     });
   }
 
+  /* --- «سجل البحث» and «عمليات البحث الرائجة» — shown while the field is
+     empty, exactly like the reference layout: a header row per section, then
+     wrapping pill chips. Tapping a chip searches for it immediately. --- */
+  const historySection = el('section', { class: 'ms-sec ms-history' });
+  const trendingSection = el('section', { class: 'ms-sec ms-trending' });
+  const chipsWrap = el('div', { class: 'ms-chips' });
+
+  function chip(label, opts = {}) {
+    return el('button', {
+      class: 'ms-chip' + (opts.hot ? ' is-hot' : ''), type: 'button',
+      onclick: () => { applyTerm(label); },
+    },
+      opts.hot ? el('span', { class: 'ms-chip-flame', 'aria-hidden': 'true' }, '\u{1F525}') : null,
+      el('span', { class: 'ms-chip-label', dir: 'auto' }, label),
+    );
+  }
+
+  function paintHistory() {
+    historySection.textContent = '';
+    const items = readHistory();
+    if (!items.length) { historySection.classList.add('hidden'); return; }
+    /* While a query is active the results take over — the landing sections
+       must never pop back on top of them. */
+    if (state.q) { historySection.classList.add('hidden'); return; }
+    historySection.classList.remove('hidden');
+    historySection.append(el('div', { class: 'ms-sec-head' },
+      ico('clock', 'icon icon-sm'),
+      el('h2', null, t('سجل البحث')),
+      el('button', { class: 'ms-sec-clear', type: 'button', 'aria-label': t('حذف السجل'), title: t('حذف السجل'), onclick: clearHistory },
+        ico('trash', 'icon icon-sm')),
+    ));
+    const row = el('div', { class: 'ms-chips ms-chips-history' });
+    items.forEach((term) => row.append(chip(term)));
+    historySection.append(row);
+  }
+
+  let trendingLoaded = false;
+  async function paintTrending(force) {
+    if (trendingLoaded && !force) return;
+    trendingSection.textContent = '';
+    trendingSection.append(el('div', { class: 'ms-sec-head' },
+      ico('trending', 'icon icon-sm'),
+      el('h2', null, t('عمليات البحث الرائجة')),
+    ));
+    const row = el('div', { class: 'ms-chips' }, el('span', { class: 'ms-chip-skel' }), el('span', { class: 'ms-chip-skel' }), el('span', { class: 'ms-chip-skel' }));
+    trendingSection.append(row);
+    try {
+      const data = await api('/api/search/trending?limit=14');
+      const terms = (data && data.terms) || [];
+      row.textContent = '';
+      if (!terms.length) { trendingSection.classList.add('hidden'); return; }
+      trendingSection.classList.remove('hidden');
+      terms.forEach((item) => row.append(chip(item.term, { hot: true })));
+      chipsWrap.textContent = '';
+      trendingLoaded = true;
+    } catch (e) {
+      trendingSection.classList.add('hidden');
+    }
+  }
+
+  /* Live suggestions while typing: real rows from the catalogue. */
+  const suggestEl = el('div', { class: 'ms-suggest', role: 'listbox' });
+  let suggestSeq = 0;
+  let suggestTimer = null;
+  async function loadSuggestions(q) {
+    const mySeq = ++suggestSeq;
+    if (!q) { suggestEl.textContent = ''; suggestEl.classList.add('hidden'); return; }
+    try {
+      const data = await api('/api/search/suggest?q=' + encodeURIComponent(q) + '&limit=6');
+      if (mySeq !== suggestSeq) return;
+      const rows = (data && (data.suggestions || data.apps || data.results)) || [];
+      suggestEl.textContent = '';
+      if (!rows.length) { suggestEl.classList.add('hidden'); return; }
+      rows.forEach((r) => {
+        const name = r.name || r.term || '';
+        suggestEl.append(el('button', {
+          class: 'ms-suggest-row', type: 'button', role: 'option',
+          onclick: () => { if (r.slug) location.href = '/app?slug=' + encodeURIComponent(r.slug); else applyTerm(name); },
+        },
+          ico('search', 'icon icon-sm'),
+          el('span', { class: 'ms-suggest-name' }, name),
+          r.slug ? ico('chevronStart', 'icon icon-sm') : null,
+        ));
+      });
+      suggestEl.classList.remove('hidden');
+    } catch (e) {
+      suggestEl.classList.add('hidden');
+    }
+  }
+
+  function applyTerm(term) {
+    const q = String(term || '').trim();
+    input.value = q;
+    state.q = q;
+    state.offset = 0;
+    pushHistory(q);
+    paintHistory();
+    syncUrl();
+    suggestEl.classList.add('hidden');
+    clearTimeout(timer);
+    run();
+  }
+
   const kickerEl = el('div', { class: 'ms-kicker' }, 'Golden Store · ' + t('بحث'));
   const head = el('div', { class: 'ms-header' },
     kickerEl,
@@ -88,7 +211,7 @@
   );
   const listEl = el('div', { class: 'ms-list', role: 'list' });
   const moreEl = el('div', { class: 'ms-more' });
-  const main = el('main', { class: 'ms-main' }, tabsEl, head, listEl, moreEl);
+  const main = el('main', { class: 'ms-main' }, tabsEl, historySection, trendingSection, suggestEl, head, listEl, moreEl);
 
   /* ----------------------------- Results -------------------------------- */
   let seq = 0;
@@ -156,6 +279,13 @@
       listEl.append(S.skeletonList());
       moreEl.textContent = '';
     }
+    /* Play-style landing: with an empty field the page shows «سجل البحث» +
+       «عمليات البحث الرائجة» under the field, and the same ONE search request
+       still fills the featured list underneath it. */
+    const emptyField = !state.q && !append;
+    historySection.classList.toggle('hidden', !emptyField || !readHistory().length);
+    trendingSection.classList.toggle('hidden', !emptyField);
+    if (emptyField) { paintHistory(); paintTrending(); }
     const qs = new URLSearchParams({ sort: 'popular', limit: String(PAGE_SIZE), offset: String(state.offset) });
     if (state.q) qs.set('q', state.q);
     if (state.type) qs.set('type', state.type);
@@ -165,6 +295,7 @@
       total = Number(data.total) || 0;
       hasMore = !!data.hasMore;
       const apps = data.apps || [];
+      if (state.q) { pushHistory(state.q); paintHistory(); }
       paintHeader();
       if (!apps.length && !append) {
         listEl.textContent = '';
@@ -199,6 +330,19 @@
     syncUrl();
     clearTimeout(timer);
     timer = setTimeout(() => run(), DEBOUNCE);   // instant search, no reload
+    clearTimeout(suggestTimer);
+    /* typing instantly swaps the landing sections for suggestions/results */
+    historySection.classList.add('hidden');
+    trendingSection.classList.add('hidden');
+
+    if (!state.q) {
+      suggestEl.textContent = '';
+      suggestEl.classList.add('hidden');
+      historySection.classList.toggle('hidden', !readHistory().length);
+      trendingSection.classList.remove('hidden');
+      return;
+    }
+    suggestTimer = setTimeout(() => loadSuggestions(state.q), 180);
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timer); run(); input.blur(); }

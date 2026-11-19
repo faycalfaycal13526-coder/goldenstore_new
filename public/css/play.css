@@ -580,10 +580,10 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .55));
 }
 .topbar-home .icon-btn.support-top-btn {
-  /* exactly the same frame as «بحث» / «الإشعارات» / «مكتبتي» — no gold ring,
-     same dark plate, same 40px circle */
+  /* owner request: a solid GREY plate instead of the see-through one.
+     Same 40px circle and same 1px border as its neighbours — no gold ring. */
   width: 40px; height: 40px;
-  background: var(--surface-2);
+  background: var(--surface-3);   /* #2c2c31 — opaque grey */
   border: 1px solid var(--border);
 }
 .support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; overflow: visible; }

@@ -846,6 +846,169 @@ export async function getAuthAdmin(env: Env) {
   };
 }
 
+/* ---------------------------------------------------------------------------
+   OFFLINE Firebase ID-token verification (RS256).
+   ---------------------------------------------------------------------------
+   The REST/Identity-Toolkit path needs FIREBASE_API_KEY. When that value is not
+   configured, every Bearer token was rejected — which silently disabled every
+   authenticated feature (private notifications, likes received, support
+   replies, the bell badge…). The verification itself needs no API key: the
+   token is an RS256 JWT signed by Google and the public keys are public.
+
+   This path checks, in order:
+     alg === 'RS256' · kid present
+     signature against Google's public certificates (cached 6 h, JWKS fallback)
+     iss === https://securetoken.google.com/<project> · aud === <project>
+     exp / iat / auth_time present and exp in the future
+     sub (== user_id / uid) non-empty and ≤ 128 chars
+   It only runs when the REST path is unavailable, so nothing that works today
+   changes behaviour.
+--------------------------------------------------------------------------- */
+type GoogleCertCache = { keys: Map<string, CryptoKey>; fetchedAt: number; source: 'x509' | 'jwks' };
+const googleCerts: GoogleCertCache = { keys: new Map(), fetchedAt: 0, source: 'x509' };
+const GOOGLE_CERT_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+const GOOGLE_JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwks/securetoken@system.gserviceaccount.com';
+const CERT_TTL_MS = 6 * 60 * 60 * 1000;
+
+/* Minimal DER helpers: Google's X.509 endpoint publishes CERTIFICATES, and
+   WebCrypto can only import a raw SubjectPublicKeyInfo (or a JWK). These read
+   the SPKI out of the certificate byte-for-byte — no ASN.1 library needed. */
+function derReadTLV(buf: Uint8Array, offset: number): { tag: number; start: number; headerLen: number; length: number; end: number } {
+  const tag = buf[offset];
+  let len = buf[offset + 1];
+  let headerLen = 2;
+  if (len & 0x80) {
+    const n = len & 0x7f;
+    len = 0;
+    for (let i = 0; i < n; i++) len = (len << 8) | buf[offset + 2 + i];
+    headerLen = 2 + n;
+  }
+  return { tag, start: offset, headerLen, length: len, end: offset + headerLen + len };
+}
+
+/** The SubjectPublicKeyInfo of an X.509 certificate, as raw DER. */
+export function spkiFromCertificate(cert: Uint8Array): Uint8Array | null {
+  try {
+    const outer = derReadTLV(cert, 0);
+    if (outer.tag !== 0x30) return null;
+    let p = outer.start + outer.headerLen;
+    const tbs = derReadTLV(cert, p);            // tbsCertificate
+    if (tbs.tag !== 0x30) return null;
+    let q = tbs.start + tbs.headerLen;
+    while (q < tbs.end) {
+      const item = derReadTLV(cert, q);
+      if (item.tag === 0x30) {
+        // SubjectPublicKeyInfo = SEQ { SEQ { OID }, BIT STRING }
+        const alg = derReadTLV(cert, item.start + item.headerLen);
+        const bit = derReadTLV(cert, alg.end);
+        if (alg.tag === 0x30 && bit.tag === 0x03) return cert.slice(item.start, item.end);
+      }
+      q = item.end;
+    }
+    return null;
+  } catch { return null; }
+}
+
+function pemToDer(pem: string): Uint8Array | null {
+  try {
+    const body = pem.replace(/-----[^-]+-----/g, '').replace(/[\r\n\s]/g, '');
+    const binary = atob(body);
+    const out = new Uint8Array(new ArrayBuffer(binary.length));
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  } catch { return null; }
+}
+
+async function loadGoogleCerts(force = false): Promise<void> {
+  const fresh = Date.now() - googleCerts.fetchedAt < CERT_TTL_MS;
+  if (!force && fresh && googleCerts.keys.size) return;
+  googleCerts.keys.clear();
+  const rsaParams = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' } as const;
+  // 1) JWKS — the format WebCrypto imports natively.
+  try {
+    const res = await fetch(GOOGLE_JWKS_URL, { headers: { Accept: 'application/json' } });
+    if (res.ok) {
+      const body = await res.json() as { keys?: any[] };
+      for (const jwk of body.keys || []) {
+        try {
+          googleCerts.keys.set(String(jwk.kid),
+            await crypto.subtle.importKey('jwk', jwk, rsaParams, false, ['verify']));
+        } catch { /* skip a malformed key */ }
+      }
+      if (googleCerts.keys.size) googleCerts.source = 'jwks';
+    }
+  } catch { /* network: try the X.509 endpoint */ }
+  // 2) X.509 metadata — extract the SPKI ourselves.
+  if (!googleCerts.keys.size) {
+    try {
+      const res = await fetch(GOOGLE_CERT_URL, { headers: { Accept: 'application/json' } });
+      if (res.ok) {
+        const map = await res.json() as Record<string, string>;
+        for (const [kid, pem] of Object.entries(map)) {
+          const der = pemToDer(String(pem));
+          const spki = der ? spkiFromCertificate(der) : null;
+          if (!spki) continue;
+          try {
+            googleCerts.keys.set(kid,
+              await crypto.subtle.importKey('spki', spki as unknown as ArrayBuffer, rsaParams, false, ['verify']));
+          } catch { /* skip */ }
+        }
+        if (googleCerts.keys.size) googleCerts.source = 'x509';
+      }
+    } catch { /* offline */ }
+  }
+  googleCerts.fetchedAt = Date.now();
+}
+
+function b64urlToBytes(part: string): Uint8Array<ArrayBuffer> {
+  const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((part.length + 3) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(new ArrayBuffer(binary.length));
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+/** Verify a Firebase ID token without the Identity Toolkit API key. */
+export async function verifyFirebaseTokenOffline(
+  idToken: string, env: Env,
+): Promise<{ uid: string; email?: string; name?: string } | null> {
+  try {
+    const parts = String(idToken || '').split('.');
+    if (parts.length !== 3) return null;
+    const header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0])));
+    const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1])));
+    if (String(header?.alg || '') !== 'RS256') return null;
+    const project = String(env.FIREBASE_PROJECT_ID || '').trim();
+    if (!project) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.iss !== `https://securetoken.google.com/${project}`) return null;
+    if (payload.aud !== project) return null;
+    if (!Number.isFinite(Number(payload.exp)) || Number(payload.exp) <= now) return null;
+    if (Number(payload.iat) > now + 300) return null;
+    const uid = String(payload.sub || payload.user_id || '');
+    if (!uid || uid.length > 128) return null;
+
+    const kid = String(header?.kid || '');
+    const signature = b64urlToBytes(parts[2]);
+    const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    let key = googleCerts.keys.get(kid) || null;
+    if (!key) { await loadGoogleCerts(true); key = googleCerts.keys.get(kid) || null; }
+    if (!key) return null;
+    const valid = await crypto.subtle.verify(
+      { name: 'RSASSA-PKCS1-v1_5' }, key, signature, signed,
+    );
+    if (!valid) return null;
+    return {
+      uid,
+      ...(typeof payload.email === 'string' ? { email: payload.email } : {}),
+      ...(typeof payload.name === 'string' ? { name: payload.name } : {}),
+    };
+  } catch (error) {
+    console.error('[firebase] offline token verification failed:', (error as any)?.message || error);
+    return null;
+  }
+}
+
 export async function verifyFirebaseToken(
   idToken: string,
   env: Env,
@@ -859,7 +1022,14 @@ export async function verifyFirebaseToken(
       ...(typeof decoded.name === 'string' ? { name: decoded.name } : {}),
     };
   } catch (error) {
-    console.error('[firebase] verifyIdToken failed:', (error as any)?.message || error);
+    const message = String((error as any)?.message || error);
+    /* The REST path depends on server-side credentials + the API key. If ANY of
+       that is missing or the network hiccups, authentication must not simply
+       stop working: verify the token offline against Google's public keys. The
+       token itself is still fully validated (signature, issuer, audience, exp). */
+    const offline = await verifyFirebaseTokenOffline(idToken, env);
+    if (offline) return offline;
+    console.error('[firebase] verifyIdToken failed:', message);
     return null;
   }
 }

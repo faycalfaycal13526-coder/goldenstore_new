@@ -149,6 +149,38 @@
     return node;
   }
 
+  /* Asks the API «how many reviews do I own, how many likes did they get, and
+     how many like-notifications exist for me?» and shows the answer in place. */
+  async function runLikeCheck(btn) {
+    const host = btn.closest('.noi-empty') || btn.parentElement;
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = t('جارٍ الفحص…');
+    try {
+      const res = await S.authedApi('/api/notifications/like-diagnostics');
+      const lines = [];
+      lines.push(t('التعليقات المكتوبة بحسابك') + ': ' + (res.reviews_written || 0));
+      lines.push(t('الإعجابات التي وصلت إليها') + ': ' + (res.likes_received || 0));
+      lines.push(t('إشعارات الإعجاب المسجّلة') + ': ' + (res.like_notifications || 0));
+      let verdict = '';
+      if (res.verdict === 'no_likes_yet') verdict = t('لم يعجب أحد بتعليقاتك بعد.');
+      else if (res.verdict === 'likes_exist_but_notifications_missing') verdict = t('وصلت إعجابات لكن بلا إشعارات — أرسل هذه الشاشة للدعم.');
+      else if (res.verdict === 'partial') verdict = t('بعض الإعجابات داخل التبريد (إشعار واحد في الساعة لكل تعليق).');
+      else verdict = t('كل شيء سليم: الإشعارات تُسجّل عند كل إعجاب.');
+      if (res.push_enabled === false) verdict += ' ' + t('تنبيه: الدفع (Push) مغلق من الإعدادات.');
+      host.append(el('div', { class: 'noi-check' },
+        el('p', null, ...lines.map((l) => el('span', { class: 'noi-check-line' }, l))),
+        el('p', { class: 'noi-check-verdict' }, verdict),
+      ));
+    } catch (e) {
+      host.append(el('div', { class: 'noi-check' },
+        el('p', { class: 'noi-check-verdict' }, t('تعذّر إجراء الفحص، حاول لاحقاً.'))));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
   function markRead(n) {
     try {
       const ts = tsOf(n);
@@ -200,6 +232,12 @@
         el('span', { class: 'noi-empty-ico' }, icon('bell')),
         el('h2', null, t('لا توجد إشعارات بعد')),
         el('p', null, t('ستظهر هنا الإشعارات المنشورة والتنبيهات الآلية.')),
+        /* The exact complaint «حتى مع تسجيل الدخول لا أتلقى أي إشعار إعجاب»
+           now has a button that reads the database and answers it. */
+        S.isLoggedIn && S.isLoggedIn()
+          ? el('button', { class: 'btn btn-secondary noi-empty-cta', type: 'button',
+            onclick: (e) => runLikeCheck(e.currentTarget) }, t('افحص إعجاباتي'))
+          : null,
       ));
     } else {
       const shown = (filter ? all.filter((n) => kindOf(n) === filter) : all)
@@ -219,6 +257,12 @@
               : 'اضغط نفس الزر مرة أخرى لعرض كل الإشعارات.')),
           supportEmpty ? el('a', { class: 'btn btn-secondary noi-empty-cta', href: '/support' },
             t('افتح صفحة الدعم')) : null,
+          // «لماذا لا يصلني إشعار إعجاب؟» — a real, self-scoped check that reads
+          // the database and says exactly what is missing.
+          likeEmpty && S.isLoggedIn && S.isLoggedIn()
+            ? el('button', { class: 'btn btn-secondary noi-empty-cta', type: 'button',
+              onclick: (e) => runLikeCheck(e.currentTarget) }, t('افحص إعجاباتي'))
+            : null,
         ));
       }
       shown.forEach((n) => list.append(row(n)));

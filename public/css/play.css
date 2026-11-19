@@ -3666,6 +3666,14 @@ html[dir="ltr"] .noi-back .icon { transform: scaleX(-1); }
 .noi-dot.is-new { background: #e0334b; }
 
 .noi-empty { padding: 54px 20px; text-align: center; color: var(--text-2); }
+.noi-empty-cta { margin-top: 14px; }
+.noi-check {
+  margin: 14px auto 0; max-width: 360px; padding: 10px 12px; border-radius: 12px;
+  background: var(--surface-2, rgba(255,255,255,.05)); border: 1px solid var(--border, rgba(255,255,255,.10));
+  text-align: start;
+}
+.noi-check-line { display: block; font-size: 12.5px; line-height: 1.9; color: var(--text-2); }
+.noi-check-verdict { margin: 8px 0 0; font-size: 12.5px; font-weight: 800; color: var(--gold, #e3b75e); }
 .noi-empty-ico {
   width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 20px;
   display: grid; place-items: center; color: var(--text-3); background: var(--surface-2);

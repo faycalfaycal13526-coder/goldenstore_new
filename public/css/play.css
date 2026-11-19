@@ -809,8 +809,8 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .dlm-tab {
   flex: 1 1 0; position: relative;
   background: transparent; border: 0; cursor: pointer;
-  padding: 12px 4px 16px; font-family: inherit;
-  font-size: 15px; font-weight: 600; color: var(--text-2);
+  padding: 12px 3px 16px; font-family: inherit;
+  font-size: 13px; font-weight: 600; color: var(--text-2);
   -webkit-tap-highlight-color: transparent; white-space: nowrap;
   transition: color .15s;
 }
@@ -839,8 +839,18 @@ html[data-theme="dark"] .dlm-tab.active .dlm-tab-in::after { background: var(--g
 .dlm-chip {
   display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
   border-radius: 999px; font-size: 11.5px; font-weight: 700;
+  white-space: nowrap; flex: 0 0 auto;
 }
+/* «التحديثات» rows: the meta line may hold a version and a chip, so it wraps
+   instead of squeezing the name. */
+.dlm-list .lib-row .lib-info .meta {
+  flex-wrap: wrap; row-gap: 6px; align-items: center; gap: 6px;
+}
+.dlm-list .lib-row .lib-info .meta > span { white-space: nowrap; }
+.dlm-list .lib-row .lib-action .btn { white-space: nowrap; }
 .dlm-chip-ready { background: rgba(43,125,233,.14); color: #2b7de9; }
+.dlm-chip-update { background: rgba(244,192,31,.16); color: #b98d05; }
+html[data-theme="dark"] .dlm-chip-update { color: var(--gold); }
 .dlm-body { padding: 0; }
 .dlm-list { padding: 0 16px; }
 .dlm-empty {
@@ -855,7 +865,7 @@ html[data-theme="light"] .dlm-empty-ico .icon { color: #000; }
   color: #757575; line-height: 1.45;
 }
 @media (max-width: 340px) {
-  .dlm-tab { font-size: 13.5px; }
+  .dlm-tab { font-size: 12px; }
   .dlm-title { font-size: 19px; }
 }
 

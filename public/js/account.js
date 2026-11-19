@@ -13,6 +13,7 @@
   const DLM_TABS = [
     { key: 'current', label: 'التنزيلات الحالية' },
     { key: 'downloaded', label: 'تم التنزيل' },
+    { key: 'updates', label: 'التحديثات' },
     { key: 'library', label: 'المثبة' },
   ];
   const DLM_EMPTY = 'لم يتم تنزيل أي تطبيقات';
@@ -265,7 +266,7 @@
         el('div', { class: 'art' },
           icon ? el('img', { src: icon, alt: name, loading: 'lazy' }) : ico('package', 'icon icon-lg')),
         el('div', { class: 'lib-info' },
-          el('div', { class: 'nm' }, name),
+          el('div', { class: 'nm' }, el('bdi', S.appNameAttrs ? S.appNameAttrs(it) : null, name)),
           el('div', { class: 'sub' }, it.developer || opts.developer || 'Golden Store'),
           opts.metaNode || el('div', { class: 'meta' },
             el('span', null, formatBytes(it.size_bytes || opts.size_bytes || 0)),
@@ -469,12 +470,118 @@
       slice();
     }
 
+    /* «التحديثات» = installed apps/games whose store build is newer than the
+       copy on the device. Works in two steps so it is never slow:
+
+       1. INSTANT: the device registry already knows which slugs are installed
+          and which version each one has (recorded at install time), so the
+          first paint needs no network and no Android bridge call;
+       2. VERIFY: one small parallel batch asks the bridge for the real version
+          of those few packages — only installed apps, never the whole catalog —
+          and repaints once if the answer differs.
+
+       When this phone has not installed anything yet there is nothing to
+       update, so an honest empty state is shown instead of a spinner. */
+    function installedSlugsFromHistory() {
+      const out = [];
+      (getItems() || []).forEach((it) => {
+        if (!it || !it.slug) return;
+        if (S.isInstalledStored && S.isInstalledStored(it.slug)) out.push(it.slug);
+      });
+      return out;
+    }
+
+    function paintUpdates(rows) {
+      panel.innerHTML = '';
+      if (!rows.length) {
+        panel.append(el('div', { class: 'dlm-empty' },
+          el('div', { class: 'dlm-empty-ico' }, ico('refresh', 'icon')),
+          el('p', { class: 'dlm-empty-txt' }, t('كل تطبيقاتك محدّثة')),
+        ));
+        return;
+      }
+      panel.append(el('div', { class: 'dlm-sec' },
+        ico('refresh', 'icon icon-sm'),
+        el('span', null, t('تحتاج تحديث')),
+        el('span', { class: 'dlm-sec-count' }, String(rows.length))));
+      const list = el('div', { class: 'lib-list dlm-list' });
+      panel.append(list);
+      rows.forEach((r) => list.append(libRowBase({
+        item: r.app, slug: r.app.slug, name: S.appName ? S.appName(r.app) : r.app.name,
+        icon_url: r.app.icon_url,
+        metaNode: el('div', { class: 'meta' },
+          r.app.version_name ? el('span', null, 'v' + r.app.version_name) : null,
+          r.app.size_bytes ? el('span', null, '•') : null,
+          r.app.size_bytes ? el('span', null, formatBytes(r.app.size_bytes)) : null,
+          statusChip(t('يتوفّر تحديث'), 'update')),
+        action: el('a', {
+          class: 'btn btn-primary btn-sm',
+          href: `/app?slug=${encodeURIComponent(r.app.slug)}`,
+        }, ico('download', 'icon icon-sm'), t('تحديث')),
+      })));
+      libListRef = list;
+    }
+
+    const verCache = new Map();     // pkg -> device version (one bridge call per app per visit)
+    function deviceVersionOf(app) {
+      if (!app || !app.package_name) return '';
+      const pkg = app.package_name;
+      if (verCache.has(pkg)) return verCache.get(pkg);
+      let v = '';
+      try { v = S.installedVersionOnDevice ? (S.installedVersionOnDevice(pkg) || '') : ''; } catch (e) { v = ''; }
+      verCache.set(pkg, v);
+      return v;
+    }
+
+    function renderUpdatesPanel() {
+      const installed = installedSlugsFromHistory();
+      if (!installed.length) { paintUpdates([]); return; }
+
+      const known = catalogCache || readCatalogCache();
+      const byslug = new Map();
+      (known || []).forEach((a) => { if (a && a.slug) byslug.set(a.slug, a); });
+
+      const build = (catalog) => {
+        const rows = [];
+        installed.forEach((slug) => {
+          const app = catalog.get(slug) || (historyOf(slug) || {});
+          if (!app || !app.slug) return;
+          const deviceVersion = deviceVersionOf(app);
+          const storeV = String(app.version_name || '').trim();
+          const isNewer = deviceVersion && deviceVersion !== 'installed'
+            ? S.versionIsNewer(storeV, deviceVersion)
+            : (deviceVersion === 'installed' ? !!storeV && S.appHasUpdate(app) : false);
+          if (isNewer) rows.push({ app, deviceVersion: deviceVersion === 'installed' ? '' : deviceVersion });
+        });
+        rows.sort((a, b) => (b.app.downloaded_at || 0) - (a.app.downloaded_at || 0));
+        return rows;
+      };
+
+      // Step 1 (instant): paint from the registry we already have.
+      paintUpdates(build(byslug));
+
+      // Step 2 (one batch): make sure the catalog page is loaded, then verify.
+      if (!catalogCache) {
+        S.api('/api/apps?limit=60&sort=popular').then((res) => {
+          const batch = (res && res.apps) || [];
+          if (!batch.length) return;
+          catalogCache = batch;
+          writeCatalogCache(batch);
+          if (!panel.isConnected || active !== 'updates') return;
+          const cat = new Map(byslug);
+          batch.forEach((a) => { if (a && a.slug) cat.set(a.slug, a); });
+          paintUpdates(build(cat));
+        }).catch(() => {});
+      }
+    }
+
     function renderPanel() {
       if (teardown) { try { teardown(); } catch (e) {} teardown = null; }
       libListRef = null;
       libRefreshRowRef = refreshRow;
       if (active === 'current') return renderCurrentPanel();
       if (active === 'downloaded') return renderDownloadedPanel();
+      if (active === 'updates') return renderUpdatesPanel();
       return renderLibraryPanel();
     }
 
@@ -491,6 +598,7 @@
     libEventsBound = true;
     window.addEventListener('gs-package-uninstalled', (e) => {
       forgetDeviceState(null);          // device truth changed: drop the cache
+      try { verCache.clear(); } catch (err) {}
       const d = (e && e.detail) || {};
       const pkg = d.packageName;
       const slug = d.slug;
@@ -596,7 +704,7 @@
           );
 
           const infoCol = el('div', { class: 'info' },
-            el('div', { class: 'nm' }, name),
+            el('div', { class: 'nm' }, el('bdi', S.appNameAttrs ? S.appNameAttrs(it) : null, name)),
             el('div', { class: 'bar' }, barFill),
             meta,
           );

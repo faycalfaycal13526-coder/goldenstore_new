@@ -770,7 +770,7 @@ function supportTopButton() {
     'aria-label': t('ادعم قولدن ستور'),
     title: t('ادعم قولدن ستور'),
     onclick: () => { openSupportSheet(); },
-  }, el('img', { class: 'support-top-img', src: '/images/support-heart-hand.png', alt: '', width: '46', height: '43', decoding: 'async' }));
+  }, el('img', { class: 'support-top-img', src: '/images/support-heart-hand.png', alt: '', width: '102', height: '95', decoding: 'async' }));
 }
 
 function topbarSearch(user) {

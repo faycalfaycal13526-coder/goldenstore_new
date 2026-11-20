@@ -4779,7 +4779,3 @@ a.tab.active { text-decoration: none; }
 }
 .rate-guest-gate p { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-2); }
 .rate-guest-gate .btn { min-width: 180px; }
-
-/* Round 42 — «نشر تطبيق أو لعبة» sits under the support entry on «أنت» and
-   wears the same plate (it is a second entry, not a second support button). */
-.publish-entry { margin-top: 10px; }

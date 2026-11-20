@@ -825,7 +825,6 @@
         ),
         telegramCard(),
         supportEntry(),
-        publishEntry(),
         legalLinksCard(),
         el('div', { class: 'account-actions' },
           user
@@ -944,19 +943,6 @@
     },
       ico('message', 'icon'),
       el('span', { class: 'support-entry-label' }, t('الدعم والمساعدة')),
-      ico('chevronEnd', 'icon support-entry-chevron'),
-    );
-  }
-
-  /* Round 42: «نشر تطبيق أو لعبة» used to be a dead button — it now opens the
-     real request form at /publish. */
-  function publishEntry() {
-    return el('a', {
-      class: 'support-entry publish-entry', href: '/publish',
-      'aria-label': t('نشر تطبيق أو لعبة'),
-    },
-      ico('upload', 'icon'),
-      el('span', { class: 'support-entry-label' }, t('نشر تطبيق أو لعبة')),
       ico('chevronEnd', 'icon support-entry-chevron'),
     );
   }

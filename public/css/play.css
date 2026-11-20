@@ -580,13 +580,13 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .55));
 }
 .topbar-home .icon-btn.support-top-btn {
-  /* owner request: a solid GREY plate instead of the see-through one.
-     Same 40px circle and same 1px border as its neighbours — no gold ring. */
+  /* Identical to «بحث» / «الإشعارات» / «مكتبتي»: the SAME 40px circle, the SAME
+     grey plate and the SAME 1px border — the artwork is the only difference.
+     (Previously a hand-picked lighter fill + lighter ring made it look like it
+     had an extra black ring around it.) */
   width: 40px; height: 40px;
-  background: var(--surface-3);   /* #2c2c31 — opaque grey */
-  /* the neighbours' ring reads clearly because their fill is darker than the
-     border; keep the same 1px ring and give it that same visible contrast */
-  border: 1px solid #4b4b54;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
 }
 .support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; overflow: visible; }
 .support-top-btn:hover { color: var(--gold-2, #ffd766); }

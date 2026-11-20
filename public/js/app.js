@@ -177,16 +177,6 @@
     }
   }
 
-  function likeHintNode() {
-    let signed = false;
-    try { signed = !!(S.isLoggedIn && S.isLoggedIn()); } catch (e) { signed = false; }
-    if (signed) return null;
-    return el('div', { class: 'rate-like-hint' },
-      ico('bell', 'icon icon-sm'),
-      el('span', null, t('ستصلك إشعارات الإعجابات بتعليقك عندما تسجّل الدخول قبل النشر.')),
-    );
-  }
-
   function openReviewMenu(wrap, btn, list) {
     closeReviewMenu();
     // Flip upwards when there is not enough room below (review lists and
@@ -2790,10 +2780,6 @@
     }
 
     const rateBody = el('div', { class: 'rate-collapse-body' });
-    /* The «you will get like notifications» line is a guest hint: it is hidden as
-       soon as the visitor signs in, together with the rest of the gate. */
-    const hint = likeHintNode();
-    if (hint) rateBody.append(hint);
     /* Round 42 — «المستخدم لم يسجل لا يستطيع التعليق ولا التقييم ولا الإعجاب»:
        a guest sees ONE invitation instead of a composer that could never submit.
        The gate is painted from the CURRENT auth state and is swapped back to the
@@ -2808,7 +2794,6 @@
       let logged = false;
       try { if (S.isLoggedIn && S.isLoggedIn()) logged = true; } catch (e) {}
       guestGate.style.display = logged ? 'none' : '';
-      if (hint) hint.style.display = logged ? 'none' : '';
       pickerWrap.style.display = logged ? '' : 'none';
       form.style.display = logged ? '' : 'none';
     }

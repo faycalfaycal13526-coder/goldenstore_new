@@ -4697,3 +4697,43 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
   .auth-hero-logo { width: 80px; height: 80px; }
   .auth-hero-name { font-size: 23px; }
 }
+
+/* ============================================================================
+   Round 37 — the IN-STORE sign-in screen (the one that appears over store
+   pages, and the full-screen gate when the store requires signing in) now
+   shares the /login design. Same colours, same fields, same order.
+   ========================================================================== */
+.gate.is-auth-page {
+  background: var(--bg);
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  text-align: start;
+}
+.gate.is-auth-page > .auth-page { min-height: 100dvh; }
+.auth-page.is-gate { justify-content: flex-start; }
+.auth-page.is-gate .auth-hero { padding-top: 4px; }
+
+/* overlay variant: a sheet that scrolls, never a squeezed dialog */
+.auth-required-overlay { align-items: flex-start; justify-content: center; overflow-y: auto; padding: 0; }
+.auth-required-overlay .auth-page {
+  min-height: auto; width: 100%; max-width: 480px; margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
+  border-radius: 0; background: var(--bg); box-shadow: none;
+}
+.auth-page .gate-error {
+  margin: 8px 0 0; padding: 10px 12px; border-radius: 12px; font-size: 13px;
+  background: rgba(229,57,53,.12); border: 1px solid rgba(229,57,53,.35); color: #ff8a80;
+  text-align: start;
+}
+.auth-page .gate-error.hidden { display: none; }
+.auth-page .gate-spinner { margin: 10px auto 0; }
+.auth-page .auth-back { cursor: pointer; }
+.auth-page .auth-back .icon { transform: none; }          /* points back in RTL via chevronEnd */
+@media (min-width: 720px) {
+  .auth-required-overlay { padding: 24px; }
+  .auth-required-overlay .auth-page {
+    max-width: 520px; margin: 24px auto; border-radius: 24px;
+    border: 1px solid var(--border);
+  }
+}

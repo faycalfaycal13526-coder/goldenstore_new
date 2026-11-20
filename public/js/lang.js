@@ -188,6 +188,7 @@
     // ---- Sign-in page (round 36): e-mail + password form ----
     'تسجيل الدخول': { en: 'Sign in', fr: 'Connexion', es: 'Iniciar sesión' },
     'إنشاء حساب': { en: 'Create an account', fr: 'Créer un compte', es: 'Crear una cuenta' },
+    'إنشاء حساب جديد': { en: 'Create a new account', fr: 'Créer un nouveau compte', es: 'Crear una cuenta nueva' },
     'نسيت كلمة المرور؟': { en: 'Forgot your password?', fr: 'Mot de passe oublié ?', es: '¿Olvidaste tu contraseña?' },
     'لدي حساب بالفعل': { en: 'I already have an account', fr: 'J’ai déjà un compte', es: 'Ya tengo una cuenta' },
     'البريد الإلكتروني': { en: 'E-mail', fr: 'E-mail', es: 'Correo electrónico' },
@@ -1418,6 +1419,7 @@
     // ---- Sign-in page (round 36): e-mail + password form ----
     'تسجيل الدخول': { en: 'Sign in', fr: 'Connexion', es: 'Iniciar sesión' },
     'إنشاء حساب': { en: 'Create an account', fr: 'Créer un compte', es: 'Crear una cuenta' },
+    'إنشاء حساب جديد': { en: 'Create a new account', fr: 'Créer un nouveau compte', es: 'Crear una cuenta nueva' },
     'نسيت كلمة المرور؟': { en: 'Forgot your password?', fr: 'Mot de passe oublié ?', es: '¿Olvidaste tu contraseña?' },
     'لدي حساب بالفعل': { en: 'I already have an account', fr: 'J’ai déjà un compte', es: 'Ya tengo una cuenta' },
     'البريد الإلكتروني': { en: 'E-mail', fr: 'E-mail', es: 'Correo electrónico' },

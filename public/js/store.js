@@ -1042,6 +1042,9 @@ async function authedApi(path, opts = {}) {
    static markup; every in-app Google sign-in gate built below gets the same
    component so the attribution is visible wherever the Google button is.
    Decorative only: no link, no action, no pointer events. */
+/* The Google «G» mark, shared by the rebuilt sign-in screens. */
+const GOOGLE_G_HTML = '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
+
 function fromBrandLockup() {
   return el('div', { class: 'gs-from', role: 'img', 'aria-label': 'from The Pirate Bay' },
     el('span', { class: 'gs-from-label' }, 'from'),
@@ -1055,55 +1058,197 @@ function addFromBrand(host) {
   host.append(fromBrandLockup());
 }
 
+/* ---------------------------------------------------------------------------
+   Round 37 (owner request): the in-store sign-in screen — the one that appears
+   ON TOP of a store page (a download, a rating, a review…) — now uses the SAME
+   design as the rebuilt /login page: back arrow + title, logo, name, tagline,
+   e-mail + password with a show/hide eye, forgot-password, create-account,
+   submit, then the third-party (Google) block at the bottom.
+
+   Behaviour is unchanged where it matters: nothing is requested before the
+   Terms/Privacy box is ticked, and the promise still resolves with the user
+   (or rejects on cancel) so every existing caller keeps working.
+   --------------------------------------------------------------------------- */
+function authGateForm(opts) {
+  opts = opts || {};
+  var onSuccess = typeof opts.onSuccess === 'function' ? opts.onSuccess : function () {};
+  var onCancel = typeof opts.onCancel === 'function' ? opts.onCancel : function () {};
+  var compact = !!opts.compact;
+
+  var title = el('h1', { class: 'auth-top-title' }, t('تسجيل الدخول'));
+  var back = el('button', { class: 'auth-back', type: 'button', 'aria-label': t('رجوع'), onclick: onCancel },
+    ico('chevronEnd', 'icon'));
+  var note = el('p', { class: 'auth-note' }, t('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك'));
+  var errBox = el('div', { class: 'gate-error hidden' });
+
+  var emailInput = el('input', { id: 'gs-auth-email', name: 'email', type: 'email',
+    inputmode: 'email', autocomplete: 'email', dir: 'ltr',
+    placeholder: t('أدخل البريد الإلكتروني'), 'aria-label': t('البريد الإلكتروني'), required: 'required' });
+  var passInput = el('input', { id: 'gs-auth-pass', name: 'password', type: 'password',
+    autocomplete: 'current-password', dir: 'ltr',
+    placeholder: t('أدخل كلمة المرور'), 'aria-label': t('كلمة المرور'), required: 'required' });
+  var eye = el('button', { class: 'auth-eye', type: 'button',
+    'aria-label': t('إظهار كلمة المرور'), title: t('إظهار كلمة المرور') }, ico('eye', 'icon'));
+  eye.addEventListener('click', function () {
+    var shown = passInput.type === 'text';
+    passInput.type = shown ? 'password' : 'text';
+    eye.classList.toggle('is-on', !shown);
+    eye.setAttribute('aria-label', t(shown ? 'إظهار كلمة المرور' : 'إخفاء كلمة المرور'));
+  });
+
+  var forgot = el('button', { class: 'auth-textbtn', type: 'button' }, t('نسيت كلمة المرور؟'));
+  var toRegister = el('button', { class: 'auth-textbtn', type: 'button' }, t('إنشاء حساب جديد'));
+  var submit = el('button', { class: 'auth-submit', type: 'submit', disabled: 'disabled' }, t('تسجيل الدخول'));
+  var consent = consentRow(opts.consentId || 'gs-auth-consent');
+  var mode = 'login';
+
+  function showErr(msg) { errBox.textContent = msg; errBox.classList.remove('hidden'); }
+  function clearErr() { errBox.textContent = ''; errBox.classList.add('hidden'); }
+  function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || '').trim()); }
+  function consentOkNow() {
+    var box = consent.querySelector('input[type="checkbox"]');
+    return !!(box && box.checked);
+  }
+  function sync() {
+    var ready = validEmail(emailInput.value) && String(passInput.value).length >= 6 && consentOkNow();
+    submit.disabled = !ready;
+  }
+  emailInput.addEventListener('input', function () { clearErr(); sync(); });
+  passInput.addEventListener('input', function () { clearErr(); sync(); });
+  consent.addEventListener('change', function () { clearErr(); sync(); });
+
+  function authError(e) {
+    var code = e && e.code;
+    if (code === 'auth/user-not-found') return t('لا يوجد حساب بهذا البريد. أنشئ حساباً جديداً.');
+    if (code === 'auth/wrong-password' || code === 'auth/invalid-credential'
+        || code === 'auth/invalid-login-credentials') return t('البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+    if (code === 'auth/email-already-in-use') return t('هذا البريد مستخدم بالفعل. سجّل الدخول بدلاً من إنشاء حساب.');
+    if (code === 'auth/weak-password') return t('كلمة المرور ضعيفة: استخدم ٦ أحرف على الأقل.');
+    if (code === 'auth/too-many-requests') return t('محاولات كثيرة. انتظر قليلاً ثم حاول مجدداً.');
+    if (code === 'auth/operation-not-allowed') return t('تسجيل الدخول بالبريد غير مُفعَّل حالياً. استخدم زر Google في الأسفل.');
+    if (code === 'auth/invalid-email') return t('البريد الإلكتروني غير صالح.');
+    if (code === 'auth/network-request-failed') return t('تعذّر الاتصال بالشبكة. تحقّق من الإنترنت وحاول مجدداً.');
+    if (code === 'auth/sdk-not-ready') return t('تعذّر تحميل خدمة المصادقة. تحقّق من اتصال الإنترنت وأعد المحاولة.');
+    if (code === 'auth/in-app-browser') return t('افتح الصفحة في متصفّح مثل Chrome أو Safari لإتمام تسجيل الدخول بحساب Google.');
+    return t('تعذّر تسجيل الدخول') + (code ? ' (' + code + ')' : '') + '. ' + t('حاول مجدداً.');
+  }
+  function busy(on) {
+    submit.disabled = on || !(validEmail(emailInput.value) && String(passInput.value).length >= 6 && consentOkNow());
+    submit.textContent = on ? t('جار تسجيل الدخول…')
+      : (mode === 'register' ? t('إنشاء حساب') : t('تسجيل الدخول'));
+  }
+
+  function setMode(next) {
+    mode = next === 'register' ? 'register' : 'login';
+    var isReg = mode === 'register';
+    title.textContent = isReg ? t('إنشاء حساب') : t('تسجيل الدخول');
+    submit.textContent = isReg ? t('إنشاء حساب') : t('تسجيل الدخول');
+    passInput.setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
+    forgot.textContent = isReg ? t('لدي حساب بالفعل') : t('نسيت كلمة المرور؟');
+    toRegister.style.display = isReg ? 'none' : '';
+    note.textContent = isReg
+      ? t('أنشئ حسابك بالبريد الإلكتروني وكلمة مرور من ٦ أحرف على الأقل')
+      : t('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك');
+    clearErr(); sync();
+  }
+  toRegister.addEventListener('click', function () { setMode('register'); try { passInput.focus(); } catch (e) {} });
+  forgot.addEventListener('click', function () {
+    if (mode === 'register') { setMode('login'); return; }
+    var mail = emailInput.value.trim();
+    if (!validEmail(mail)) { showErr(t('أدخل بريدك الإلكتروني أولاً لإرسال رابط إعادة التعيين.')); try { emailInput.focus(); } catch (e) {} return; }
+    clearErr(); forgot.disabled = true;
+    Promise.resolve()
+      .then(function () { return window.GAuth.sendPasswordReset(mail); })
+      .then(function () { showErr(t('تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك. راجع صندوق الوارد.')); })
+      .catch(function (e) { showErr(authError(e)); })
+      .then(function () { forgot.disabled = false; });
+  });
+
+  var form = el('form', { class: 'auth-form', novalidate: 'novalidate' },
+    el('label', { class: 'auth-field', for: 'gs-auth-email' },
+      el('span', { class: 'auth-field-ico', 'aria-hidden': 'true' }, ico('mail', 'icon')),
+      emailInput),
+    el('label', { class: 'auth-field', for: 'gs-auth-pass' },
+      el('span', { class: 'auth-field-ico', 'aria-hidden': 'true' }, ico('lock', 'icon')),
+      passInput, eye),
+    el('div', { class: 'auth-links' }, forgot, toRegister),
+    consent,
+    submit,
+    errBox,
+    note);
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    clearErr();
+    if (!validEmail(emailInput.value)) { showErr(t('البريد الإلكتروني غير صالح.')); return; }
+    if (String(passInput.value).length < 6) { showErr(t('كلمة المرور يجب أن تكون ٦ أحرف على الأقل.')); return; }
+    var box = consent.querySelector('input[type="checkbox"]');
+    if (!box || !box.checked) {
+      consent.classList.add('consent-error');
+      showErr(t(CONSENT_MSG));
+      return;                                   // no request without consent
+    }
+    busy(true);
+    var mail = emailInput.value.trim(), pass = passInput.value;
+    var task = mode === 'register'
+      ? window.GAuth.signUpWithEmail(mail, pass, '')
+      : window.GAuth.signInWithEmail(mail, pass);
+    Promise.resolve(task)
+      .then(function (user) { if (user) onSuccess(user); else busy(false); })
+      .catch(function (e) { showErr(authError(e)); busy(false); });
+  });
+
+  var googleBtn = el('button', { class: 'auth-google-big', type: 'button',
+    'aria-label': t('متابعة باستخدام Google'), title: t('متابعة باستخدام Google'),
+    html: GOOGLE_G_HTML + '<span class="gbtn-label">' + t('متابعة باستخدام Google') + '</span>',
+    onclick: function () {
+      var box = consent.querySelector('input[type="checkbox"]');
+      if (!box || !box.checked) {
+        consent.classList.add('consent-error');
+        showErr(t(CONSENT_MSG));
+        return;                                 // same consent rule as before
+      }
+      clearErr();
+      googleBtn.disabled = true;
+      Promise.resolve()
+        .then(function () { return window.GAuth.signInWithGoogle(); })
+        .then(function (user) { googleBtn.disabled = false; if (user) onSuccess(user); })
+        .catch(function (e) { googleBtn.disabled = false; showErr(authError(e)); });
+    } });
+  var googleFoot = el('div', { class: 'auth-third-foot' },
+    el('span', { class: 'auth-third-brand' }, t('متصفح')),
+    el('span', { class: 'auth-third-sub' }, t('الجوجل')));
+
+  var wrap = el('div', { class: 'auth-page is-gate' + (compact ? ' is-compact' : '') },
+    el('header', { class: 'auth-top' }, title, back),
+    el('div', { class: 'auth-hero' },
+      el('img', { class: 'auth-hero-logo', src: '/images/logo.png', alt: 'Golden Store', width: '96', height: '96' }),
+      el('div', { class: 'auth-hero-name' }, 'Golden', el('b', null, 'Store')),
+      el('p', { class: 'auth-hero-tag' }, 'Golden Store, Play More Fun!')),
+    form,
+    el('div', { class: 'auth-third' },
+      el('div', { class: 'auth-third-title' }, t('تسجيل الدخول السريع لحساب الطرف الثالث')),
+      googleBtn,
+      googleFoot));
+  addFromBrand(wrap);
+  setTimeout(function () { try { emailInput.focus(); } catch (e) {} }, 0);
+  return wrap;
+}
+
 function requireAuth() {
   if (_user) return Promise.resolve(_user);
   return new Promise((resolve, reject) => {
     const overlay = el('div', { class: 'dialog-overlay auth-required-overlay' });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); reject(new Error('cancelled')); } });
-    const authConsent = consentRow('gs-auth-consent');
-    const card = el('div', { class: 'dialog-card auth-required-card' },
-      el('div', { class: 'auth-required-header' },
-        el('img', { src: '/images/logo.png', alt: 'Golden Store', class: 'auth-logo' }),
-        el('h2', { class: 'auth-title' }, t('تسجيل الدخول مطلوب')),
-        el('p', { class: 'auth-desc' }, t('سجّل الدخول بحساب Google لتتمكن من تنزيل التطبيقات والتقييم والمزيد.')),
-      ),
-      authConsent,
-      el('button', { class: 'gbtn auth-google-btn', type: 'button', html: '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span class="gbtn-label">' + t('متابعة باستخدام Google') + '</span>', onclick: async () => {
-        if (!consentAccepted(authConsent)) {
-          authConsent.classList.add('consent-error');
-          toast(t(CONSENT_MSG), 'error');
-          return;                       // no Firebase request without consent
-        }
-        try {
-          const user = await window.GAuth.signInWithGoogle();
-          if (user) {
-            cacheUser(user);
-            onAuthed(user);
-            overlay.remove();
-            resolve(user);
-          }
-        } catch (e) {
-          if (e && e.code === 'auth/in-app-browser') {
-            toast(t('افتح الرابط في المتصفح الخارجي لتسجيل الدخول'), 'error');
-          } else {
-            toast(t('تعذّر تسجيل الدخول، حاول مجدداً'), 'error');
-          }
-        }
-      } }),
-      el('button', { class: 'btn btn-secondary auth-cancel-btn', type: 'button', onclick: () => { overlay.remove(); reject(new Error('cancelled')); } }, t('إلغاء')),
-    );
-    authConsent.addEventListener('change', () => {
-      if (consentAccepted(authConsent)) authConsent.classList.remove('consent-error');
-    });
-    // Keep the consent row directly BELOW the Google button (matches login.html).
-    const authGoogleBtn = card.querySelector('.auth-google-btn');
-    if (authGoogleBtn && authConsent.parentNode) {
-      authConsent.remove();
-      authGoogleBtn.after(authConsent);
-    }
-    addFromBrand(card);
-    overlay.append(card);
+    const finish = (user) => { overlay.remove(); document.body.style.overflow = ''; resolve(user); };
+    const cancel = () => { overlay.remove(); document.body.style.overflow = ''; reject(new Error('cancelled')); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cancel(); });
+    overlay.append(renderAuthGate({
+      compact: true,
+      consentId: 'gs-auth-consent',
+      onSuccess: finish,
+      onCancel: cancel,
+    }));
     document.body.append(overlay);
+    document.body.style.overflow = 'hidden';
   });
 }
 
@@ -1115,71 +1260,25 @@ function goToLogin() {
   location.replace('/login?next=' + encodeURIComponent(next));
 }
 
+/* Both in-app gates (the overlay and the full-screen one) render the very same
+   builder, so the lockup and the consent rule can only ever live in one place. */
+function renderAuthGate(opts) { return authGateForm(opts || {}); }
+
+/* Full-screen sign-in gate (require_login = 1). Round 37: same rebuilt design
+   as /login and as the in-page overlay — one look everywhere. */
 function showAuthGate() {
   if (document.getElementById('gs-auth-gate')) return;
-  const gate = el('div', { id: 'gs-auth-gate', class: 'gate' });
-  const gateConsent = consentRow('gs-gate-consent');
-  const inner = el('div', null,
-    el('div', { class: 'logo' }, el('img', { src: '/images/logo.png', alt: 'Golden Store' })),
-    el('h1', null, 'Golden', el('b', null, 'Store')),
-    el('p', null, t('سجّل الدخول بحساب Google للوصول إلى المتجر وتطبيقاته وإشعاراته.')),
-    gateConsent,
-    el('button', { class: 'gbtn auth-google-btn', type: 'button', html: '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span class="gbtn-label">' + t('متابعة باستخدام Google') + '</span>' }),
-    el('div', { class: 'gate-spinner hidden' }, el('div', { class: 'spinner' })),
-    el('div', { class: 'gate-error hidden' }),
-  );
-  gate.append(inner);
-  addFromBrand(gate);
+  const gate = el('div', { id: 'gs-auth-gate', class: 'gate is-auth-page' });
+  const spinner = el('div', { class: 'gate-spinner hidden' }, el('div', { class: 'spinner' }));
+  const errBox = el('div', { class: 'gate-error hidden' });
+  const form = renderAuthGate({
+    consentId: 'gs-gate-consent',
+    onSuccess: () => { hideAuthGate(); },
+    onCancel: () => { try { location.href = '/'; } catch (e) {} },
+  });
+  gate.append(form, spinner, errBox);
   document.body.append(gate);
-  // Keep the consent row directly BELOW the Google button (matches login.html).
-  const gateGoogleBtn = gate.querySelector('.auth-google-btn');
-  if (gateGoogleBtn && gateConsent.parentNode) {
-    gateConsent.remove();
-    gateGoogleBtn.after(gateConsent);
-  }
   document.body.style.overflow = 'hidden';
-
-  const btn = gate.querySelector('.gbtn');
-  const spin = gate.querySelector('.gate-spinner');
-  const errBox = gate.querySelector('.gate-error');
-  function setError(msg) {
-    if (!errBox) return;
-    errBox.textContent = msg;
-    errBox.classList.remove('hidden');
-    if (spin) spin.classList.add('hidden');
-    if (btn) { btn.disabled = false; btn.style.display = 'inline-flex'; }
-  }
-  function mapError(e) {
-    const code = e && e.code;
-    if (code === 'auth/in-app-browser') return t('افتح الصفحة في متصفّح مثل Chrome لإتمام تسجيل الدخول.');
-    if (code === 'auth/unauthorized-domain') return t('هذا النطاق غير مُصرَّح به في Firebase Authentication.');
-    if (code === 'auth/operation-not-allowed') return t('مزوّد Google غير مُفعَّل في Firebase.');
-    if (code === 'auth/network-request-failed') return t('تعذّر الاتصال بالشبكة. تحقّق من الإنترنت وحاول مجدداً.');
-    if (code === 'auth/popup-blocked') return t('المتصفّح حظر النافذة المنبثقة. اسمح بها ثم حاول مجدداً.');
-    return t('تعذّر تسجيل الدخول. حاول مجدداً.');
-  }
-  gateConsent.addEventListener('change', () => {
-    if (consentAccepted(gateConsent)) gateConsent.classList.remove('consent-error');
-    if (errBox) errBox.classList.add('hidden');
-  });
-  if (btn) btn.addEventListener('click', async () => {
-    if (!consentAccepted(gateConsent)) {
-      gateConsent.classList.add('consent-error');
-      setError(t(CONSENT_MSG));
-      return;                       // no Firebase request without consent
-    }
-    if (errBox) errBox.classList.add('hidden');
-    if (btn) btn.disabled = true;
-    if (spin) spin.classList.remove('hidden');
-    try {
-      const user = await window.GAuth.signInWithGoogle();
-      if (user) return;
-      if (spin) spin.classList.add('hidden');
-      if (btn) btn.disabled = false;
-    } catch (e) {
-      setError(mapError(e));
-    }
-  });
 }
 
 function hideAuthGate() {

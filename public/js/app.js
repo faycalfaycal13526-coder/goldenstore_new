@@ -155,11 +155,23 @@
      receive one, so the composer states it plainly instead of failing silently. */
   /* Round 41 — a single «you need an account» gate for likes, ratings and
      comments. Native app: the bridge has its own session, so nothing is asked. */
-  async function requireAccountFor(what) {
+  /* Round 42: remember what the visitor was trying to do while the sign-in sheet
+     was open, and finish it once the account exists. */
+  let pendingAccountAction = null;
+
+  async function requireAccountFor(what, retry) {
     if (isNativeApp()) return true;
     try { if (S.isLoggedIn && S.isLoggedIn()) return true; } catch (e) {}
     toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + what, 'info');
-    try { await S.requireAuth(); return true; } catch (e) { return false; }
+    if (typeof retry === 'function') pendingAccountAction = retry;
+    try {
+      await S.requireAuth();
+      pendingAccountAction = null;      // handled by the auth listener above
+      return true;
+    } catch (e) {
+      pendingAccountAction = null;
+      return false;
+    }
   }
 
   function likeHintNode() {
@@ -865,7 +877,7 @@
       'aria-label': likeLabel,
       title: likeLabel,
       onclick: () => {
-        if (!canInteract) { requireAccountFor(t('الإعجاب')); return; }
+        if (!canInteract) { requireAccountFor(t('الإعجاب'), () => toggleReviewLike(review)); return; }
         toggleReviewLike(review);
       },
     },
@@ -2580,10 +2592,17 @@
       el('div', { class: 'who' }, el('div', { class: 'nm' }, accountName), el('div', { class: 'dt' }, t('تنشر باسم حسابك'))),
     );
     const commentInput = el('textarea', { class: 'field', maxlength: '2000', placeholder: t('شارك رأيك في هذا التطبيق…') });
-    /* Round 41: guests read every review but cannot write one — the box asks for
-       an account the moment they try, instead of letting them type and lose it. */
+    /* Round 41/42: guests read every review but cannot write one — the box asks
+       for an account the moment they try, instead of letting them type and lose
+       it. The composer is not even painted for a guest (see paintAuthUi). */
     commentInput.addEventListener('focus', async () => {
-      if (!(await requireAccountFor(t('التعليق')))) { try { commentInput.blur(); } catch (e) {} }
+      let logged = isNativeApp();
+      try { if (S.isLoggedIn && S.isLoggedIn()) logged = true; } catch (e) {}
+      if (logged) return;
+      const mine = () => setTimeout(() => {
+        try { commentInput.focus(); } catch (e) {}
+      }, 120);
+      if (!(await requireAccountFor(t('التعليق'), mine))) { try { commentInput.blur(); } catch (e) {} }
     });
     const submitBtn = el('button', { class: 'btn btn-primary' }, t('نشر المراجعة'));
     submitBtn.addEventListener('click', () => submit());
@@ -2707,12 +2726,15 @@
         toast(t('التقييمات معطّلة حالياً'), 'info'); return;
       }
       if (voted) { toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info'); return; }
-      if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
-      /* Round 42 (owner): «اجعل يجب التسجيل كي يقيم ويكتب تعليق» — a rating or
-         a comment is only ever submitted with a real account. */
-      if (!isNativeApp()) {
+      /* Round 42: the account is asked for FIRST — a guest who taps «نشر» without
+         picking stars must still get the sign-in invitation, not «اختر النجوم». */
+      if (!isNativeApp() && !(S.isLoggedIn && S.isLoggedIn())) {
         if (!(await requireAccountFor(t('التقييم')))) return;
-        if (!S.isLoggedIn || !S.isLoggedIn()) { toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + t('التقييم'), 'info'); return; }
+      }
+      if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
+      if (!isNativeApp() && !(S.isLoggedIn && S.isLoggedIn())) {
+        toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + t('التقييم'), 'info');
+        return;
       }
       submitBtn.disabled = true;
       const myComment = commentInput.value.trim();
@@ -2751,28 +2773,48 @@
     }
 
     const rateBody = el('div', { class: 'rate-collapse-body' });
+    /* The «you will get like notifications» line is a guest hint: it is hidden as
+       soon as the visitor signs in, together with the rest of the gate. */
     const hint = likeHintNode();
     if (hint) rateBody.append(hint);
-    /* Round 42: a guest sees «سجّل الدخول للمشاركة» instead of a composer that
-       could never submit. */
+    /* Round 42 — «المستخدم لم يسجل لا يستطيع التعليق ولا التقييم ولا الإعجاب»:
+       a guest sees ONE invitation instead of a composer that could never submit.
+       The gate is painted from the CURRENT auth state and is swapped back to the
+       real composer the instant a visitor signs in (no reload required). */
+    const pickerWrap = el('div', { style: { marginTop: '18px' } }, pickerHint, picker);
+    const guestGate = el('div', { class: 'rate-guest-gate' },
+      el('p', null, t('سجّل الدخول لتقييم التطبيق وكتابة تعليق')),
+      el('button', { class: 'btn btn-primary', type: 'button',
+        onclick: async () => { await requireAccountFor(t('التقييم')); } },
+        t('تسجيل الدخول')));
+    function paintAuthUi() {
+      let logged = isNativeApp();
+      try { if (S.isLoggedIn && S.isLoggedIn()) logged = true; } catch (e) {}
+      guestGate.style.display = logged ? 'none' : '';
+      if (hint) hint.style.display = logged ? 'none' : '';
+      pickerWrap.style.display = logged ? '' : 'none';
+      form.style.display = logged ? '' : 'none';
+    }
     if (!isNativeApp()) {
-      let logged = false;
-      try { logged = !!(S.isLoggedIn && S.isLoggedIn()); } catch (e) {}
-      if (!logged) {
-        form.style.display = 'none';
-        try { picker.style.display = 'none'; } catch (e) {}
-        try { if (pickerHint) pickerHint.style.display = 'none'; } catch (e) {}
-        rateBody.append(el('div', { class: 'rate-guest-gate' },
-          el('p', null, t('سجّل الدخول لتقييم التطبيق وكتابة تعليق')),
-          el('button', { class: 'btn btn-primary', type: 'button',
-            onclick: async () => { await requireAccountFor(t('التقييم')); } },
-            t('تسجيل الدخول'))));
+      rateBody.append(guestGate);
+      paintAuthUi();
+      if (S.onAuthChanged) {
+        S.onAuthChanged(() => {
+          paintAuthUi();
+          renderReviews();
+          /* A tap that asked for an account is carried out right after the
+             sign-in, so nothing has to be repeated by hand. */
+          const pending = pendingAccountAction;
+          pendingAccountAction = null;
+          if (pending && S.isLoggedIn && S.isLoggedIn()) {
+            try { pending(); } catch (e) {}
+          }
+        });
       }
     }
     rateBody.append(
-      el('div', { style: { marginTop: '18px' } },
-        pickerHint,
-        picker,
+      pickerWrap,
+      el('div', { style: { marginTop: '12px' } },
         form,
       ),
       reviewsList,

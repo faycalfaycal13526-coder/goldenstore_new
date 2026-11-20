@@ -1011,8 +1011,10 @@ function hideGate() { if (_gateEl) { _gateEl.remove(); _gateEl = null; } }
 
 function onAuthed(user) {
   const firstRender = !_authed;
+  const changed = _authed && (_user ? _user.uid : null) !== (user ? user.uid : null);
   _user = user;
   _authed = true;
+  if (changed) emitAuthChanged(user);
   if (user && user.uid && !String(user.uid).startsWith('gs_')) notifBaseline(user.uid);
   hideGate();
   document.body.style.overflow = '';
@@ -1020,6 +1022,24 @@ function onAuthed(user) {
     _ready.forEach((fn) => { try { fn(user); } catch (e) { console.error(e); } });
     _ready = [];
   }
+}
+
+/* Round 42 (owner: «المستخدم لم يسجل لا يستطيع التعليق ولا التقييم ولا الإعجاب»).
+   After an in-page sign-in the review block used to keep its GUEST rendering
+   until a reload — the invitation stayed and the stars/composer never appeared,
+   so a freshly signed-in visitor still could not rate or comment. Every auth
+   change now notifies the page. */
+const _authListeners = [];
+function onAuthChanged(fn) {
+  if (typeof fn !== 'function') return () => {};
+  _authListeners.push(fn);
+  return () => {
+    const i = _authListeners.indexOf(fn);
+    if (i >= 0) _authListeners.splice(i, 1);
+  };
+}
+function emitAuthChanged(user) {
+  _authListeners.slice().forEach((fn) => { try { fn(user); } catch (e) { console.error(e); } });
 }
 
 function ready(fn) {
@@ -1307,11 +1327,17 @@ function requireAuth() {
     const finish = (user) => { overlay.remove(); document.body.style.overflow = ''; resolve(user); };
     const cancel = () => { overlay.remove(); document.body.style.overflow = ''; reject(new Error('cancelled')); };
     overlay.addEventListener('click', (e) => { if (e.target === overlay) cancel(); });
+    /* The overlay finishes on its own, AND when the store's auth state arrives
+       from Firebase (a Google popup or a slow sign-in) — otherwise the caller
+       was left waiting in a guest state after a successful sign-in. */
+    let done = false;
+    const once = (user) => { if (done) return; done = true; off(); finish(user); };
+    const off = onAuthChanged((u) => { if (u) once(u); });
     overlay.append(renderAuthGate({
       compact: true,
       consentId: 'gs-auth-consent',
-      onSuccess: finish,
-      onCancel: cancel,
+      onSuccess: once,
+      onCancel: () => { if (done) return; done = true; off(); cancel(); },
     }));
     document.body.append(overlay);
     document.body.style.overflow = 'hidden';
@@ -2513,7 +2539,7 @@ window.Store = {
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,
   fetchNotifications, notifUnreadCount, notifSeenAt, setNotifSeenAt, openNotifications, loadNotificationsForPage,
-  ready, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
+  ready, onAuthChanged, signOut, getUser: () => _user, isLoggedIn, requireAuth, goToLogin,
   openSupportSheet, supportTopButton,
   apiBaseUrl,
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,

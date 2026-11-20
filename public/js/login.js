@@ -17,6 +17,14 @@
   var submit = $('submit');
   var emailEl = $('email');
   var passEl = $('password');
+  /* Round 39 — the create-account view asks for a username plus optional
+     country / gender / age, and the e-mail + phone. They are collected into
+     the dashboard's «جمع المعلومات» page (never shown on «أنت»). */
+  var nameRow = $('nameRow'), nameEl = $('username');
+  var countryRow = $('countryRow'), countryEl = $('country');
+  var genderRow = $('genderRow'), genderEl = $('gender');
+  var ageRow = $('ageRow'), ageEl = $('age');
+  var phoneRow = $('phoneRow'), phoneEl = $('phone');
   var eye = $('eye');
   var forgot = $('forgot');
   var toRegister = $('toRegister');
@@ -95,15 +103,24 @@
   }
 
   function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || '').trim()); }
-  function formReady() {
+  function validName(v) { var n = String(v || '').trim(); return n.length >= 4 && n.length <= 50; }
+  function modeOk() {
     if (!emailEl || !passEl) return false;
-    return validEmail(emailEl.value) && String(passEl.value).length >= 6 && consentOk();
+    if (mode === 'register') {
+      // username 4–50, password 6–8, e-mail required, country/gender/age optional
+      return validName(nameEl && nameEl.value)
+        && String(passEl.value).length >= 6 && String(passEl.value).length <= 8
+        && validEmail(emailEl.value);
+    }
+    return validEmail(emailEl.value) && String(passEl.value).length >= 6;
   }
+  function formReady() { return modeOk() && consentOk(); }
   function syncSubmit() { if (submit) submit.disabled = !formReady(); }
-  [emailEl, passEl].forEach(function (el) {
+  [emailEl, passEl, nameEl, countryEl, ageEl, phoneEl].forEach(function (el) {
     if (!el) return;
     el.addEventListener('input', function () { clearError(); syncSubmit(); });
   });
+  if (genderEl) genderEl.addEventListener('change', function () { clearError(); syncSubmit(); });
 
   /* show / hide the password */
   if (eye && passEl) {
@@ -120,13 +137,21 @@
     mode = next === 'register' ? 'register' : 'login';
     var isReg = mode === 'register';
     if (titleEl) titleEl.textContent = isReg ? T('إنشاء حساب') : T('تسجيل الدخول');
-    if (submit) submit.textContent = isReg ? T('إنشاء حساب') : T('تسجيل الدخول');
     if (passEl) passEl.setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
     if (forgot) forgot.textContent = isReg ? T('لدي حساب بالفعل') : T('نسيت كلمة المرور؟');
     if (toRegister) toRegister.style.display = isReg ? 'none' : '';
+    [nameRow, countryRow, genderRow, ageRow, phoneRow].forEach(function (row) {
+      if (row) row.style.display = isReg ? '' : 'none';
+    });
+    if (passEl) passEl.setAttribute('maxlength', isReg ? '8' : '128');
+    if (emailEl) emailEl.setAttribute('required', 'required');
     if (note) note.textContent = isReg
-      ? T('أنشئ حسابك بالبريد الإلكتروني وكلمة مرور من ٦ أحرف على الأقل')
+      ? T('عند نسيان كلمة المرور، ستحتاج إلى رقم الهاتف أو البريد الإلكتروني لاستردادها. نوصي بإكمالها.')
       : T('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك');
+    if (submit) submit.textContent = isReg ? T('انشاء الحساب') : T('تسجيل الدخول');
+    var mascot = $('authMascot'), hero = $('authHero');
+    if (mascot) mascot.style.display = isReg ? '' : 'none';
+    if (hero) hero.style.display = isReg ? 'none' : '';
     clearError();
     syncSubmit();
   }
@@ -213,7 +238,18 @@
         try { emailEl.focus(); } catch (e) {}
         return;
       }
-      if (String(passEl.value).length < 6) {
+      if (mode === 'register') {
+        if (!validName(nameEl && nameEl.value)) {
+          showError(T('اسم المستخدم يجب أن يكون بين ٤ و٥٠ حرفاً.'));
+          try { if (nameEl) nameEl.focus(); } catch (e) {}
+          return;
+        }
+        if (String(passEl.value).length < 6 || String(passEl.value).length > 8) {
+          showError(T('كلمة المرور يجب أن تكون بين ٦ و٨ أحرف.'));
+          try { passEl.focus(); } catch (e) {}
+          return;
+        }
+      } else if (String(passEl.value).length < 6) {
         showError(T('كلمة المرور يجب أن تكون ٦ أحرف على الأقل.'));
         try { passEl.focus(); } catch (e) {}
         return;
@@ -223,10 +259,31 @@
       var pass = passEl.value;
       setLoading(true);
       var task = mode === 'register'
-        ? window.GAuth.signUpWithEmail(email, pass, '')
+        ? window.GAuth.signUpWithEmail(email, pass, (nameEl && nameEl.value.trim()) || '')
         : window.GAuth.signInWithEmail(email, pass);
       Promise.resolve(task)
-        .then(function (user) { if (user) { clearSwitchState(); go(); } else setLoading(false); })
+        .then(function (user) {
+          if (!user) { setLoading(false); return; }
+          if (mode === 'register') {
+            // collected for the dashboard only — the storefront never shows it
+            try {
+              fetch('/api/profile/demographics', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  username: (nameEl && nameEl.value.trim()) || '',
+                  email: email,
+                  phone: (phoneEl && phoneEl.value.trim()) || '',
+                  country: (countryEl && countryEl.value.trim()) || '',
+                  gender: (genderEl && genderEl.value) || '',
+                  age: ageEl && ageEl.value ? Number(ageEl.value) : null,
+                  opted_in: true,
+                }),
+              }).catch(function () {});
+            } catch (e) {}
+          }
+          clearSwitchState(); go();
+        })
         .catch(function (e) { showError(errorMessage(e)); setLoading(false); });
     });
   }

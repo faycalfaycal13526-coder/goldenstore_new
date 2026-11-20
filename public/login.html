@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261120j">
+<link rel="stylesheet" href="/css/play.css?v=20261120k">
 <script id="gs-apk-self-heal">
 (function(){
   try {
@@ -46,30 +46,78 @@
     <!-- top row: back arrow + title, exactly like the reference layout -->
     <h1 class="auth-sr" data-auth-title>تسجيل الدخول</h1>
 
-    <div class="auth-hero">
+    <!-- Round 39: register mode shows a mascot avatar instead of the logo -->
+    <div class="auth-mascot" id="authMascot" aria-hidden="true" style="display:none">
+      <svg viewBox="0 0 100 100" width="76" height="76" role="img">
+        <defs><linearGradient id="gsMg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#63c132"/><stop offset="1" stop-color="#3f9a1d"/></linearGradient></defs>
+        <path d="M18 30 L30 12 L36 30 Z" fill="#3f3f46"/>
+        <path d="M82 30 L70 12 L64 30 Z" fill="#3f3f46"/>
+        <circle cx="50" cy="55" r="34" fill="url(#gsMg)"/>
+        <ellipse cx="37" cy="48" rx="6" ry="7.5" fill="#fff"/>
+        <ellipse cx="63" cy="48" rx="6" ry="7.5" fill="#fff"/>
+        <circle cx="37" cy="49" r="3" fill="#222"/>
+        <circle cx="63" cy="49" r="3" fill="#222"/>
+        <path d="M36 64 q7 8 14 0" fill="none" stroke="#222" stroke-width="4" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div class="auth-hero" id="authHero">
       <img class="auth-hero-logo" src="/images/logo.png" alt="Golden Store" width="96" height="96">
       <div class="auth-hero-name">Golden<b>Store</b></div>
       <p class="auth-hero-tag">Golden Store, Play More Fun!</p>
     </div>
 
     <form class="auth-form" id="authForm" novalidate>
-      <label class="auth-field" for="email">
-        <span class="auth-field-ico" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 7l8.5 6 8.5-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </span>
-        <input id="email" name="email" type="email" inputmode="email" autocomplete="email"
-               dir="ltr" placeholder="أدخل البريد الإلكتروني" aria-label="البريد الإلكتروني" required>
+      <!-- Round 39: create-account extras (hidden while signing in) -->
+      <label class="auth-field auth-box" for="username" id="nameRow" style="display:none">
+        <span class="auth-field-label">اسم المستخدم*</span>
+        <input id="username" name="username" type="text" maxlength="50" autocomplete="username"
+               placeholder="اسم المستخدم (4-50 حرف)" aria-label="اسم المستخدم">
       </label>
 
-      <label class="auth-field" for="password">
-        <span class="auth-field-ico" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><rect x="4.5" y="10" width="15" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7.5a4 4 0 018 0V10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </span>
+      <label class="auth-field auth-box" for="email">
+        <span class="auth-field-label">عنوان بريد إلكتروني</span>
+        <input id="email" name="email" type="email" inputmode="email" autocomplete="email"
+               dir="ltr" placeholder="البريد الإلكتروني (اختياري)" aria-label="البريد الإلكتروني" required>
+      </label>
+
+      <label class="auth-field auth-box" for="password">
+        <span class="auth-field-label">كلمه السر*</span>
         <input id="password" name="password" type="password" autocomplete="current-password"
-               dir="ltr" placeholder="أدخل كلمة المرور" aria-label="كلمة المرور" required minlength="6">
+               dir="ltr" placeholder="كلمة المرور (6-8 أحرف)" aria-label="كلمة المرور" required minlength="6">
         <button class="auth-eye" id="eye" type="button" aria-label="إظهار كلمة المرور" title="إظهار كلمة المرور">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         </button>
+      </label>
+
+      <label class="auth-field auth-box" for="country" id="countryRow" style="display:none">
+        <span class="auth-field-label">الدولة</span>
+        <input id="country" name="country" type="text" maxlength="60" autocomplete="country-name"
+               placeholder="الدولة (اختياري)" aria-label="الدولة">
+      </label>
+
+      <label class="auth-field auth-box" for="gender" id="genderRow" style="display:none">
+        <span class="auth-field-label">الجنس</span>
+        <select id="gender" name="gender" aria-label="الجنس">
+          <option value="">اختر الجنس</option>
+          <option value="male">ذكر</option>
+          <option value="female">أنثى</option>
+          <option value="other">آخر</option>
+          <option value="prefer_not">أفضّل عدم التحديد</option>
+        </select>
+      </label>
+
+      <label class="auth-field auth-box" for="age" id="ageRow" style="display:none">
+        <span class="auth-field-label">العمر</span>
+        <input id="age" name="age" type="number" min="10" max="110" inputmode="numeric"
+               placeholder="العمر (اختياري)" aria-label="العمر">
+      </label>
+
+      <label class="auth-field auth-box" for="phone" id="phoneRow" style="display:none">
+        <span class="auth-field-label">رقم هاتف</span>
+        <input id="phone" name="phone" type="tel" maxlength="24" inputmode="tel" dir="ltr"
+               placeholder="رقم الهاتف (اختياري)" aria-label="رقم هاتف">
       </label>
 
       <div class="auth-links">
@@ -114,13 +162,13 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
-  <script src="/js/icons.js?v=20261120j"></script>
-  <script src="/js/store-settings.js?v=20261120j"></script>
-  <script src="/js/lang.js?v=20261120j"></script>
-  <script src="/js/legal.js?v=20261120j"></script>
-  <script src="/js/firebase-auth.js?v=20261120j"></script>
-  <script src="/js/notifications.js?v=20261120j"></script>
-  <script src="/js/login.js?v=20261120j"></script>
-  <script src="/js/notification-hub.js?v=20261120j"></script>
+  <script src="/js/icons.js?v=20261120k"></script>
+  <script src="/js/store-settings.js?v=20261120k"></script>
+  <script src="/js/lang.js?v=20261120k"></script>
+  <script src="/js/legal.js?v=20261120k"></script>
+  <script src="/js/firebase-auth.js?v=20261120k"></script>
+  <script src="/js/notifications.js?v=20261120k"></script>
+  <script src="/js/login.js?v=20261120k"></script>
+  <script src="/js/notification-hub.js?v=20261120k"></script>
 </body>
 </html>

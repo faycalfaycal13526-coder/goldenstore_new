@@ -4654,6 +4654,34 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
 .auth-textbtn:active { opacity: .7; }
 #toRegister { color: var(--gold-2, #ffd766); font-weight: 700; }
 
+/* Round 39: the create-account screen follows the owner's reference —
+   a mascot avatar on top and BOXED fields whose label sits on the top
+   border. Sign-in mode keeps the original underline fields. */
+.auth-field { flex-wrap: wrap; }
+.auth-field-label {
+  position: absolute; top: -7px; inset-inline-start: 14px;
+  padding: 0 6px; background: var(--bg);
+  font-size: 12px; font-weight: 700; color: var(--text-2); letter-spacing: .2px;
+  pointer-events: none;
+}
+.auth-mascot { display: flex; justify-content: center; padding: 6px 0 2px; }
+.auth-box,
+.gate.is-auth-page .auth-box {
+  border: 1.5px solid var(--border-2, #6c6c78); border-radius: 12px;
+  padding: 16px 14px; margin-top: 10px; min-height: 58px;
+  background: transparent;
+}
+.auth-box:focus-within { border-color: var(--gold, #f4c01f); border-bottom-color: var(--gold, #f4c01f); }
+.auth-box .auth-field-label { font-size: 12.5px; font-weight: 700; }
+.auth-box input, .auth-box select { font-size: 15.5px; }
+.auth-box .auth-field-label:empty { display: none; }
+.auth-field select {
+  flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
+  color: var(--text); font-size: 16px; font-family: inherit; padding: 2px 0;
+  appearance: none;
+}
+.auth-field select option { background: var(--surface); color: var(--text); }
+
 .auth-submit {
   width: 100%; min-height: 54px; border-radius: 999px; border: 0; cursor: pointer;
   background: var(--gold, #f4c01f); color: #17170f; font-family: inherit;

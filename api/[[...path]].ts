@@ -1976,6 +1976,12 @@ const INSIGHTS_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS user_demographics (
      uid TEXT PRIMARY KEY, age_range TEXT, gender TEXT, country TEXT,
      opted_in INTEGER DEFAULT 1, updated_at INTEGER)`,
+  // Round 39: the sign-up form now also captures a username, e-mail, phone and
+  // an exact age. Added with ALTERs so existing databases upgrade in place.
+  `ALTER TABLE user_demographics ADD COLUMN username TEXT`,
+  `ALTER TABLE user_demographics ADD COLUMN email TEXT`,
+  `ALTER TABLE user_demographics ADD COLUMN phone TEXT`,
+  `ALTER TABLE user_demographics ADD COLUMN age INTEGER`,
 ];
 const insightsReady = new WeakSet<object>();
 async function ensureInsightsTables(db: any) {
@@ -2156,11 +2162,25 @@ app.post('/profile/demographics', async (c) => {
   const gender = GENDERS.includes(body.gender) ? body.gender : '';
   const country = sanitizeText(body.country, 60);
   const opted = body.opted_in === false ? 0 : 1;
-  await c.env.DB.prepare(`INSERT INTO user_demographics (uid, age_range, gender, country, opted_in, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(uid) DO UPDATE SET
+  // Round 39 — the sign-up form offers these next to the password:
+  // username, e-mail, phone, country, gender and age.
+  const username = sanitizeText(body.username, 50);
+  const email = sanitizeText(body.email, 120).toLowerCase();
+  const phone = sanitizeText(body.phone, 24);
+  const ageNum = Number.isFinite(Number(body.age)) && Number(body.age) >= 10 && Number(body.age) <= 110
+    ? Math.round(Number(body.age)) : null;
+  const emailOk = email ? /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) : true;
+  await c.env.DB.prepare(`INSERT INTO user_demographics
+      (uid, age_range, gender, country, opted_in, updated_at, username, email, phone, age)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(uid) DO UPDATE SET
       age_range = excluded.age_range, gender = excluded.gender, country = excluded.country,
-      opted_in = excluded.opted_in, updated_at = excluded.updated_at`)
-    .bind(uid, age, gender, country, opted, nowSec()).run();
+      opted_in = excluded.opted_in, updated_at = excluded.updated_at,
+      username = COALESCE(NULLIF(excluded.username, ''), user_demographics.username),
+      email = COALESCE(NULLIF(excluded.email, ''), user_demographics.email),
+      phone = COALESCE(NULLIF(excluded.phone, ''), user_demographics.phone),
+      age = COALESCE(excluded.age, user_demographics.age)`)
+    .bind(uid, age, gender, country, opted, nowSec(),
+      username, emailOk ? email : '', phone, ageNum).run();
   return c.json({ ok: true });
 });
 app.get('/profile/demographics/:uid', async (c) => {
@@ -2168,6 +2188,31 @@ app.get('/profile/demographics/:uid', async (c) => {
   const row: any = await c.env.DB.prepare('SELECT age_range, gender, country, opted_in FROM user_demographics WHERE uid = ?')
     .bind(c.req.param('uid')).first().catch(() => null);
   return c.json({ demographics: row || null });
+});
+
+/* Admin-only: everything the sign-up form collected, for the
+   «جمع المعلومات» page in the dashboard. Never public. */
+app.get('/admin/demographics', async (c) => {
+  await ensureInsightsTables(c.env.DB);
+  const limit = Math.min(Math.max(Number(c.req.query('limit')) || 200, 1), 1000);
+  let rows: any[] = [];
+  try {
+    const r: any = await c.env.DB.prepare(
+      `SELECT uid, username, email, phone, country, gender, age, age_range, updated_at
+         FROM user_demographics WHERE opted_in = 1 ORDER BY updated_at DESC LIMIT ?`)
+      .bind(limit).all();
+    rows = r.results || [];
+  } catch (e) { rows = []; }
+  const by = async (sql: string) => {
+    try { const r: any = await c.env.DB.prepare(sql).all(); return r.results || []; }
+    catch (e) { return []; }
+  };
+  const [countries, genders, ages] = await Promise.all([
+    by("SELECT country AS key, COUNT(*) AS count FROM user_demographics WHERE opted_in = 1 AND country <> '' GROUP BY country ORDER BY count DESC LIMIT 20"),
+    by("SELECT gender AS key, COUNT(*) AS count FROM user_demographics WHERE opted_in = 1 AND gender <> '' GROUP BY gender ORDER BY count DESC"),
+    by("SELECT CASE WHEN age IS NULL THEN age_range ELSE CAST(age / 5 * 5 AS TEXT) || 's' END AS key, COUNT(*) AS count FROM user_demographics WHERE opted_in = 1 AND (age IS NOT NULL OR age_range <> '') GROUP BY key ORDER BY count DESC"),
+  ]);
+  return c.json({ total: rows.length, rows, countries, genders, ages });
 });
 
 

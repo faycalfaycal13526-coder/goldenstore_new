@@ -1077,14 +1077,49 @@ function authGateForm(opts) {
 
   var title = el('h1', { class: 'auth-sr', 'data-auth-title': '' }, t('تسجيل الدخول'));
   var note = el('p', { class: 'auth-note' }, t('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك'));
+
+  /* Round 39: create-account extras, collected ONLY for the dashboard's
+     «جمع المعلومات» page — never rendered anywhere in the storefront. */
+  function regField(id, label, input) {
+    return el('label', { class: 'auth-field auth-box', for: id, style: 'display:none' },
+      el('span', { class: 'auth-field-label' }, label), input);
+  }
+  var nameInput = el('input', { id: 'gs-reg-name', type: 'text', maxlength: '50',
+    autocomplete: 'username', placeholder: t('اسم المستخدم (4-50 حرف)'), 'aria-label': t('اسم المستخدم') });
+  var countryInput = el('input', { id: 'gs-reg-country', type: 'text', maxlength: '60',
+    autocomplete: 'country-name', placeholder: t('الدولة (اختياري)'), 'aria-label': t('الدولة') });
+  var genderSelect = el('select', { id: 'gs-reg-gender', 'aria-label': t('الجنس') },
+    el('option', { value: '' }, t('اختر الجنس')),
+    el('option', { value: 'male' }, t('ذكر')), el('option', { value: 'female' }, t('أنثى')),
+    el('option', { value: 'other' }, t('آخر')), el('option', { value: 'prefer_not' }, t('أفضّل عدم التحديد')));
+  var ageInput = el('input', { id: 'gs-reg-age', type: 'number', min: '10', max: '110',
+    inputmode: 'numeric', placeholder: t('العمر (اختياري)'), 'aria-label': t('العمر') });
+  var phoneInput = el('input', { id: 'gs-reg-phone', type: 'tel', maxlength: '24',
+    inputmode: 'tel', dir: 'ltr', placeholder: t('رقم الهاتف (اختياري)'), 'aria-label': t('رقم هاتف') });
+  var nameRow = regField('gs-reg-name', t('اسم المستخدم*'), nameInput);
+  var countryRow = regField('gs-reg-country', t('الدولة'), countryInput);
+  var genderRow = regField('gs-reg-gender', t('الجنس'), genderSelect);
+  var ageRow = regField('gs-reg-age', t('العمر'), ageInput);
+  var phoneRow = regField('gs-reg-phone', t('رقم هاتف'), phoneInput);
+  var mascot = el('div', { class: 'auth-mascot', 'aria-hidden': 'true', style: 'display:none' });
+  try {
+    mascot.innerHTML = '<svg viewBox="0 0 100 100" width="72" height="72" role="img">' +
+      '<defs><linearGradient id="gsMgG" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="#63c132"/><stop offset="1" stop-color="#3f9a1d"/></linearGradient></defs>' +
+      '<path d="M18 30 L30 12 L36 30 Z" fill="#3f3f46"/><path d="M82 30 L70 12 L64 30 Z" fill="#3f3f46"/>' +
+      '<circle cx="50" cy="55" r="34" fill="url(#gsMgG)"/>' +
+      '<ellipse cx="37" cy="48" rx="6" ry="7.5" fill="#fff"/><ellipse cx="63" cy="48" rx="6" ry="7.5" fill="#fff"/>' +
+      '<circle cx="37" cy="49" r="3" fill="#222"/><circle cx="63" cy="49" r="3" fill="#222"/>' +
+      '<path d="M36 64 q7 8 14 0" fill="none" stroke="#222" stroke-width="4" stroke-linecap="round"/></svg>';
+  } catch (e) {}
   var errBox = el('div', { class: 'gate-error hidden' });
 
   var emailInput = el('input', { id: 'gs-auth-email', name: 'email', type: 'email',
     inputmode: 'email', autocomplete: 'email', dir: 'ltr',
-    placeholder: t('أدخل البريد الإلكتروني'), 'aria-label': t('البريد الإلكتروني'), required: 'required' });
+    placeholder: t('البريد الإلكتروني (اختياري)'), 'aria-label': t('البريد الإلكتروني'), required: 'required' });
   var passInput = el('input', { id: 'gs-auth-pass', name: 'password', type: 'password',
     autocomplete: 'current-password', dir: 'ltr',
-    placeholder: t('أدخل كلمة المرور'), 'aria-label': t('كلمة المرور'), required: 'required' });
+    placeholder: t('كلمة المرور (6-8 أحرف)'), 'aria-label': t('كلمة المرور'), required: 'required' });
   var eye = el('button', { class: 'auth-eye', type: 'button',
     'aria-label': t('إظهار كلمة المرور'), title: t('إظهار كلمة المرور') }, ico('eye', 'icon'));
   eye.addEventListener('click', function () {
@@ -1107,12 +1142,17 @@ function authGateForm(opts) {
     var box = consent.querySelector('input[type="checkbox"]');
     return !!(box && box.checked);
   }
-  function sync() {
-    var ready = validEmail(emailInput.value) && String(passInput.value).length >= 6 && consentOkNow();
-    submit.disabled = !ready;
+  function nameOk() { var n = String(nameInput.value || '').trim(); return n.length >= 4 && n.length <= 50; }
+  function fieldsOk() {
+    var len = String(passInput.value).length;
+    if (mode === 'register') return nameOk() && len >= 6 && len <= 8 && validEmail(emailInput.value);
+    return len >= 6 && validEmail(emailInput.value);
   }
-  emailInput.addEventListener('input', function () { clearErr(); sync(); });
-  passInput.addEventListener('input', function () { clearErr(); sync(); });
+  function sync() { submit.disabled = !(fieldsOk() && consentOkNow()); }
+  [emailInput, passInput, nameInput, countryInput, ageInput, phoneInput].forEach(function (elx) {
+    elx.addEventListener('input', function () { clearErr(); sync(); });
+  });
+  genderSelect.addEventListener('change', function () { clearErr(); sync(); });
   consent.addEventListener('change', function () { clearErr(); sync(); });
 
   function authError(e) {
@@ -1144,6 +1184,16 @@ function authGateForm(opts) {
     passInput.setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
     forgot.textContent = isReg ? t('لدي حساب بالفعل') : t('نسيت كلمة المرور؟');
     toRegister.style.display = isReg ? 'none' : '';
+    [nameRow, countryRow, genderRow, ageRow, phoneRow].forEach(function (row) {
+      row.style.display = isReg ? '' : 'none';
+    });
+    mascot.style.display = isReg ? '' : 'none';
+    try {
+      var hero = document.getElementById('gs-auth-hero') || (form && form.querySelector('.auth-hero'));
+      if (hero) hero.style.display = isReg ? 'none' : '';
+    } catch (e) {}
+    passInput.setAttribute('maxlength', isReg ? '8' : '128');
+    submit.textContent = isReg ? t('انشاء الحساب') : t('تسجيل الدخول');
     note.textContent = isReg
       ? t('أنشئ حسابك بالبريد الإلكتروني وكلمة مرور من ٦ أحرف على الأقل')
       : t('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك');
@@ -1163,12 +1213,15 @@ function authGateForm(opts) {
   });
 
   var form = el('form', { class: 'auth-form', novalidate: 'novalidate' },
-    el('label', { class: 'auth-field', for: 'gs-auth-email' },
-      el('span', { class: 'auth-field-ico', 'aria-hidden': 'true' }, ico('mail', 'icon')),
+    mascot,
+    nameRow,
+    el('label', { class: 'auth-field auth-box', for: 'gs-auth-email' },
+      el('span', { class: 'auth-field-label' }, t('عنوان بريد إلكتروني')),
       emailInput),
-    el('label', { class: 'auth-field', for: 'gs-auth-pass' },
-      el('span', { class: 'auth-field-ico', 'aria-hidden': 'true' }, ico('lock', 'icon')),
+    el('label', { class: 'auth-field auth-box', for: 'gs-auth-pass' },
+      el('span', { class: 'auth-field-label' }, t('كلمه السر*')),
       passInput, eye),
+    countryRow, genderRow, ageRow, phoneRow,
     el('div', { class: 'auth-links' }, forgot, toRegister),
     consent,
     submit,
@@ -1178,7 +1231,14 @@ function authGateForm(opts) {
     ev.preventDefault();
     clearErr();
     if (!validEmail(emailInput.value)) { showErr(t('البريد الإلكتروني غير صالح.')); return; }
-    if (String(passInput.value).length < 6) { showErr(t('كلمة المرور يجب أن تكون ٦ أحرف على الأقل.')); return; }
+    if (mode === 'register') {
+      if (!nameOk()) { showErr(t('اسم المستخدم يجب أن يكون بين ٤ و٥٠ حرفاً.')); return; }
+      if (String(passInput.value).length < 6 || String(passInput.value).length > 8) {
+        showErr(t('كلمة المرور يجب أن تكون بين ٦ و٨ أحرف.')); return;
+      }
+    } else if (String(passInput.value).length < 6) {
+      showErr(t('كلمة المرور يجب أن تكون ٦ أحرف على الأقل.')); return;
+    }
     var box = consent.querySelector('input[type="checkbox"]');
     if (!box || !box.checked) {
       consent.classList.add('consent-error');
@@ -1187,11 +1247,31 @@ function authGateForm(opts) {
     }
     busy(true);
     var mail = emailInput.value.trim(), pass = passInput.value;
-    var task = mode === 'register'
-      ? window.GAuth.signUpWithEmail(mail, pass, '')
+    var isReg = mode === 'register';
+    var task = isReg
+      ? window.GAuth.signUpWithEmail(mail, pass, String(nameInput.value || '').trim())
       : window.GAuth.signInWithEmail(mail, pass);
     Promise.resolve(task)
-      .then(function (user) { if (user) onSuccess(user); else busy(false); })
+      .then(function (user) {
+        if (!user) { busy(false); return; }
+        if (isReg) {
+          try {
+            fetch('/api/profile/demographics', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                username: String(nameInput.value || '').trim(), email: mail,
+                phone: String(phoneInput.value || '').trim(),
+                country: String(countryInput.value || '').trim(),
+                gender: genderSelect.value || '',
+                age: ageInput.value ? Number(ageInput.value) : null,
+                opted_in: true,
+              }),
+            }).catch(function () {});
+          } catch (e) {}
+        }
+        onSuccess(user);
+      })
       .catch(function (e) { showErr(authError(e)); busy(false); });
   });
 
@@ -1218,7 +1298,7 @@ function authGateForm(opts) {
 
   var wrap = el('div', { class: 'auth-page is-gate' + (compact ? ' is-compact' : '') },
     title,
-    el('div', { class: 'auth-hero' },
+    el('div', { class: 'auth-hero', id: 'gs-auth-hero' },
       el('img', { class: 'auth-hero-logo', src: '/images/logo.png', alt: 'Golden Store', width: '96', height: '96' }),
       el('div', { class: 'auth-hero-name' }, 'Golden', el('b', null, 'Store')),
       el('p', { class: 'auth-hero-tag' }, 'Golden Store, Play More Fun!')),

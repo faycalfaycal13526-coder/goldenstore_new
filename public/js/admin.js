@@ -160,6 +160,7 @@
       { key: 'reports', icon: 'message', label: t('بلاغات المراجعات') },
       { key: 'support', icon: 'message', label: t('رسائل الدعم') },
       { key: 'users', icon: 'users', label: t('المستخدمون') },
+      { key: 'collect', icon: 'database', label: t('جمع المعلومات') },
     ] },
     { id: 'growth', label: 'النمو', icon: 'trending', items: [
       { key: 'notifications', icon: 'bell', label: 'الإشعارات' },
@@ -827,6 +828,7 @@
     else if (activeTab === 'reports') await renderReports(body);
     else if (activeTab === 'support') await renderSupport(body);
     else if (activeTab === 'users') await renderUsers(body);
+    else if (activeTab === 'collect') await renderCollectInfo(body);
     else if (activeTab === 'notifications') await renderNotifications(body);
     else if (activeTab === 'advanced-push') {
       if (window.GSAdminAdvanced) await window.GSAdminAdvanced.renderPush(body);
@@ -1456,6 +1458,78 @@
         ratingsRepairPanel(stats, body),
     );
   }
+
+  // -------- جمع المعلومات (round 39) --------
+  /* Everything the create-account form collects (username, e-mail, phone,
+     country, gender, age) appears HERE — and only here. The storefront never
+     renders it: the block that used to sit on «أنت» was removed on request. */
+  async function renderCollectInfo(body) {
+    let data = { total: 0, rows: [], countries: [], genders: [], ages: [] };
+    try { data = await api('/api/admin/demographics?limit=300'); } catch (e) {}
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const total = Number(data.total) || rows.length;
+
+    function chip(label, value) {
+      return el('div', { class: 'collect-chip' },
+        el('span', { class: 'collect-chip-label' }, label),
+        el('strong', null, value));
+    }
+    function bars(title, list, mapLabel) {
+      const arr = Array.isArray(list) ? list : [];
+      const max = arr.reduce((m, r) => Math.max(m, Number(r.count) || 0), 0) || 1;
+      return el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('trending', 'icon'), title),
+        arr.length ? el('div', { class: 'collect-bars' }, ...arr.map((r) => {
+          const v = Number(r.count) || 0;
+          const name = mapLabel ? mapLabel(String(r.key || '')) : (r.key || '—');
+          return el('div', { class: 'collect-bar-row' },
+            el('span', { class: 'collect-bar-name' }, name),
+            el('span', { class: 'collect-bar-track' },
+              el('span', { class: 'collect-bar-fill', style: { width: Math.round((v / max) * 100) + '%' } })),
+            el('span', { class: 'collect-bar-count' }, String(v)));
+        })) : el('div', { class: 'hint' }, t('لا توجد بيانات بعد')));
+    }
+
+    const table = el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico('database', 'icon'), t('البيانات المجمّعة')),
+      rows.length
+        ? el('div', { class: 'collect-table-wrap' },
+            el('table', { class: 'collect-table' },
+              el('thead', null, el('tr', null,
+                ['اسم المستخدم', 'البريد الإلكتروني', 'رقم هاتف', 'الدولة', 'الجنس', 'العمر', 'التاريخ']
+                  .map((h) => el('th', null, t(h))))),
+              el('tbody', null, ...rows.map((r) => el('tr', null,
+                el('td', { 'data-noi18n': '' }, r.username || '—'),
+                el('td', { 'data-noi18n': '' }, r.email || '—'),
+                el('td', { 'data-noi18n': '' }, r.phone || '—'),
+                el('td', { 'data-noi18n': '' }, r.country || '—'),
+                el('td', null, r.gender ? t(GENDER_LABEL[r.gender] || r.gender) : '—'),
+                el('td', { 'data-noi18n': '' }, r.age ? String(r.age) : (r.age_range || '—')),
+                el('td', { 'data-noi18n': '' }, r.updated_at ? formatDate(r.updated_at) : '—'))))))
+        : el('div', { class: 'hint' }, t('لا توجد بيانات بعد')));
+
+    body.append(
+      el('div', { class: 'page-head' },
+        el('h2', null, t('جمع المعلومات')),
+        el('div', { class: 'sub' }, t('كل ما يكتبه المستخدم في نموذج إنشاء الحساب — يُحفظ هنا فقط ولا يظهر في المتجر.'))),
+      el('div', { class: 'collect-chips' },
+        chip(t('إجمالي المشاركين'), String(total)),
+        chip(t('الدول'), String((data.countries || []).length)),
+        chip(t('الجنس'), String((data.genders || []).length)),
+        chip(t('الفئات العمرية'), String((data.ages || []).length))),
+      el('div', { class: 'collect-grid' },
+        bars(t('الدولة'), data.countries),
+        bars(t('الجنس'), data.genders, (k) => t(GENDER_LABEL[k] || k)),
+        bars(t('العمر'), data.ages, (k) => {
+          // «20s» buckets become a readable «20-24» range; age_range keys pass through
+          const n = parseInt(k, 10);
+          return /^\d+s$/.test(k) && !isNaN(n) ? (n + '-' + (n + 4)) : k;
+        })),
+      table,
+      el('div', { class: 'hint', style: { marginTop: '10px' } },
+        t('تُجمع هذه البيانات فقط عندما يملأ المستخدم النموذج طوعاً. لا تظهر في أي صفحة من صفحات المتجر.')));
+  }
+  const GENDER_LABEL = { male: 'ذكر', female: 'أنثى', other: 'آخر', prefer_not: 'أفضّل عدم التحديد' };
 
   // -------- store settings --------
   const SETTINGS_SCHEMA = [

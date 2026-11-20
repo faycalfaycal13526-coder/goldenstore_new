@@ -31,11 +31,9 @@
   S.bottomNav(isLibraryView ? 'library' : 'account');
 
   S.ready((user) => {
-    // Account and library pages require login
-    if (!user) {
-      S.goToLogin();
-      return;
-    }
+    /* Owner request (round 35): «أنت» must open WITHOUT signing in. A guest now
+       sees the page itself, with a sign-in row at the top that leads to the
+       login page — instead of being bounced to /login straight away. */
     root.innerHTML = '';
     // Owner request: the store topbar must NOT appear on «أنت» nor «مكتبتي».
     // Both views are rendered by this same file, so we simply do not mount it.
@@ -775,22 +773,35 @@
 
   // --- Settings page (profile + settings) ---
   function renderSettingsPage(content, user) {
-    // Profile header
-    const photo = user && user.photoURL
-      ? el('img', { src: user.photoURL, alt: '', referrerpolicy: 'no-referrer' })
-      : document.createTextNode((user && (user.displayName || user.email) || '?').trim().charAt(0).toUpperCase());
-
-    content.append(
-      el('div', { class: 'acct-head' },
-        el('div', { class: 'avatar avatar-lg' }, photo),
-        el('div', { class: 'acct-info' },
-          el('div', { class: 'nm' }, (user && user.displayName) || t('مستخدم') + ' Golden Store'),
-          el('div', { class: 'acct-email-row' },
-            el('div', { class: 'em acct-email', 'data-noi18n': '' }, (user && user.email) || ''),
+    /* Owner request (round 35): the header is now a plain placeholder avatar +
+       «تسجيل الدخول» — never the Google/e-mail picture — and it is a real link
+       to the sign-in page. When signed in, the same row shows the name and
+       «الإعدادات», still linking to the account. */
+    if (user) {
+      content.append(
+        el('div', { class: 'acct-head' },
+          el('div', { class: 'avatar avatar-lg is-placeholder' }, ico('user', 'icon')),
+          el('div', { class: 'acct-info' },
+            el('div', { class: 'nm' }, (user.displayName || t('مستخدم') + ' Golden Store')),
+            el('div', { class: 'acct-email-row' },
+              el('div', { class: 'em acct-email', 'data-noi18n': '' }, user.email || ''),
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } else {
+      content.append(
+        el('a', { class: 'acct-head acct-head--guest', href: '/login?next=%2Faccount', 'aria-label': t('تسجيل الدخول') },
+          el('div', { class: 'avatar avatar-lg is-placeholder' }, ico('user', 'icon')),
+          el('div', { class: 'acct-info' },
+            el('div', { class: 'nm' }, t('تسجيل الدخول')),
+            el('div', { class: 'acct-email-row' },
+              el('div', { class: 'em acct-email' }, t('اضغط للدخول أو إنشاء حساب')),
+            ),
+          ),
+        ),
+      );
+    }
 
     // Settings title
     // Settings title
@@ -816,8 +827,12 @@
         supportEntry(),
         legalLinksCard(),
         el('div', { class: 'account-actions' },
-          el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
-            ico('logout', 'icon icon-sm'), t('تسجيل الخروج')),
+          user
+            ? el('button', { class: 'btn btn-outline btn-block', type: 'button', onclick: () => confirmSignOut() },
+                ico('logout', 'icon icon-sm'), t('تسجيل الخروج'))
+            /* Guest: the same slot invites signing in, and goes to /login. */
+            : el('a', { class: 'btn btn-primary btn-block', href: '/login?next=%2Faccount' },
+                ico('user', 'icon icon-sm'), t('تسجيل الدخول')),
         ),
       );
     }

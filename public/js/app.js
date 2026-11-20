@@ -1897,9 +1897,10 @@
     let adPillEl = null;
     function bringPillFront() {
       try {
-        if (!adPillEl) return;
+        if (!adPillEl || !adInjected.length) return;   // no overlay: the header already shows it
         (document.body || document.documentElement).appendChild(adPillEl);
         adPillEl.style.setProperty('z-index', '2147483647', 'important');
+        adPillEl.style.setProperty('display', 'inline-flex', 'important');
       } catch (e) {}
     }
     let adStartHook = null;
@@ -2034,7 +2035,7 @@
           + 'padding:8px 14px;border-radius:999px;background:rgba(12,12,18,.92);color:#fff;'
           + 'font:700 13px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
           + 'border:1px solid rgba(245,197,66,.55);box-shadow:0 6px 22px rgba(0,0,0,.45);'
-          + 'pointer-events:none');
+          + 'pointer-events:none;display:none');
         adPillEl.textContent = '';
         bringPillFront();
         setTimeout(bringPillFront, 700);

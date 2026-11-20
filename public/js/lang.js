@@ -331,6 +331,7 @@
     'لم يتم تنزيل أي تطبيقات': { en: 'No apps have been downloaded', fr: 'Aucune application téléchargée', es: 'No se ha descargado ninguna aplicación' },
     'رجوع': { en: 'Back', fr: 'Retour', es: 'Atrás' },
     // in-app advertisement
+    'تطبيقات وألعاب مختارة كل يوم — بأمان وبسرعة': { en: 'Hand-picked apps and games every day — safe and fast', fr: 'Des applications et des jeux choisis chaque jour — sûrs et rapides', es: 'Apps y juegos seleccionados cada día — seguros y rápidos' },
     'إعلان': { en: 'Ad', fr: 'Publicité', es: 'Anuncio' },
     'يبدأ التحميل بعد': { en: 'Download starts in', fr: 'Téléchargement dans', es: 'La descarga empieza en' },
     'جارٍ بدء التحميل…': { en: 'Starting the download…', fr: 'Démarrage du téléchargement…', es: 'Iniciando la descarga…' },

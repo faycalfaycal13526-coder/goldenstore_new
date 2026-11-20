@@ -848,39 +848,11 @@
       ),
     );
 
-    // The share button is now STANDALONE: its own section, directly below the
-    // Telegram card, containing nothing but the button itself. A DocumentFragment
-    // keeps the two sections as siblings without adding a wrapper <div>, so the
-    // Telegram card stays exactly as it was and supportEntry() still follows.
-    const shareCard = el('section', { class: 'share-store-card', 'aria-label': t('نشر قولدن ستور') },
-      el('button', {
-        class: 'share-store-cta', type: 'button',
-        'aria-label': t('نشر قولدن ستور'),
-        onclick: shareStore,
-      },
-        ico('share', 'icon'),
-        el('span', null, t('نشر قولدن ستور')),
-      ),
-    );
+    /* «نشر قولدن ستور» was removed by the owner: the Telegram card is the last
+       block here, and supportEntry() follows it as before. */
     const group = document.createDocumentFragment();
     group.appendChild(card);
-    group.appendChild(shareCard);
     return group;
-  }
-
-  function shareStore() {
-    const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
-    // Sharing the STORE now points at the official download page, with a text
-    // that invites people to install the app.
-    const url = (origin || 'https://goldenstore.online') + '/download';
-    const payload = {
-      title: 'Golden Store',
-      text: t('حمّل تطبيق Golden Store الآن واستمتع بأفضل التطبيقات والألعاب'),
-      url, icon: '/images/logo.png', kind: 'store',
-    };
-    if (window.GSShare && typeof window.GSShare.open === 'function') window.GSShare.open(payload);
-    else if (navigator.share) navigator.share({ title: 'Golden Store', url }).catch(() => {});
-    else if (navigator.clipboard) { navigator.clipboard.writeText(url); toast(t('تم نسخ الرابط'), 'success'); }
   }
 
   function langSettingItem() {

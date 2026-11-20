@@ -4335,24 +4335,6 @@ html.gs-maintenance-locked body > *:not(.gs-maintenance-overlay) { pointer-event
 .gs-share-overlay.is-open .gs-share-sheet { transform: translateY(0) scale(1); }
 .gs-share-grip { display: none; }
 
-/* ---- Share-the-store CTA (account page) -------------------------------
-   One calm gold button that matches the Telegram card above it. */
-.share-store-card {
-  margin-top: 12px; padding: 0; border-radius: 0;
-  background: transparent; border: 0;
-}
-.share-store-cta {
-  width: 100%; padding: 13px 16px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  border-radius: 14px; font-size: 14px; font-weight: 800; cursor: pointer;
-  color: var(--gold, #f4c01f); background: rgba(244,192,31,.10);
-  border: 1px solid rgba(244,192,31,.42);
-  transition: filter .18s ease, transform .18s ease, background .18s ease;
-}
-.share-store-cta:hover { background: rgba(244,192,31,.16); }
-.share-store-cta:active { transform: scale(.99); }
-.share-store-cta .icon { width: 20px; height: 20px; }
-
 /* ---- Publish sheet (apps, games and the store) ------------------------ */
 .gs-share-sheet { padding: 14px 18px calc(16px + env(safe-area-inset-bottom, 0px)); }
 .gs-share-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }

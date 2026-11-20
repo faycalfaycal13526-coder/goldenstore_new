@@ -4599,7 +4599,7 @@ body[data-page="maintenance"] { background: #050507 !important; overflow: hidden
 
 /* ============================================================================
    Round 36 — sign-in page rebuilt to the reference layout: back arrow + title,
-   logo + name + tagline, e-mail & password fields, submit, invite code, and the
+   logo + name + tagline, e-mail & password fields, submit, and the
    Google button at the bottom. Colours follow the store theme (never a fixed
    white page), so it matches the rest of Golden Store in dark and light.
    ========================================================================== */
@@ -4696,13 +4696,6 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
 
 .auth-third { margin-top: auto; padding-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 12px; border-top: 1px solid var(--border); }
 .auth-third-title { color: var(--text-3); font-size: 13px; }
-.auth-invite { width: 100%; }
-.auth-invite input {
-  width: 100%; height: 44px; border-radius: 999px; text-align: center;
-  background: var(--surface); border: 1px solid var(--border); color: var(--text);
-  font-family: inherit; font-size: 14px; outline: none;
-}
-.auth-invite input::placeholder { color: var(--text-3); }
 .auth-google-big {
   width: 64px; height: 64px; border-radius: 50%; border: 0; padding: 0;
   background: #fff; display: inline-flex; align-items: center; justify-content: center;
@@ -4779,3 +4772,33 @@ a.tab.active { text-decoration: none; }
 }
 .rate-guest-gate p { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-2); }
 .rate-guest-gate .btn { min-width: 180px; }
+/* Round 42e — «ميزة الروابط داخل صفحة التطبيقات والألعاب»: one share control on
+   every card. It sits above the card art, never steals the card tap, and looks
+   identical on the apps page, the games page, /more and the home rails. */
+.approw, .grid-card, .fc-slide, .poster, .fc-media { position: relative; }
+.card-share {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 6px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-2);
+  cursor: pointer;
+  z-index: 3;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(6px);
+}
+.card-share .icon { width: 15px; height: 15px; }
+.card-share:hover, .card-share:focus-visible { color: var(--text); border-color: var(--gold); }
+.card-share:active { transform: scale(.94); }
+.fc-slide > .card-share { top: 8px; inset-inline-start: 8px; background: rgba(0,0,0,.45); color: #fff; border-color: rgba(255,255,255,.25); }
+.applist .approw > .card-share { top: 50%; transform: translateY(-50%); inset-inline-start: auto; inset-inline-end: 46px; }
+.applist .approw > .card-share:active { transform: translateY(-50%) scale(.94); }
+@media (max-width: 360px) { .card-share { width: 27px; height: 27px; } }

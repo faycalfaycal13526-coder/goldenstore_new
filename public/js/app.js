@@ -160,7 +160,10 @@
   let pendingAccountAction = null;
 
   async function requireAccountFor(what, retry) {
-    if (isNativeApp()) return true;
+    /* Round 42e (owner): «يجب التسجيل كي تقييم وتعلّق» — the same rule inside the
+       Android app. The APK has its own Google sign-in through the bridge, and a
+       signed-in user is a real Firebase user, so `isLoggedIn()` is the truth
+       everywhere; a guest is asked to sign in there too. */
     try { if (S.isLoggedIn && S.isLoggedIn()) return true; } catch (e) {}
     toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + what, 'info');
     if (typeof retry === 'function') pendingAccountAction = retry;
@@ -864,7 +867,7 @@
     /* Round 41: a review row is «interactive» for a signed-in visitor (or in the
        native app). A guest can still READ everything; tapping like opens the
        sign-in gate instead of doing nothing. */
-    let signedIn = isNativeApp();
+    let signedIn = false;
     try { if (S.isLoggedIn && S.isLoggedIn()) signedIn = true; } catch (e) {}
     const canInteract = !!id && signedIn;
     const initial = ((review.name || 'م').trim().charAt(0) || 'م').toUpperCase();
@@ -2606,7 +2609,7 @@
        for an account the moment they try, instead of letting them type and lose
        it. The composer is not even painted for a guest (see paintAuthUi). */
     commentInput.addEventListener('focus', async () => {
-      let logged = isNativeApp();
+      let logged = false;
       try { if (S.isLoggedIn && S.isLoggedIn()) logged = true; } catch (e) {}
       if (logged) return;
       const mine = () => setTimeout(() => {
@@ -2738,11 +2741,11 @@
       if (voted) { toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info'); return; }
       /* Round 42: the account is asked for FIRST — a guest who taps «نشر» without
          picking stars must still get the sign-in invitation, not «اختر النجوم». */
-      if (!isNativeApp() && !(S.isLoggedIn && S.isLoggedIn())) {
+      if (!(S.isLoggedIn && S.isLoggedIn())) {
         if (!(await requireAccountFor(t('التقييم')))) return;
       }
       if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
-      if (!isNativeApp() && !(S.isLoggedIn && S.isLoggedIn())) {
+      if (!(S.isLoggedIn && S.isLoggedIn())) {
         toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + t('التقييم'), 'info');
         return;
       }
@@ -2798,29 +2801,27 @@
         onclick: async () => { await requireAccountFor(t('التقييم')); } },
         t('تسجيل الدخول')));
     function paintAuthUi() {
-      let logged = isNativeApp();
+      let logged = false;
       try { if (S.isLoggedIn && S.isLoggedIn()) logged = true; } catch (e) {}
       guestGate.style.display = logged ? 'none' : '';
       if (hint) hint.style.display = logged ? 'none' : '';
       pickerWrap.style.display = logged ? '' : 'none';
       form.style.display = logged ? '' : 'none';
     }
-    if (!isNativeApp()) {
-      rateBody.append(guestGate);
-      paintAuthUi();
-      if (S.onAuthChanged) {
-        S.onAuthChanged(() => {
-          paintAuthUi();
-          renderReviews();
-          /* A tap that asked for an account is carried out right after the
-             sign-in, so nothing has to be repeated by hand. */
-          const pending = pendingAccountAction;
-          pendingAccountAction = null;
-          if (pending && S.isLoggedIn && S.isLoggedIn()) {
-            try { pending(); } catch (e) {}
-          }
-        });
-      }
+    rateBody.append(guestGate);
+    paintAuthUi();
+    if (S.onAuthChanged) {
+      S.onAuthChanged(() => {
+        paintAuthUi();
+        renderReviews();
+        /* A tap that asked for an account is carried out right after the
+           sign-in, so nothing has to be repeated by hand. */
+        const pending = pendingAccountAction;
+        pendingAccountAction = null;
+        if (pending && S.isLoggedIn && S.isLoggedIn()) {
+          try { pending(); } catch (e) {}
+        }
+      });
     }
     rateBody.append(
       pickerWrap,

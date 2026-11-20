@@ -239,9 +239,57 @@ function toast(msg, type = 'info', ms = 3000) {
 }
 
 /* ----------------------------- Cards ----------------------------- */
+/* Round 42e — «ميزة الروابط داخل صفحة التطبيقات والألعاب»: every card in those
+   two pages now carries a real share control, so a link can be sent from the
+   LIST itself (not only from inside an app page), on the browser and inside the
+   APK. The link is always the public app page: /app?slug=… */
+function shareCardPayload(a) {
+  const base = publicOrigin ? (publicOrigin() || location.origin) : location.origin;
+  const name = appName(a);
+  const isGame = a && a.type === 'game';
+  const pageUrl = `${base}/app?slug=${encodeURIComponent(a.slug)}`;
+  return {
+    title: name,
+    text: isGame ? `${t('العبها الآن من Golden Store')} — ${name}` : `${t('حمّل التطبيق الآن من Golden Store')} — ${name}`,
+    url: pageUrl, pageUrl, icon: (a && a.icon_url) || '',
+    kind: isGame ? 'game' : 'app',
+  };
+}
+
+function shareApp(a) {
+  if (!a || !a.slug) return;
+  const payload = shareCardPayload(a);
+  if (window.GSShare && typeof window.GSShare.open === 'function') { window.GSShare.open(payload); return; }
+  const bridge = (window.GSAndroid && typeof window.GSAndroid === 'object') ? window.GSAndroid : null;
+  const text = payload.text + '\n' + payload.url;
+  if (bridge) {
+    for (const fn of ['shareText', 'share', 'shareUrl', 'shareLink']) {
+      try { if (typeof bridge[fn] === 'function') { bridge[fn](text, payload.title); return; } } catch (e) {}
+    }
+  }
+  if (navigator.share) { navigator.share({ title: payload.title, text: payload.text, url: payload.url }).catch(() => {}); return; }
+  const copied = () => { try { toast(t('تم نسخ الرابط'), 'success'); } catch (e) {} };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(payload.url).then(copied).catch(() => { if (legacyCopy(payload.url)) copied(); });
+    return;
+  }
+  if (legacyCopy(payload.url)) copied();
+}
+
+/* One tabindex=-1 button per card: it never navigates the card link. */
+function cardShareBtn(a) {
+  const label = t('مشاركة');
+  return el('button', {
+    class: 'card-share', type: 'button', tabindex: '-1',
+    'aria-label': `${label} ${appName(a)}`, title: label, 'data-slug': a.slug || '',
+    onclick: (e) => { e.preventDefault(); e.stopPropagation(); shareApp(a); },
+  }, ico('share', 'icon icon-sm'));
+}
+
 function posterCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'poster' },
+    cardShareBtn(a),
     el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
     rt
@@ -254,6 +302,7 @@ function listRow(a, opts = {}) {
   const cat = categoryName(a.category);
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'approw' },
+    cardShareBtn(a),
     el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'info' },
       el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
@@ -274,6 +323,7 @@ function listRow(a, opts = {}) {
 function gridCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'grid-card' },
+    cardShareBtn(a),
     el('div', { class: 'grid-art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'grid-info' },
       el('div', { class: 'grid-name' }, el('bdi', appNameAttrs(a), appName(a))),
@@ -288,6 +338,7 @@ function gridCard(a) {
 
 function featureSlide(a) {
   const slide = el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'fc-slide' });
+  slide.append(cardShareBtn(a));
   const media = el('div', { class: 'fc-media' });
   if (a.feature_url) {
     media.append(el('img', { src: a.feature_url, alt: appName(a), loading: 'lazy', class: 'fc-media-img' }));
@@ -2610,6 +2661,8 @@ window.Store = {
   STORE, api, authedApi, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
   publicOrigin,
+  shareApp,
+  shareCardPayload,
   posterCard, listRow, gridCard, featureCarousel, categoryName, appName, appNameAttrs,
   spinner, skeletonHome, skeletonDetail, skeletonList, skeletonSimilar, emptyState, errorState,
   topbarSearch, topbarNav, bottomNav, renderSiteFooter, avatarEl, themeToggleBtn, langSwitcherEl, toggleTheme, currentTheme,

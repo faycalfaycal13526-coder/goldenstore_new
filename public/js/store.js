@@ -1101,17 +1101,6 @@ function authGateForm(opts) {
   var genderRow = regField('gs-reg-gender', t('الجنس'), genderSelect);
   var ageRow = regField('gs-reg-age', t('العمر'), ageInput);
   var phoneRow = regField('gs-reg-phone', t('رقم هاتف'), phoneInput);
-  var mascot = el('div', { class: 'auth-mascot', 'aria-hidden': 'true', style: 'display:none' });
-  try {
-    mascot.innerHTML = '<svg viewBox="0 0 100 100" width="72" height="72" role="img">' +
-      '<defs><linearGradient id="gsMgG" x1="0" y1="0" x2="0" y2="1">' +
-      '<stop offset="0" stop-color="#63c132"/><stop offset="1" stop-color="#3f9a1d"/></linearGradient></defs>' +
-      '<path d="M18 30 L30 12 L36 30 Z" fill="#3f3f46"/><path d="M82 30 L70 12 L64 30 Z" fill="#3f3f46"/>' +
-      '<circle cx="50" cy="55" r="34" fill="url(#gsMgG)"/>' +
-      '<ellipse cx="37" cy="48" rx="6" ry="7.5" fill="#fff"/><ellipse cx="63" cy="48" rx="6" ry="7.5" fill="#fff"/>' +
-      '<circle cx="37" cy="49" r="3" fill="#222"/><circle cx="63" cy="49" r="3" fill="#222"/>' +
-      '<path d="M36 64 q7 8 14 0" fill="none" stroke="#222" stroke-width="4" stroke-linecap="round"/></svg>';
-  } catch (e) {}
   var errBox = el('div', { class: 'gate-error hidden' });
 
   var emailInput = el('input', { id: 'gs-auth-email', name: 'email', type: 'email',
@@ -1187,10 +1176,10 @@ function authGateForm(opts) {
     [nameRow, countryRow, genderRow, ageRow, phoneRow].forEach(function (row) {
       row.style.display = isReg ? '' : 'none';
     });
-    mascot.style.display = isReg ? '' : 'none';
+    // Round 40: one GoldenStore logo everywhere — no green mascot.
     try {
       var hero = document.getElementById('gs-auth-hero') || (form && form.querySelector('.auth-hero'));
-      if (hero) hero.style.display = isReg ? 'none' : '';
+      if (hero) hero.style.display = '';
     } catch (e) {}
     passInput.setAttribute('maxlength', isReg ? '8' : '128');
     submit.textContent = isReg ? t('انشاء الحساب') : t('تسجيل الدخول');
@@ -1213,7 +1202,6 @@ function authGateForm(opts) {
   });
 
   var form = el('form', { class: 'auth-form', novalidate: 'novalidate' },
-    mascot,
     nameRow,
     el('label', { class: 'auth-field auth-box', for: 'gs-auth-email' },
       el('span', { class: 'auth-field-label' }, t('عنوان بريد إلكتروني')),

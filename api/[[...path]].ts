@@ -701,7 +701,22 @@ app.get('/app-update', async (c) => {
     created_at: Number(row?.created_at) || 0,   // release date for the dialog
     downloads,                                  // always a real number, never undefined
   };
-  return c.json({ ...out, update: { ...out } });
+  // Round 40: logo + screenshots + YouTube videos for the download page.
+  let shots: string[] = [];
+  let vids: any[] = [];
+  try { shots = JSON.parse(row && row.screenshots || '[]'); } catch {}
+  try { vids = JSON.parse(row && row.videos || '[]'); } catch {}
+  if (!Array.isArray(shots)) shots = [];
+  if (!Array.isArray(vids)) vids = [];
+  const media = {
+    logo_url: row && row.logo_key ? icon_url(row.logo_key, c.env, 320) : null,
+    screenshots: shots.map((k: string) => ({ key: k, url: shot_url(k, c.env) })).filter((x: any) => x.url),
+    videos: vids.map((v: any) => ({
+      video_id: v.video_id, kind: v.kind, title: v.title || '',
+      thumb_url: `https://i.ytimg.com/vi/${v.video_id}/hqdefault.jpg`,
+    })),
+  };
+  return c.json({ ...out, ...media, update: { ...out } });
 });
 
 app.get('/app-update/download', async (c) => {
@@ -715,6 +730,82 @@ app.get('/app-update/download', async (c) => {
   await bumpDownloadCount(c.env).catch(() => {});
   await recordDownloadEvent(c.env, 'app-update', 'web');
   return c.redirect(apkUrl, 302);
+});
+
+/* =========================================================================
+   Round 40 — the DOWNLOAD page is now managed from «مركز التحديث»:
+   a real logo (replacing the old green mascot) plus app screenshots and
+   YouTube videos/Shorts, exactly like an app/game in the store.
+   ========================================================================= */
+app.post('/admin/app-update/media', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  await ensureReleaseTable(c.env.DB);
+  // best-effort column upgrades (duplicate column errors are expected once)
+  for (const sql of [
+    `ALTER TABLE app_updates ADD COLUMN logo_key TEXT`,
+    `ALTER TABLE app_updates ADD COLUMN screenshots TEXT`,
+    `ALTER TABLE app_updates ADD COLUMN videos TEXT`,
+  ]) { try { await c.env.DB.prepare(sql).run(); } catch {} }
+
+  const readList = (raw: any, validate: (x: any) => boolean): any[] | null => {
+    if (raw === undefined) return null;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(validate).slice(0, 24);
+  };
+  const shots = readList(body.screenshots,
+    (x) => typeof x === 'string' && x.startsWith('ss/') && !x.includes('..'));
+  const vids = readList(body.videos,
+    (x) => x && /^[A-Za-z0-9_-]{6,20}$/.test(String(x.video_id || ''))
+      && (x.kind === 'short' || x.kind === 'video'));
+  const logo = body.logo_key === undefined ? undefined
+    : (body.logo_key === null || body.logo_key === '' ? null
+      : (typeof body.logo_key === 'string' && body.logo_key.startsWith('icon/') && !body.logo_key.includes('..')
+        ? body.logo_key : undefined));
+  if (logo === undefined && body.logo_key !== undefined) return c.json({ error: 'invalid_logo_key' }, 400);
+
+  const sets: string[] = [];
+  const binds: any[] = [];
+  if (logo !== undefined) { sets.push('logo_key = ?'); binds.push(logo); }
+  if (shots !== null) { sets.push('screenshots = ?'); binds.push(JSON.stringify(shots)); }
+  if (vids !== null) {
+    sets.push('videos = ?');
+    binds.push(JSON.stringify(vids.map((v: any) => ({
+      video_id: String(v.video_id), kind: v.kind === 'short' ? 'short' : 'video',
+      title: sanitizeText(v.title, 120),
+    }))));
+  }
+  if (sets.length) {
+    try {
+      await c.env.DB.prepare(`UPDATE app_updates SET ${sets.join(', ')} WHERE id = 'current'`).bind(...binds).run();
+    } catch (e: any) { return c.json({ error: 'save_failed' }, 500); }
+  }
+  return c.json({ ok: true });
+});
+
+app.get('/admin/app-update/media', async (c) => {
+  await ensureReleaseTable(c.env.DB);
+  for (const sql of [
+    `ALTER TABLE app_updates ADD COLUMN logo_key TEXT`,
+    `ALTER TABLE app_updates ADD COLUMN screenshots TEXT`,
+    `ALTER TABLE app_updates ADD COLUMN videos TEXT`,
+  ]) { try { await c.env.DB.prepare(sql).run(); } catch {} }
+  const row: any = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").first().catch(() => null);
+  let shots: string[] = [];
+  let vids: any[] = [];
+  try { shots = JSON.parse(row && row.screenshots || '[]'); } catch {}
+  try { vids = JSON.parse(row && row.videos || '[]'); } catch {}
+  if (!Array.isArray(shots)) shots = [];
+  if (!Array.isArray(vids)) vids = [];
+  return c.json({
+    logo_url: row && row.logo_key ? icon_url(row.logo_key, c.env, 320) : null,
+    logo_key: (row && row.logo_key) || null,
+    screenshots: shots.map((k: string) => ({ key: k, url: shot_url(k, c.env) })),
+    videos: vids.map((v: any) => ({
+      video_id: v.video_id, kind: v.kind, title: v.title || '',
+      thumb_url: `https://i.ytimg.com/vi/${v.video_id}/hqdefault.jpg`,
+      embed_url: `https://www.youtube.com/embed/${v.video_id}`,
+    })),
+  });
 });
 
 /* ---- Legal consent (defence in depth) -----------------------------------

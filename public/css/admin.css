@@ -1752,3 +1752,18 @@ body.admin-compact .admin-kpi { padding: 10px; }
 .collect-table th, .collect-table td { padding: 10px 12px; text-align: start; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .collect-table th { color: var(--text-3); font-weight: 700; font-size: 12px; }
 .collect-table tbody tr:hover { background: var(--surface-2); }
+
+/* ---------- شعار وصور صفحة التحميل (round 40) ---------- */
+#adm-update-media { margin-top: 14px; }
+.adm-media-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 900px) { .adm-media-cols { grid-template-columns: 1fr; } }
+.adm-media-preview { border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: var(--surface-2); }
+.adm-media-preview-head { font-size: 12px; font-weight: 700; color: var(--text-3); margin-bottom: 10px; }
+.adm-media-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.adm-media-logo img { width: 88px; height: 88px; border-radius: 22px; object-fit: contain; background: var(--surface-3); }
+.adm-media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.adm-media-shot { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-3); }
+.adm-media-shot img { display: block; width: 100%; height: 150px; object-fit: cover; }
+.adm-media-shot-bar { display: flex; justify-content: space-between; gap: 4px; padding: 6px; }
+.adm-media-shot-bar .btn { padding: 4px 6px; min-width: 0; }
+.adm-media-shot-bar .icon, .adm-media-shot-bar svg { width: 15px; height: 15px; }

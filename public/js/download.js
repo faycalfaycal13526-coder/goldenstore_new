@@ -170,10 +170,108 @@
   }
 
   function refresh() {
-    return loadRelease(0).then(render).catch(function () {
+    return loadRelease(0).then(function (data) {
+      try { renderMedia(data || {}); } catch (e) {}
+      return render(data);
+    }).catch(function () {
       showCount(null);
       if (help) help.textContent = t('تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.');
     });
+  }
+
+
+  /* -------------------------------------------------------------------
+     Round 40 — the download page shows the SAME media an app/game has:
+     the store logo (replacing the green mascot) plus screenshots and
+     YouTube videos/Shorts, all managed in «مركز التحديث».
+     ------------------------------------------------------------------- */
+  function elx(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function renderMedia(data) {
+    // 1) logo — every branded image on the page follows the uploaded one
+    var logo = String(data.logo_url || '');
+    if (logo) {
+      Array.prototype.forEach.call(document.querySelectorAll('.dl-brand img, .dl-visual-inner img'), function (img) {
+        img.setAttribute('src', logo);
+        img.setAttribute('srcset', logo);
+      });
+    }
+
+    // 2) screenshots strip
+    var shots = Array.isArray(data.screenshots) ? data.screenshots.filter(function (x) { return x && x.url; }) : [];
+    var host = document.getElementById('dlMedia');
+    var strip = document.getElementById('dlShots');
+    var vids = document.getElementById('dlVideos');
+    if (!host) return;
+    if (strip) {
+      strip.innerHTML = '';
+      if (shots.length) {
+        shots.forEach(function (sh) {
+          var fig = elx('figure', 'dl-shot');
+          var img = elx('img');
+          img.src = sh.url; img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+          fig.appendChild(img);
+          strip.appendChild(fig);
+        });
+        var shotsSection = document.getElementById('dlShotsSection');
+        if (shotsSection) shotsSection.hidden = false;
+      }
+    }
+
+    // 3) YouTube videos + Shorts
+    var list = Array.isArray(data.videos) ? data.videos.filter(function (v) { return v && v.video_id; }) : [];
+    if (vids) {
+      vids.innerHTML = '';
+      list.forEach(function (v) {
+        var isShort = v.kind === 'short';
+        var card = elx('button', 'dl-video' + (isShort ? ' is-short' : ''));
+        card.type = 'button';
+        card.setAttribute('aria-label', v.title || t('تشغيل الفيديو'));
+        var thumb = elx('img');
+        thumb.src = 'https://i.ytimg.com/vi/' + v.video_id + '/hqdefault.jpg';
+        thumb.alt = ''; thumb.loading = 'lazy';
+        card.appendChild(thumb);
+        card.appendChild(elx('span', 'dl-video-play', '▶'));
+        if (v.title) card.appendChild(elx('span', 'dl-video-title', v.title));
+        card.addEventListener('click', function () { openVideo(v, isShort); });
+        vids.appendChild(card);
+      });
+      if (list.length) {
+        var vSection = document.getElementById('dlVideosSection');
+        if (vSection) vSection.hidden = false;
+      }
+    }
+    if (shots.length || list.length) host.hidden = false;
+  }
+
+  function openVideo(v, isShort) {
+    var overlay = elx('div', 'dl-video-modal');
+    var box = elx('div', 'dl-video-modal-box' + (isShort ? ' is-short' : ''));
+    var frame = document.createElement('iframe');
+    frame.src = 'https://www.youtube.com/embed/' + v.video_id + '?autoplay=1&rel=0&playsinline=1';
+    frame.title = v.title || 'YouTube';
+    frame.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture');
+    frame.setAttribute('allowfullscreen', 'allowfullscreen');
+    frame.setAttribute('loading', 'lazy');
+    var close = elx('button', 'dl-video-close', '✕');
+    close.type = 'button';
+    close.setAttribute('aria-label', t('إغلاق'));
+    function shut() { overlay.remove(); document.body.style.overflow = ''; }
+    close.addEventListener('click', shut);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) shut(); });
+    document.addEventListener('keydown', function esc(e) {
+      if (e.key === 'Escape') { document.removeEventListener('keydown', esc); shut(); }
+    });
+    box.appendChild(close);
+    box.appendChild(frame);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
   }
 
   refresh();

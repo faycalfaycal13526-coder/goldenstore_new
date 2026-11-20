@@ -4664,7 +4664,6 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
   font-size: 12px; font-weight: 700; color: var(--text-2); letter-spacing: .2px;
   pointer-events: none;
 }
-.auth-mascot { display: flex; justify-content: center; padding: 6px 0 2px; }
 .auth-box,
 .gate.is-auth-page .auth-box {
   border: 1.5px solid var(--border-2, #6c6c78); border-radius: 12px;

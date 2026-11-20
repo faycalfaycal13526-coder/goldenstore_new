@@ -233,6 +233,52 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
   .dl-home span { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+/* ---- Round 40: download-page media (screenshots + YouTube videos) ---- */
+.dl-shots {
+  display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 14px;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+}
+.dl-shot {
+  flex: 0 0 auto; width: 178px; margin: 0; scroll-snap-align: start;
+  border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+  background: var(--surface-2);
+}
+.dl-shot img { display: block; width: 100%; height: 316px; object-fit: cover; }
+.dl-videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.dl-video {
+  position: relative; display: block; width: 100%; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+  background: var(--surface-2); color: inherit; font-family: inherit; text-align: start;
+}
+.dl-video img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; }
+.dl-video.is-short { max-width: 220px; }
+.dl-video.is-short img { aspect-ratio: 9/16; }
+.dl-video-play {
+  position: absolute; inset-inline-start: 10px; top: 10px;
+  width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(0,0,0,.62);
+  color: #fff; font-size: 14px;
+}
+.dl-video-title {
+  display: block; padding: 10px 12px; font-size: 13px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dl-video-modal {
+  position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
+  background: rgba(0,0,0,.86); padding: 16px;
+}
+.dl-video-modal-box { position: relative; width: 100%; max-width: 960px; }
+.dl-video-modal-box.is-short { max-width: 400px; }
+.dl-video-modal-box iframe {
+  width: 100%; aspect-ratio: 16/9; border: 0; border-radius: 14px; background: #000;
+}
+.dl-video-modal-box.is-short iframe { aspect-ratio: 9/16; }
+.dl-video-close {
+  position: absolute; top: -44px; inset-inline-end: 0;
+  width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3);
+  background: rgba(255,255,255,.12); color: #fff; font-size: 16px; cursor: pointer;
+}
 </style>
 <script id="gs-apk-self-heal">
 (function(){
@@ -344,6 +390,27 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
     </div>
   </section>
 
+  <div id="dlMedia" hidden>
+    <section class="dl-section" id="dlShotsSection" hidden>
+      <div class="wrap">
+        <div class="dl-section-head">
+          <h2 data-i18n="صور التطبيق">صور التطبيق</h2>
+          <p data-i18n="لقطات من داخل تطبيق Golden Store.">لقطات من داخل تطبيق Golden Store.</p>
+        </div>
+        <div class="dl-shots" id="dlShots" role="list"></div>
+      </div>
+    </section>
+    <section class="dl-section" id="dlVideosSection" hidden>
+      <div class="wrap">
+        <div class="dl-section-head">
+          <h2 data-i18n="فيديوهات التطبيق">فيديوهات التطبيق</h2>
+          <p data-i18n="مقاطع يوتيوب وشورتات من المتجر.">مقاطع يوتيوب وشورتات من المتجر.</p>
+        </div>
+        <div class="dl-videos" id="dlVideos" role="list"></div>
+      </div>
+    </section>
+  </div>
+
 </main>
 
 <footer class="dl-footer">
@@ -357,10 +424,10 @@ a.dl-feature.dl-support-card { display: block; width: 100%; max-width: 300px; co
   </div>
 </footer>
 
-<script src="/js/icons.js?v=20261120k"></script>
-<script src="/js/store-settings.js?v=20261120k"></script>
-  <script src="/js/lang.js?v=20261120k"></script>
-<script src="/js/download.js?v=20261120k"></script>
-  <script src="/js/notification-hub.js?v=20261120k"></script>
+<script src="/js/icons.js?v=20261120l"></script>
+<script src="/js/store-settings.js?v=20261120l"></script>
+  <script src="/js/lang.js?v=20261120l"></script>
+<script src="/js/download.js?v=20261120l"></script>
+  <script src="/js/notification-hub.js?v=20261120l"></script>
 </body>
 </html>

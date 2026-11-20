@@ -149,9 +149,9 @@
       ? T('عند نسيان كلمة المرور، ستحتاج إلى رقم الهاتف أو البريد الإلكتروني لاستردادها. نوصي بإكمالها.')
       : T('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك');
     if (submit) submit.textContent = isReg ? T('انشاء الحساب') : T('تسجيل الدخول');
-    var mascot = $('authMascot'), hero = $('authHero');
-    if (mascot) mascot.style.display = isReg ? '' : 'none';
-    if (hero) hero.style.display = isReg ? 'none' : '';
+    // Round 40: the same GoldenStore logo heads both modes (owner request).
+    var hero = $('authHero');
+    if (hero) hero.style.display = '';
     clearError();
     syncSubmit();
   }

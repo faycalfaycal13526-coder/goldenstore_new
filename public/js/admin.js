@@ -2556,6 +2556,168 @@
     document.body.append(overlay);
   }
 
+  /* Round 40 — «مركز التحديث» now manages the DOWNLOAD page media exactly like
+     an app: a real logo (the green mascot is gone), screenshots and YouTube
+     videos/Shorts. Saved through /api/admin/app-update/media. */
+  function updateMediaPanel() {
+    let logoDz = null, ssDz = null;
+    let shots = [];       // [{ key, url }]
+    let videos = [];      // [{ video_id, kind, title }]
+    let logoKey = null, logoUrl = null;
+
+    const shotsStrip = el('div', { class: 'adm-media-grid' });
+    const logoPreview = el('div', { class: 'adm-media-logo' }, el('div', { class: 'hint' }, t('لا شعار بعد')));
+    const videoListEl = el('div', { class: 'gs-admin-video-list' });
+    const saveBtn = el('button', { class: 'btn btn-primary', type: 'button' }, ico('check'), t('حفظ الشعار والصور'));
+
+    const videoUrlInput = el('input', { class: 'input', type: 'url',
+      placeholder: 'https://youtube.com/watch?v=…  ·  youtu.be/…  ·  /shorts/…',
+      'aria-label': t('رابط فيديو يوتيوب') });
+    const videoTitleInput = el('input', { class: 'input', type: 'text',
+      placeholder: t('عنوان الفيديو (اختياري)'), 'aria-label': t('عنوان الفيديو (اختياري)') });
+    const videoKind = el('select', { class: 'input', 'aria-label': t('نوع الفيديو') },
+      el('option', { value: 'auto' }, t('اكتشاف تلقائي')),
+      el('option', { value: 'video' }, t('فيديو عادي')),
+      el('option', { value: 'short' }, t('شورت')));
+
+    function parseVideo(raw) {
+      const s2 = String(raw || '').trim();
+      if (!s2) return null;
+      const m = s2.match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{6,20})/);
+      const withCase = m || s2.match(/^([A-Za-z0-9_-]{6,20})$/);
+      if (!withCase) return null;
+      const id = withCase[1];
+      const auto = /\/shorts\//.test(s2) ? 'short' : 'video';
+      return { video_id: id, kind: videoKind.value === 'auto' ? auto : videoKind.value };
+    }
+
+    function renderShot() {
+      logoPreview.innerHTML = '';
+      if (logoUrl) {
+        logoPreview.append(el('img', { src: logoUrl, alt: t('شعار التطبيق'), width: '88', height: '88' }));
+        logoPreview.append(el('button', { class: 'btn btn-secondary btn-sm', type: 'button',
+          onclick: () => { logoKey = null; logoUrl = null; renderShot(); } }, ico('trash'), t('إزالة')));
+      } else {
+        logoPreview.append(el('div', { class: 'hint' }, t('الشعار الافتراضي (قولدن ستور)')));
+      }
+      shotsStrip.innerHTML = '';
+      if (!shots.length) shotsStrip.append(el('div', { class: 'hint' }, t('لا توجد صور بعد')));
+      shots.forEach((s3, i) => {
+        const card = el('div', { class: 'adm-media-shot' },
+          el('img', { src: s3.url, alt: '', loading: 'lazy' }),
+          el('div', { class: 'adm-media-shot-bar' },
+            el('button', { class: 'btn btn-secondary btn-sm', type: 'button', title: t('نقل لليمين'),
+              onclick: () => { if (i > 0) { const [x] = shots.splice(i, 1); shots.splice(i - 1, 0, x); renderShot(); } } },
+              ico('chevronEnd')),
+            el('button', { class: 'btn btn-secondary btn-sm', type: 'button', title: t('نقل لليسار'),
+              onclick: () => { if (i < shots.length - 1) { const [x] = shots.splice(i, 1); shots.splice(i + 1, 0, x); renderShot(); } } },
+              ico('chevronStart')),
+            el('button', { class: 'btn btn-secondary btn-sm', type: 'button', title: t('حذف'),
+              onclick: () => { shots.splice(i, 1); renderShot(); } }, ico('trash'))));
+        shotsStrip.append(card);
+      });
+      videoListEl.innerHTML = '';
+      if (!videos.length) videoListEl.append(el('div', { class: 'gs-admin-video-empty' }, t('لا توجد فيديوهات بعد')));
+      videos.forEach((v, i) => {
+        videoListEl.append(el('div', { class: 'gs-admin-video-row' },
+          el('img', { class: 'gs-admin-video-thumb ' + (v.kind === 'short' ? 'is-short' : 'is-video'),
+            src: `https://i.ytimg.com/vi/${v.video_id}/hqdefault.jpg`, alt: '', loading: 'lazy' }),
+          el('div', { class: 'gs-admin-video-meta' },
+            el('div', { class: 'gs-admin-video-badges' },
+              el('span', { class: 'gs-admin-video-badge' + (v.kind === 'short' ? ' is-short' : '') },
+                v.kind === 'short' ? t('شورت') : t('فيديو عادي'))),
+            el('strong', null, v.title || v.video_id)),
+          el('button', { class: 'btn btn-secondary btn-sm', type: 'button',
+            onclick: () => { videos.splice(i, 1); renderShot(); } }, ico('trash'), t('حذف'))));
+      });
+    }
+
+    logoDz = bindLogo();
+    ssDz = bindShots();
+
+    async function load() {
+      try {
+        const d = await api('/api/admin/app-update/media');
+        logoKey = d.logo_key || null;
+        logoUrl = d.logo_url || null;
+        shots = Array.isArray(d.screenshots) ? d.screenshots.slice() : [];
+        videos = Array.isArray(d.videos) ? d.videos.map((v) => ({ video_id: v.video_id, kind: v.kind, title: v.title || '' })) : [];
+      } catch (e) {}
+      renderShot();
+    }
+
+    // the dropzone hands the picked files to `onFiles`; re-create it with the
+    // handler so uploads start immediately (round 40).
+    function bindLogo() {
+      const dz = dropzone({ accept: 'image/*', label: t('شعار التطبيق (PNG مربّع)'), onFiles: async (files) => {
+        const f = files && files[0];
+        if (!f) return;
+        if (!/^image\//.test(f.type || '')) { toast(t('اختر صورة'), 'error'); return; }
+        try {
+          toast(t('جارٍ رفع الشعار…'));
+          logoKey = await r2Upload(f, 'icon', 'goldenstore-app', () => {});
+          logoUrl = URL.createObjectURL(f);
+          renderShot();
+        } catch (e) { toast(t('فشل رفع الشعار'), 'error'); }
+      } });
+      return dz;
+    }
+    function bindShots() {
+      return dropzone({ accept: 'image/*', multiple: true, label: t('صور التطبيق (لقطات الشاشة)'),
+        onFiles: async (files) => {
+          const list2 = Array.from(files || []);
+          for (let i = 0; i < list2.length; i++) {
+            const f = list2[i];
+            if (!/^image\//.test(f.type || '')) continue;
+            try {
+              toast(t('جارٍ رفع الصور…') + ` ${i + 1}/${list2.length}`);
+              const key = await r2Upload(f, 'screenshot', 'goldenstore-app', () => {});
+              shots.push({ key, url: URL.createObjectURL(f) });
+              renderShot();
+            } catch (e) { toast(t('فشل رفع الصور'), 'error'); }
+          }
+        } });
+    }
+
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      try {
+        await api('/api/admin/app-update/media', { method: 'POST', body: {
+          logo_key: logoKey, screenshots: shots.map((x) => x.key),
+          videos: videos.map((v) => ({ video_id: v.video_id, kind: v.kind, title: v.title || '' })),
+        } });
+        logAdminAction('حفظ شعار وصور صفحة التحميل');
+        toast(t('تم حفظ الشعار والصور'), 'success');
+        await load();
+      } catch (e) { toast(t('فشل الحفظ'), 'error'); }
+      saveBtn.disabled = false;
+    };
+
+    const panel = el('div', { class: 'panel', id: 'adm-update-media' },
+      el('div', { class: 'panel-head' }, ico('image', 'icon'), t('شعار وصور صفحة التحميل')),
+      el('div', { class: 'adm-media-cols' },
+        el('div', { class: 'form' },
+          el('div', { class: 'field' }, el('label', null, t('شعار التطبيق')), logoDz,
+            el('div', { class: 'hint' }, 'يظهر في صفحة التحميل وأعلى نافذة التحديث بدل الأيقونة القديمة.')),
+          el('div', { class: 'field' }, el('label', null, t('صور التطبيق')), ssDz,
+            el('div', { class: 'hint' }, 'تُعرض كلقطة شاشة قابلة للتمرير في صفحة التحميل وفي نافذة التحديث.')),
+          el('div', { class: 'field' }, el('label', null, t('فيديو يوتيوب أو شورت')),
+            videoUrlInput, videoTitleInput, videoKind,
+            el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => {
+              const v = parseVideo(videoUrlInput.value);
+              if (!v) { toast(t('رابط يوتيوب غير صالح'), 'error'); return; }
+              videos.push({ video_id: v.video_id, kind: v.kind, title: videoTitleInput.value.trim() });
+              videoUrlInput.value = ''; videoTitleInput.value = ''; renderShot();
+            } }, ico('plus'), t('إضافة فيديو')),
+            el('div', { class: 'hint' }, 'يقبل watch?v= · youtu.be · /shorts/ — والشورت يُعرض عمودياً.')),
+          saveBtn),
+        el('div', { class: 'adm-media-preview' },
+          el('div', { class: 'adm-media-preview-head' }, t('المعاينة')),
+          logoPreview, shotsStrip, videoListEl)));
+    load();
+    return panel;
+  }
+
   async function renderAppUpdate(body) {
     body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
     try {
@@ -2684,6 +2846,7 @@
               metaRow(t('التنزيلات'), formatNum((current && current.downloads) || 0)),
               current && current.force ? el('div', { class: 'admin-update-force' }, t('تحديث إلزامي')) : null),
             historyPanel)),
+        updateMediaPanel(),
       );
     } catch (e) {
       body.innerHTML = '';

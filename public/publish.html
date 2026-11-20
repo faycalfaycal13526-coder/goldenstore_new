@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<script src="/js/theme-init.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0f">
+<title>نشر تطبيق أو لعبة — Golden Store</title>
+<meta name="description" content="أرسل تطبيقك أو لعبتك إلى Golden Store: املأ النموذج وسنراجع الملف وننشره في المتجر.">
+<link rel="icon" type="image/png" href="/images/logo.png">
+<link rel="apple-touch-icon" href="/images/logo.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="canonical" href="https://goldenstore.online/publish">
+<meta name="robots" content="index, follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/play.css?v=20261120n">
+<style>
+  .pub-page { max-width: 620px; margin: 0 auto; padding: 22px 16px calc(40px + env(safe-area-inset-bottom)); }
+  .pub-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 10px 0 18px; }
+  .pub-hero img { width: 76px; height: 76px; border-radius: 22px; }
+  .pub-hero h1 { margin: 0; font-size: 24px; font-weight: 800; }
+  .pub-hero p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.7; }
+  .pub-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px; }
+  .pub-field { margin-bottom: 14px; position: relative; }
+  .pub-field label { display: block; font-size: 13px; font-weight: 700; color: var(--text-2); margin-bottom: 6px; }
+  .pub-field input, .pub-field select, .pub-field textarea {
+    width: 100%; box-sizing: border-box; background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border-2, #6c6c78); border-radius: 12px; padding: 13px 14px;
+    font-family: inherit; font-size: 15px; outline: none;
+  }
+  .pub-field input:focus, .pub-field select:focus, .pub-field textarea:focus { border-color: var(--gold, #f4c01f); }
+  .pub-field textarea { min-height: 110px; resize: vertical; }
+  .pub-hint { font-size: 12px; color: var(--text-3); margin-top: 6px; }
+  .pub-submit {
+    width: 100%; min-height: 54px; border: 0; border-radius: 999px; cursor: pointer;
+    background: var(--gold, #f4c01f); color: #17170f; font-family: inherit;
+    font-size: 17px; font-weight: 800; margin-top: 6px;
+  }
+  .pub-submit[disabled] { opacity: .55; cursor: default; }
+  .pub-ok { display: none; text-align: center; padding: 22px 8px; }
+  .pub-ok.is-on { display: block; }
+  .pub-ok .tick { font-size: 42px; }
+  .pub-ok h2 { margin: 6px 0; font-size: 20px; }
+  .pub-ok p { margin: 0; color: var(--text-2); font-size: 14px; }
+  .pub-back { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--text-2); text-decoration: none; font-size: 14px; }
+  .pub-err { color: #ff6b6b; font-size: 13px; margin-top: 8px; min-height: 18px; }
+  .pub-links { display: flex; gap: 10px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+</style>
+</head>
+<body data-page="publish">
+<main class="pub-page">
+  <a class="pub-back" href="/apps" id="pubBack">→ <span data-i18n="رجوع">رجوع</span></a>
+  <div class="pub-hero">
+    <img src="/images/logo.png" alt="Golden Store" width="76" height="76">
+    <h1 data-i18n="انشر تطبيقك أو لعبتك">انشر تطبيقك أو لعبتك</h1>
+    <p data-i18n="أرسل التفاصيل وسنراجع الملف ثم ننشره في المتجر مع صفحة كاملة: أيقونة، لقطات، فيديو وتقييمات.">أرسل التفاصيل وسنراجع الملف ثم ننشره في المتجر مع صفحة كاملة: أيقونة، لقطات، فيديو وتقييمات.</p>
+  </div>
+
+  <form class="pub-card" id="pubForm" novalidate>
+    <div class="pub-field">
+      <label for="pubKind" data-i18n="النوع">النوع</label>
+      <select id="pubKind" name="kind">
+        <option value="app" data-i18n="تطبيق">تطبيق</option>
+        <option value="game" data-i18n="لعبة">لعبة</option>
+      </select>
+    </div>
+    <div class="pub-field">
+      <label for="pubName" data-i18n="اسم التطبيق أو اللعبة">اسم التطبيق أو اللعبة <span aria-hidden="true">*</span></label>
+      <input id="pubName" name="name" type="text" maxlength="80" required placeholder="مثال: My Game">
+    </div>
+    <div class="pub-field">
+      <label for="pubDev" data-i18n="اسم المطوّر (اختياري)">اسم المطوّر (اختياري)</label>
+      <input id="pubDev" name="developer" type="text" maxlength="80" placeholder="اسمك أو اسم الاستوديو">
+    </div>
+    <div class="pub-field">
+      <label for="pubLink" data-i18n="رابط ملف APK">رابط ملف APK</label>
+      <input id="pubLink" name="link" type="url" dir="ltr" placeholder="https://…/app.apk">
+      <div class="pub-hint" data-i18n="ضع رابط التحميل المباشر أو رابط مشروعك (Google Drive، GitHub…).">ضع رابط التحميل المباشر أو رابط مشروعك (Google Drive، GitHub…).</div>
+    </div>
+    <div class="pub-field">
+      <label for="pubContact" data-i18n="بريد أو حساب للتواصل">بريد أو حساب للتواصل</label>
+      <input id="pubContact" name="contact" type="text" dir="ltr" maxlength="120" placeholder="you@mail.com · @telegram">
+    </div>
+    <div class="pub-field">
+      <label for="pubNotes" data-i18n="ملاحظات (اختياري)">ملاحظات (اختياري)</label>
+      <textarea id="pubNotes" name="notes" maxlength="1500" placeholder="وصف قصير، الفئة، الإصدار، أي تفاصيل تساعدنا في المراجعة."></textarea>
+    </div>
+    <button class="pub-submit" id="pubSubmit" type="submit" data-i18n="إرسال الطلب">إرسال الطلب</button>
+    <div class="pub-err" id="pubErr" role="alert"></div>
+  </form>
+
+  <div class="pub-ok" id="pubOk" role="status">
+    <div class="tick">✅</div>
+    <h2 data-i18n="وصل طلبك">وصل طلبك</h2>
+    <p data-i18n="سنراجع الملف وننشره في المتجر. شكراً لمساهمتك!">سنراجع الملف وننشره في المتجر. شكراً لمساهمتك!</p>
+    <div class="pub-links">
+      <a class="btn btn-secondary" href="/apps" data-i18n="تصفّح التطبيقات">تصفّح التطبيقات</a>
+      <a class="btn btn-primary" href="/" data-i18n="الصفحة الرئيسية">الصفحة الرئيسية</a>
+    </div>
+  </div>
+</main>
+
+<script src="/js/icons.js?v=20261120n"></script>
+<script src="/js/store-settings.js?v=20261120n"></script>
+<script src="/js/lang.js?v=20261120n"></script>
+<script src="/js/publish.js?v=20261120n"></script>
+<script src="/js/notification-hub.js?v=20261120n"></script>
+<script id="gs-apk-self-heal">
+(function(){
+  try {
+    var del = JSON.parse(localStorage.getItem('gs_deleted_apks') || '[]');
+    if (!Array.isArray(del)) del = [];
+    var states = JSON.parse(localStorage.getItem('gs_apk_states') || '{}') || {};
+    var changed = false;
+    Object.keys(states).forEach(function(k){
+      var st = states[k];
+      if (del.indexOf(k) >= 0 || !st || st.status === 'none') { delete states[k]; changed = true; }
+    });
+    if (changed) localStorage.setItem('gs_apk_states', JSON.stringify(states));
+  } catch (e) {}
+})();
+</script>
+
+</body>
+</html>

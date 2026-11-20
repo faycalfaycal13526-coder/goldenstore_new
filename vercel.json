@@ -7,6 +7,10 @@
     "trailingSlash": false,
     "rewrites": [
         {
+            "source": "/publish",
+            "destination": "/publish.html"
+        },
+        {
             "source": "/admin",
             "destination": "/gs-admin-c0d982f8.html"
         },

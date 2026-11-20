@@ -3446,7 +3446,8 @@
 
   function requestCard(r, body) {
     const isUpdate = r.type === 'update';
-    const card = el('div', { class: 'req-card' });
+    const isPublish = r.type === 'publish';
+    const card = el('div', { class: 'req-card' + (isPublish ? ' req-card-publish' : '') });
     const dismissBtn = el('button', { class: 'btn btn-sm btn-secondary', onclick: async () => {
       dismissBtn.disabled = true;
       try { await api(`/api/admin/requests/${r.id}`, { method: 'DELETE' }); card.remove(); toast('تم الحذف', 'success'); }
@@ -3455,15 +3456,20 @@
 
     card.append(
       el('div', { class: 'req-top' },
-        el('span', { class: `req-badge ${isUpdate ? 'update' : 'report'}` }, isUpdate ? 'طلب تحديث' : 'بلاغ'),
-        el('strong', null, r.app_name || r.slug),
+        el('span', { class: `req-badge ${isPublish ? 'publish' : isUpdate ? 'update' : 'report'}` },
+          isPublish ? 'طلب نشر' : isUpdate ? 'طلب تحديث' : 'بلاغ'),
+        el('strong', null, r.app_name || r.slug || (isPublish ? 'طلب نشر' : '—')),
         el('span', { class: 'tab-spacer' }),
-        el('a', { class: 'btn btn-sm btn-secondary', href: `/app?slug=${encodeURIComponent(r.slug)}`, target: '_blank' }, ico('external'), 'عرض'),
+        r.slug ? el('a', { class: 'btn btn-sm btn-secondary', href: `/app?slug=${encodeURIComponent(r.slug)}`, target: '_blank' }, ico('external'), 'عرض') : null,
         dismissBtn,
       ),
       el('div', { class: 'req-meta' }, r.ts ? formatDate(r.ts) : ''),
     );
 
+    if (isPublish) {
+      card.append(el('div', { class: 'req-detail' }, r.details || ''));
+      return card;
+    }
     if (isUpdate) {
       card.append(el('div', { class: 'req-detail' }, `الإصدار الحالي: ${r.current_version || '—'} ← الإصدار المطلوب: ${r.new_version || '—'}`));
       if (r.source) card.append(el('div', { class: 'req-detail' }, 'المصدر: ', el('a', { href: r.source, target: '_blank', rel: 'noopener' }, r.source)));

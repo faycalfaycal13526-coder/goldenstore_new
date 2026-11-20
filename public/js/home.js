@@ -21,8 +21,15 @@
     root.append(S.topbarSearch(user));
 
     // Round 41: a shared link such as /apps#top opens on that very tab.
+    /* Round 42 (owner again: «في صفحة التطبيقات والألعاب عدل الرابط الذي في
+       الفوق»): every top tab now has ONE real, shareable URL — /apps?tab=top —
+       and the legacy #top form still works, so an old shared link keeps opening
+       the right tab after a reload. */
+    const tabUrl = (key) => (key === 'foryou' ? PAGE_URL : `${PAGE_URL}?tab=${key}`);
     let topTab = (function () {
-      const raw = String(location.hash || '').replace(/^#/, '');
+      let raw = '';
+      try { raw = new URLSearchParams(location.search).get('tab') || ''; } catch (e) { raw = ''; }
+      if (!TOP_TABS.some((x) => x.key === raw)) raw = String(location.hash || '').replace(/^#/, '');
       return TOP_TABS.some((x) => x.key === raw) ? raw : 'foryou';
     })();
     const tabsBar = el('div', { class: 'tabs' });
@@ -38,7 +45,7 @@
         const isCurrent = t_item.key === topTab;
         const tabNode = el('a', {
           class: `tab ${isCurrent ? 'active' : ''}`,
-          href: isCurrent ? PAGE_URL : `${PAGE_URL}#${t_item.key}`,
+          href: tabUrl(t_item.key),
           role: 'tab',
           'aria-selected': isCurrent ? 'true' : 'false',
           'aria-label': t(t_item.label),
@@ -48,7 +55,7 @@
             ev.preventDefault();
             if (topTab !== t_item.key) {
               topTab = t_item.key;
-              try { history.replaceState(null, '', `${PAGE_URL}#${t_item.key}`); } catch (e) {}
+              try { history.replaceState(null, '', tabUrl(t_item.key)); } catch (e) {}
               renderTabs(); renderContent();
             }
           },
@@ -57,6 +64,12 @@
       });
     }
 
+    window.addEventListener('popstate', () => {
+      let raw = '';
+      try { raw = new URLSearchParams(location.search).get('tab') || ''; } catch (e) { raw = ''; }
+      if (!TOP_TABS.some((x) => x.key === raw)) raw = 'foryou';
+      if (raw !== topTab) { topTab = raw; renderTabs(); renderContent(); }
+    });
     root.append(tabsBar, content);
     renderTabs();
     renderContent();

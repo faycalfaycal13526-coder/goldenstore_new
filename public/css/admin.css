@@ -1767,3 +1767,7 @@ body.admin-compact .admin-kpi { padding: 10px; }
 .adm-media-shot-bar { display: flex; justify-content: space-between; gap: 4px; padding: 6px; }
 .adm-media-shot-bar .btn { padding: 4px 6px; min-width: 0; }
 .adm-media-shot-bar .icon, .adm-media-shot-bar svg { width: 15px; height: 15px; }
+
+/* Round 42 — a «طلب نشر» from the storefront form. */
+.req-badge.publish { background: rgba(244,192,31,.16); color: #f4c01f; }
+.req-card-publish { border-inline-start: 3px solid #f4c01f; }

@@ -109,7 +109,7 @@ const PUBLIC_WRITE_EXACT = new Set([
   '/api/notifications/register-device', '/api/notifications/unregister-token',
   '/api/notifications/preference', '/api/notifications/receipt',
   '/api/notifications/click', '/api/notifications/self-test',
-  '/api/profile/demographics', '/api/support/threads',
+  '/api/profile/demographics', '/api/support/threads', '/api/publish-request',
 ]);
 const PUBLIC_WRITE_PATTERNS: RegExp[] = [
   /^\/api\/apps\/[^/]+\/(star|star-check|request-update|report|follow)$/,
@@ -126,6 +126,7 @@ const WRITE_BUCKETS: Record<string, { max: number; sec: number }> = {
   '/api/profile/demographics': { max: 15, sec: 60 },
   '/api/apps/:slug/report': { max: 10, sec: 60 },
   '/api/apps/:slug/request-update': { max: 10, sec: 60 },
+  '/api/publish-request': { max: 6, sec: 60 },
 };
 const loginFailures = new Map<string, { count: number; lockedUntil: number }>();
 
@@ -1600,6 +1601,50 @@ app.post('/apps/:slug/request-update', async (c) => {
   await c.env.DB.prepare(`INSERT INTO app_requests (id, type, slug, app_name, current_version, new_version, source, status, ts) VALUES (?, 'update', ?, ?, ?, ?, ?, 'new', ?)`)
     .bind(randomId(), appData.slug, appData.name, appData.version_name || '', sanitizeText(body.new_version, 60), sanitizeUrl(body.source) || '', nowSec()).run();
   return c.json({ ok: true });
+});
+
+/* =========================================================================
+   Round 42 (owner: «عدل زر نشر التطبيقات والألعاب لان الرابط لا يعمل»):
+   a real, working «نشر تطبيق / لعبة» form for visitors. Same table the admin
+   console already reads («الطلبات والبلاغات»), so nothing new is needed there.
+   ========================================================================= */
+const PUBLISH_KINDS = ['app', 'game'];
+app.post('/publish-request', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const kind = PUBLISH_KINDS.includes(String(body.kind)) ? String(body.kind) : 'app';
+  const name = sanitizeText(body.name, 80);
+  const developer = sanitizeText(body.developer, 80);
+  const link = sanitizeUrl(body.link) || '';
+  const notes = sanitizeText(body.notes, 1500);
+  const contact = sanitizeText(body.contact, 120);
+  if (name.length < 2) return c.json({ error: 'name_required' }, 400);
+  if (!link && !contact) return c.json({ error: 'link_or_contact_required' }, 400);
+  const ip = getClientIp(c);
+  const id = randomId();
+  const details = [
+    developer ? 'المطوّر: ' + developer : '',
+    link ? 'الرابط: ' + link : '',
+    contact ? 'التواصل: ' + contact : '',
+    notes ? 'ملاحظات: ' + notes : '',
+  ].filter(Boolean).join(' | ');
+  try {
+    await c.env.DB.prepare(`INSERT INTO app_requests (id, type, slug, app_name, reason, details, status, ts)
+      VALUES (?, 'publish', ?, ?, ?, ?, 'new', ?)`)
+      .bind(id, '', `${kind === 'game' ? 'لعبة' : 'تطبيق'}: ${name}`, 'publish_request',
+        sanitizeText(details, 2000), nowSec()).run();
+  } catch (e: any) {
+    return c.json({ error: 'save_failed' }, 500);
+  }
+  // One notification for the owner's feed; a failure never blocks the visitor.
+  try {
+    await addNotification(c.env, {
+      type: 'announcement',
+      title: 'طلب نشر جديد',
+      body: `${kind === 'game' ? 'لعبة' : 'تطبيق'}: ${name}`,
+      data: { kind: 'publish_request', request_id: id },
+    });
+  } catch (e) {}
+  return c.json({ ok: true, id });
 });
 
 app.post('/apps/:slug/report', async (c) => {

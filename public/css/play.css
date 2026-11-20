@@ -4768,3 +4768,18 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
 a.tab { text-decoration: none; color: inherit; -webkit-tap-highlight-color: transparent; }
 a.tab:active { text-decoration: none; }
 a.tab.active { text-decoration: none; }
+
+/* Round 42 — a guest cannot rate or comment: one clear invitation instead of a
+   dead composer. */
+.rate-guest-gate {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin: 14px 0 4px; padding: 18px 16px; text-align: center;
+  border: 1px dashed var(--border-2, #6c6c78); border-radius: 16px;
+  background: var(--surface-2);
+}
+.rate-guest-gate p { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-2); }
+.rate-guest-gate .btn { min-width: 180px; }
+
+/* Round 42 — «نشر تطبيق أو لعبة» sits under the support entry on «أنت» and
+   wears the same plate (it is a second entry, not a second support button). */
+.publish-entry { margin-top: 10px; }

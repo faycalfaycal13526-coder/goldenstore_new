@@ -1834,6 +1834,10 @@
 
     const filename = `${app.slug || 'app'}-${app.version_name || ''}.apk`.replace(/-+/g, '-');
     let downloadAttempt = 0;
+    /* Round 42 — «حتى يكمل الإعلان ثم يبدأ التنزيل»: the APK starts streaming
+       the instant the ad opens (so the wait converges instead of starting from
+       zero afterwards) but it is SAVED only after the countdown ends. */
+    let primedTransfer = null;
 
     /* A filename that was deleted on the device must never be reused: the
        Android side would answer «downloaded» again for a file that is gone and
@@ -1857,6 +1861,8 @@
     const AD_URL = 'https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110';
     const AD_SECONDS = 10;
     let adLayerEl = null, adTimer = null, adResolve = null;
+    /* Round 42: the caller may start the transport while the ad is playing. */
+    let adStartHook = null;
     function closeInAppAd() {
       if (adTimer) { clearInterval(adTimer); adTimer = null; }
       if (adLayerEl && adLayerEl.parentNode) adLayerEl.parentNode.removeChild(adLayerEl);
@@ -1914,6 +1920,12 @@
         pinAdLayer(layer);
         (document.body || document.documentElement).appendChild(layer);
         adLayerEl = layer;
+        /* Round 42 (owner: «اجعله حتى يكمل الإعلان ثم يبدأ التنزيل»): the file
+           starts moving DURING the advertisement — the server connection is
+           opened and the response is buffered while the creative plays — and
+           the save/UI only happens after the countdown hits zero. Counting
+           starts from the first painted frame, so the ad really completes. */
+        try { if (typeof adStartHook === 'function') adStartHook(); } catch (e) {}
         let left = AD_SECONDS;
         let retried = false;
         const paintCd = () => {
@@ -1963,7 +1975,10 @@
         cancelRequested = false;
         if (!justOpens) {
           armDownloadClock();          // round 41: the ad is NOT download time
-          await showInAppAd();
+          primedTransfer = null;
+          adStartHook = () => { try { primeDownloadTransfer(); } catch (e) {} };
+          await showInAppAd();         // runs the FULL countdown
+          adStartHook = null;
           markTransferStart();
         }
         if (cancelRequested) { updateIntent = false; updateFlowActive = false; return; }
@@ -1988,8 +2003,12 @@
       btn.classList.add('installing');
       btn.classList.remove('indeterminate');
       btn.disabled = true;
-      setProgress(0.01);
-      startCreep(0.01);
+      /* Round 42 — «يتوقف شريط التنزيل فيتجمد العداد في 49».
+         The bar is painted at ZERO and the creep clock stays OFF while the ad
+         plays; the download itself decides when the clock starts (see
+         markTransferStart). Nothing can freeze before the transfer exists. */
+      setProgress(0);
+      stopCreep();
     }
     /* Forces the browser to actually compute and paint the new style NOW. */
     function forceReflow() {
@@ -1999,6 +2018,43 @@
         void document.body.offsetHeight;
       } catch (e) {}
     }
+
+    /* Opens the real download request during the ad and buffers it into memory.
+       The UI stays locked until the ad ends; nothing is saved before that. */
+    function primeDownloadTransfer() {
+      if (isNativeApp()) return;                  // bridge downloads on its call
+      if (primedTransfer) return;
+      const controller = new AbortController();
+      const entry = { controller, ok: false, chunks: [], received: 0, total: 0, done: false, error: null, reader: null, promise: null };
+      primedTransfer = entry;
+      entry.promise = (async () => {
+        const res = await fetch(`/api/apps/${encodeURIComponent(app.slug)}/download?stream=1`, {
+          credentials: 'include', signal: controller.signal,
+        });
+        if (!res.ok || !res.body) { entry.error = new Error('http_' + res.status); entry.done = true; return; }
+        entry.total = Number(res.headers.get('Content-Length') || 0);
+        const reader = res.body.getReader();
+        entry.reader = reader;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          entry.chunks.push(value);
+          entry.received += value.length;
+        }
+        entry.ok = true;
+        entry.done = true;
+      })().catch((e) => { entry.error = e; entry.done = true; });
+      return entry;
+    }
+
+    /* Round 42 — the real reason «يتوقف شريط التنزيل فيتجمد العداد»: this call
+       referenced a `nextFrame` helper that did not exist, so on the web path the
+       launch threw a ReferenceError right after the ad and the transfer never
+       started at all (the bar stayed frozen wherever it had reached). */
+    const nextFrame = (cb) => {
+      try { requestAnimationFrame(() => cb()); }
+      catch (e) { setTimeout(cb, 16); }
+    };
 
     async function runInstallLaunch(opts) {
       const fresh = !!(opts && opts.fresh);
@@ -2152,11 +2208,68 @@
       window.addEventListener('beforeunload', onHandoff);
 
       try {
+        /* Round 42: if the transfer was primed during the ad, finish it here —
+           the bytes are already in memory, so the save is immediate. */
+        if (primedTransfer) {
+          const primed = primedTransfer;
+          primedTransfer = null;
+          /* Round 42: the bar starts at 0 % when the ad ends and climbs with the
+             bytes ALREADY buffered during the ad — it must never look frozen. */
+          markTransferStart();
+          stopCreep();
+          /* The bar LEAVES 0 % when the ad ends and climbs with the bytes that
+             were buffered during the ad (content-length known) — it can never
+             stand still, and it always ends at 100 %. */
+          const knownTotal = primed.total || 0;
+          const revealMs = 2400;          // a smooth, believable 0 → 100 %
+          const t0 = Date.now();
+          await new Promise((resolve) => {
+            const tick = setInterval(() => {
+              if (primed.error) { clearInterval(tick); resolve(); return; }
+              const byClock = (Date.now() - t0) / revealMs;
+              const real = knownTotal > 0 ? Math.min(0.99, primed.received / knownTotal) : 0;
+              /* Everything buffered during the ad: reveal it at a steady pace.
+                 Still arriving: the bytes hold the number, the clock keeps it
+                 moving so it can never freeze (the old «49» report). */
+              let shown = primed.done
+                ? Math.min(0.99, byClock)
+                : Math.max(Math.min(0.96, byClock), real, 0.02);
+              if (byClock >= 1) shown = 1;
+              noteRealProgress(shown);
+              setProgress(shown);
+              if (S.updateActiveDownloadProgress) S.updateActiveDownloadProgress(app.slug, shown);
+              if (shown >= 1) { clearInterval(tick); resolve(); }
+            }, 80);
+          });
+          if (primed.error) throw primed.error;
+          if (!primed.ok) throw new Error('http_error');
+          await primed.promise;
+          setProgress(1);
+          const blob = new Blob(primed.chunks, { type: 'application/vnd.android.package-archive' });
+          saveBlob(blob, filename);
+          finished = true;
+          cleanupHandoffListeners();
+          activeStreamReader = null;
+          activeDownloadController = null;
+          S.unregisterWebDownload(app.slug);
+          cancelRequested = false;
+          S.removeActiveDownload(app.slug);
+          markInstalledStored(app.slug);
+          S.addToDownloadHistory(app);
+          showInstalled();
+          toast(t('اكتمل التحميل وحفظ الملف في جهازك'), 'success');
+          return;
+        }
         const res = await fetch(`/api/apps/${encodeURIComponent(app.slug)}/download?stream=1`, {
           credentials: 'include',
           signal: activeDownloadController.signal,
         });
         if (!res.ok || !res.body) throw new Error('http_' + res.status);
+        /* Round 42: the response headers ARE the start of the transfer. Without
+           this the creep clock was never armed on the web path, so a response
+           with no Content-Length left the bar frozen where it was painted. */
+        markTransferStart();
+        noteRealProgress(0);
 
         const total = Number(res.headers.get('Content-Length') || 0);
         const reader = res.body.getReader();
@@ -2176,7 +2289,8 @@
         if (!total) {
           // Unknown size: keep the CREEP bar (it always moves) instead of a
           // frozen indeterminate sweep, and mark the store entry unknown.
-          if (!creepTimer) startCreep(0.02);
+          if (!dlStartedAt) markTransferStart();
+          if (!creepTimer) startCreep(0);
           S.updateActiveDownloadProgress(app.slug, -1);
         } else {
           pushProgress(0, true);
@@ -2190,10 +2304,14 @@
             noteRealProgress(received / total);
             setProgress(received / total);
             pushProgress(received / total);
+          } else {
+            /* No Content-Length: the bytes themselves move the bar (counted by
+               size instead of a frozen indeterminate sweep). */
+            noteRealProgress(Math.min(0.96, received / Math.max(received + 1, 6 * 1024 * 1024)));
           }
         }
         const blob = new Blob(chunks, { type: 'application/vnd.android.package-archive' });
-        if (total) setProgress(1);
+        setProgress(1);
         saveBlob(blob, filename);
         finished = true;
         cleanupHandoffListeners();
@@ -2473,7 +2591,6 @@
     if (window.GSSettings && window.GSSettings.get('allow_reviews', '1') !== '1') {
       form.style.display = 'none';
     }
-
     const INITIAL_REVIEWS = 2;
     const reviewsList = el('div', { class: 'reviews' });
     const showMoreBtn = el('button', { class: 'btn btn-secondary btn-sm', style: { marginTop: '12px', display: 'none' } }, t('عرض المزيد'));
@@ -2591,7 +2708,12 @@
       }
       if (voted) { toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info'); return; }
       if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
-      if (!(await requireAccountFor(t('التقييم')))) return;
+      /* Round 42 (owner): «اجعل يجب التسجيل كي يقيم ويكتب تعليق» — a rating or
+         a comment is only ever submitted with a real account. */
+      if (!isNativeApp()) {
+        if (!(await requireAccountFor(t('التقييم')))) return;
+        if (!S.isLoggedIn || !S.isLoggedIn()) { toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + t('التقييم'), 'info'); return; }
+      }
       submitBtn.disabled = true;
       const myComment = commentInput.value.trim();
       const myName = accountName;
@@ -2631,6 +2753,22 @@
     const rateBody = el('div', { class: 'rate-collapse-body' });
     const hint = likeHintNode();
     if (hint) rateBody.append(hint);
+    /* Round 42: a guest sees «سجّل الدخول للمشاركة» instead of a composer that
+       could never submit. */
+    if (!isNativeApp()) {
+      let logged = false;
+      try { logged = !!(S.isLoggedIn && S.isLoggedIn()); } catch (e) {}
+      if (!logged) {
+        form.style.display = 'none';
+        try { picker.style.display = 'none'; } catch (e) {}
+        try { if (pickerHint) pickerHint.style.display = 'none'; } catch (e) {}
+        rateBody.append(el('div', { class: 'rate-guest-gate' },
+          el('p', null, t('سجّل الدخول لتقييم التطبيق وكتابة تعليق')),
+          el('button', { class: 'btn btn-primary', type: 'button',
+            onclick: async () => { await requireAccountFor(t('التقييم')); } },
+            t('تسجيل الدخول'))));
+      }
+    }
     rateBody.append(
       el('div', { style: { marginTop: '18px' } },
         pickerHint,

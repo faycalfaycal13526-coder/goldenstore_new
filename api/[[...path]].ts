@@ -783,6 +783,9 @@ app.post('/admin/app-update/media', async (c) => {
 });
 
 app.get('/admin/app-update/media', async (c) => {
+  // Even if the /admin/* guard were ever reordered, never hand this to a guest.
+  const admin = await requireAdmin(c, async () => {}).catch(() => null);
+  if (admin) return admin;
   await ensureReleaseTable(c.env.DB);
   for (const sql of [
     `ALTER TABLE app_updates ADD COLUMN logo_key TEXT`,

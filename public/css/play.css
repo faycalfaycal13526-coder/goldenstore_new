@@ -579,15 +579,10 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   image-rendering: auto;
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .55));
 }
-.topbar-home .icon-btn.support-top-btn {
-  /* Identical to «بحث» / «الإشعارات» / «مكتبتي»: the SAME 40px circle, the SAME
-     grey plate and the SAME 1px border — the artwork is the only difference.
-     (Previously a hand-picked lighter fill + lighter ring made it look like it
-     had an extra black ring around it.) */
-  width: 40px; height: 40px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
+/* The hand button declares NO plate/border/size of its own: it inherits
+   `.topbar-home .icon-btn` verbatim, so it is an exact copy of «بحث» /
+   «الإشعارات» / «مكتبتي» and only the artwork inside differs (owner request). */
+.topbar-home .icon-btn.support-top-btn { border-radius: 50%; }
 .support-top-btn .icon { width: 22px; height: 22px; stroke: currentColor; overflow: visible; }
 .support-top-btn:hover { color: var(--gold-2, #ffd766); }
 .support-top-btn:active { transform: scale(.94); }

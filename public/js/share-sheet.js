@@ -199,8 +199,6 @@
             });
         } }, [ico('share'), t('مشاركة عبر النظام')]));
     }
-    actions.appendChild(node('a', { class: 'btn btn-secondary', href: url,
-      target: '_blank', rel: 'noopener noreferrer' }, [ico('download'), isStore ? t('فتح صفحة التحميل') : t('فتح رابط التنزيل')]));
     if (pageUrl) {
       actions.appendChild(node('a', { class: 'btn btn-secondary', href: pageUrl,
         target: '_blank', rel: 'noopener noreferrer' }, [ico('external'), isStore ? t('فتح المتجر') : t('فتح صفحة التطبيق')]));

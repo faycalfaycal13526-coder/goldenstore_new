@@ -916,16 +916,11 @@ function bottomNav(active) {
     el('div', { class: 'bottomnav-inner' },
       brand,
       ...NAV_ITEMS_RAW.map((it) => {
-        const isAccount = it.key === 'account';
         let iconNode;
-        if (isAccount && _user) {
-          const av = el('span', { class: 'pill-ico nav-avatar' });
-          if (_user.photoURL) av.append(el('img', { src: _user.photoURL, alt: '', referrerpolicy: 'no-referrer' }));
-          else av.append(el('span', { class: 'nav-avatar-txt' }, initials(_user)));
-          iconNode = av;
-        } else {
-          iconNode = el('span', { class: 'pill-ico' }, ico(it.icon, 'icon'));
-        }
+        /* Owner request: the «أنت» tab keeps ONE icon everywhere. It used to
+           swap to the Google account photo (which on some accounts is just the
+           e-mail avatar image), so it is always the plain user glyph now. */
+        iconNode = el('span', { class: 'pill-ico' }, ico(it.icon, 'icon'));
         return el('a', {
           href: it.href,
           class: `navitem ${it.key === active ? 'active' : ''}`,
@@ -2290,10 +2285,7 @@ function onActiveDownloadsChange(fn) {
       'html,body{-webkit-text-size-adjust:100%;touch-action:manipulation;}' +
       '*{-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}' +
       'body{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;}' +
-      'input,textarea,[contenteditable="true"]{-webkit-user-select:text;user-select:text;}' +
-      '.bottomnav .nav-avatar{display:flex;align-items:center;justify-content:center;}' +
-      '.bottomnav .nav-avatar img{width:24px;height:24px;border-radius:50%;object-fit:cover;display:block;}' +
-      '.bottomnav .nav-avatar-txt{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#0d0d0f;background:#e0b64c;}';
+      'input,textarea,[contenteditable="true"]{-webkit-user-select:text;user-select:text;}';
     (document.head || document.documentElement).appendChild(style);
     document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
     document.addEventListener('touchmove', function (e) {

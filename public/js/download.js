@@ -19,7 +19,6 @@
   var counter = document.getElementById('downloadCounter');
   var help = document.getElementById('downloadHelp');
   var versionEl = document.getElementById('currentVersion');
-  var checkBtn = document.getElementById('checkUpdatesBtn');
   var status = document.getElementById('updateStatus');
 
   /* -------------------------------------------------------------------
@@ -184,29 +183,4 @@
     if (!document.hidden) refresh();
   });
 
-  // Manual update check — reports the latest published version without
-  // forcing a download, and never blocks the main download button.
-  if (checkBtn) checkBtn.addEventListener('click', function () {
-    checkBtn.disabled = true;
-    if (status) {
-      status.textContent = t('جارٍ التحقق من التحديثات…');
-      status.className = 'dl-check-status';
-    }
-    loadRelease(0)
-      .then(function (data) {
-        showCount(data.downloads);
-        applyRelease(data);
-        if (status) {
-          status.textContent = t('أحدث إصدار متاح') + ' · ' + t('الإصدار') + ' ' + (data.version_name || '—');
-          status.className = 'dl-check-status is-ok';
-        }
-      })
-      .catch(function () {
-        if (status) {
-          status.textContent = t('تعذّر التحقق من التحديثات');
-          status.className = 'dl-check-status is-error';
-        }
-      })
-      .then(function () { checkBtn.disabled = false; });
-  });
 })();

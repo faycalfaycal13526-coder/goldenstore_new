@@ -213,6 +213,27 @@ function ratingOf(app) {
 
 function getQuery(name) { return new URLSearchParams(location.search).get(name) || ''; }
 
+/* Round 42f (owner screenshot): inside the Android app `publicOrigin()` returned
+   the API host — a shared link read https://api.goldenstore.online/app?slug=… and
+   opened nothing. Every shared link must point at the PUBLIC site. */
+const PUBLIC_HOST = 'goldenstore.online';
+function publicSiteOrigin() {
+  const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+  let host = '';
+  try { host = (location.hostname || '').toLowerCase(); } catch (e) { host = ''; }
+  /* A real browser on the store domain, a preview host, or localhost: the page's
+     own origin is already the public site. */
+  if (host === PUBLIC_HOST || host === 'www.' + PUBLIC_HOST) return `https://${PUBLIC_HOST}`;
+  /* Capacitor/APK: its WebView origin is https://localhost or capacitor://localhost,
+     which is useless for a shared link — always the public store. */
+  try { if (isNativeApp()) return `https://${PUBLIC_HOST}`; } catch (e) {}
+  if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) return origin;
+  /* Capacitor / a wrapped WebView on file://, localhost or the API host: the
+     public store is the only link that opens for a normal person. */
+  if (!host || host === 'api.' + PUBLIC_HOST) return `https://${PUBLIC_HOST}`;
+  return origin || `https://${PUBLIC_HOST}`;
+}
+
 function publicOrigin() {
   try {
     if (isNativeApp()) {
@@ -244,7 +265,7 @@ function toast(msg, type = 'info', ms = 3000) {
    LIST itself (not only from inside an app page), on the browser and inside the
    APK. The link is always the public app page: /app?slug=… */
 function shareCardPayload(a) {
-  const base = publicOrigin ? (publicOrigin() || location.origin) : location.origin;
+  const base = publicSiteOrigin();
   const name = appName(a);
   const isGame = a && a.type === 'game';
   const pageUrl = `${base}/app?slug=${encodeURIComponent(a.slug)}`;
@@ -2661,6 +2682,7 @@ window.Store = {
   STORE, api, authedApi, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
   publicOrigin,
+  publicSiteOrigin,
   shareApp,
   shareCardPayload,
   posterCard, listRow, gridCard, featureCarousel, categoryName, appName, appNameAttrs,

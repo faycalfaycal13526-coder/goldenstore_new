@@ -694,7 +694,11 @@
     // Professional share sheet: preview, copyable link, native OS share and a
     // safe "open link" action. Built lazily so it never touches page load.
     function share(a) {
-      const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
+      /* Round 42f: never the API host — a link built from it opens nothing
+         (the owner's screenshot showed https://api.goldenstore.online/app?slug=…). */
+      const origin = (window.Store && (window.Store.publicSiteOrigin || window.Store.publicOrigin))
+        ? (window.Store.publicSiteOrigin ? window.Store.publicSiteOrigin() : window.Store.publicOrigin())
+        : null;
       const slugValue = (a && a.slug) ? a.slug : slug;
       /* Owner request (round 34): the shared link is the APP PAGE, not the
          internal `/api/apps/<slug>/download` endpoint — a person receiving the

@@ -74,6 +74,50 @@
     return Promise.resolve(fallbackCopy(text));
   }
 
+  /* Round 42d — «روابط النشر لا تعمل»: inside the Android WebView (the APK) a
+     `target="_blank"` link or navigator.share does nothing at all, so every
+     destination must go through the app bridge (or a deep link + same-window
+     navigation, which WebViews always hand over to the OS). */
+  function bridge() {
+    return (window.GSAndroid && typeof window.GSAndroid === 'object') ? window.GSAndroid : null;
+  }
+  function isNative() {
+    try { if (window.Store && typeof window.Store.isNativeApp === 'function' && window.Store.isNativeApp()) return true; } catch (e) {}
+    return !!bridge();
+  }
+  function bridgeOpenExternal(href) {
+    var b = bridge();
+    if (!b) return false;
+    var fns = ['openExternal', 'openUrl', 'openBrowser', 'openLink'];
+    for (var i = 0; i < fns.length; i++) {
+      try { if (typeof b[fns[i]] === 'function') { b[fns[i]](href); return true; } } catch (e) {}
+    }
+    return false;
+  }
+  function bridgeShare(text, url, title) {
+    var b = bridge();
+    if (!b) return false;
+    var fns = ['shareText', 'share', 'shareUrl', 'shareLink'];
+    for (var i = 0; i < fns.length; i++) {
+      try {
+        if (typeof b[fns[i]] === 'function') { b[fns[i]](text + '\n' + url, title || ''); return true; }
+      } catch (e) {}
+    }
+    return false;
+  }
+  /* Deep links the phone opens directly — the only reliable route from a WebView. */
+  function deepLink(net, url, text) {
+    var u = encodeURIComponent(url);
+    var body = encodeURIComponent(text + '\n' + url);
+    if (net === 'wa') return 'whatsapp://send?text=' + body;
+    if (net === 'tg') return 'tg://msg_url?url=' + u + '&text=' + encodeURIComponent(text);
+    return '';
+  }
+  function openOutside(href) {
+    if (bridgeOpenExternal(href)) return true;
+    try { window.location.href = href; return true; } catch (e) { return false; }
+  }
+
   var current = null;
   function close() {
     if (!current) return;
@@ -147,9 +191,19 @@
       var img = node('img', { class: 'gs-share-target-icon', src: d.icon,
         alt: '', width: '24', height: '24', loading: 'lazy' });
       img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
+      var nativeNow = isNative();
       targets.appendChild(node('a', { class: 'gs-share-target', 'data-net': d.net,
-        href: d.href, target: '_blank', rel: 'noopener noreferrer', title: d.label,
-        'aria-label': d.label },
+        href: nativeNow ? (deepLink(d.net, url, text) || d.href) : d.href,
+        target: nativeNow ? null : '_blank', rel: 'noopener noreferrer', title: d.label,
+        'aria-label': d.label,
+        onclick: function (ev) {
+          if (!isNative()) return;                 // web: a normal new tab
+          ev.preventDefault();
+          var deep = deepLink(d.net, url, text);
+          if (deep && bridgeOpenExternal(deep)) return;
+          if (bridgeOpenExternal(d.href)) return;
+          openOutside(deep || d.href);             // last resort: same window
+        } },
         [node('span', { class: 'gs-share-target-art' }, [img]), node('span', { class: 'gs-share-target-name', text: d.label })]));
     });
 
@@ -174,7 +228,15 @@
       node('div', { class: 'gs-share-text-actions' }, [copyTextBtn]),
     ]);
 
-    function doCopy(value, btn) {
+    /* A failed/absent system share must still end with a working link in the
+     clipboard — the old code refused to fall back here and the tap looked dead. */
+  function copyQuietly(value) {
+    copyText(value).then(function (okCopy) {
+      if (okCopy) toast(t('تم نسخ الرابط'), 'success');
+    });
+  }
+
+  function doCopy(value, btn) {
       copyText(value).then(function (okCopy) {
         if (!okCopy) { toast(t('تعذّر نسخ الرابط'), 'error'); return; }
         toast(t('تم نسخ الرابط'), 'success');
@@ -188,20 +250,34 @@
 
     /* ---- actions: native share first, then a plain look at the link ---- */
     var actions = node('div', { class: 'gs-share-actions' });
-    if (navigator.share) {
+    var canSystemShare = !!navigator.share || isNative();
+    if (canSystemShare) {
       actions.appendChild(node('button', { class: 'btn btn-primary btn-block', type: 'button',
         onclick: function () {
-          Promise.resolve(navigator.share({ title: title, text: text, url: url }))
-            .then(function () { close(); })
-            .catch(function (err) {
-              if (err && err.name === 'AbortError') return;
-              doCopy(url, null);
-            });
+          if (navigator.share) {
+            Promise.resolve(navigator.share({ title: title, text: text, url: url }))
+              .then(function () { close(); })
+              .catch(function (err) {
+                if (err && err.name === 'AbortError') return;
+                copyQuietly(url);
+              });
+            return;
+          }
+          /* Android WebView: hand the text to the app, or fall back to copying —
+             never leave the tap doing nothing. */
+          if (bridgeShare(text, url, title)) { close(); return; }
+          copyQuietly(url);
         } }, [ico('share'), t('مشاركة عبر النظام')]));
     }
     if (pageUrl) {
+      var nativePage = isNative();
       actions.appendChild(node('a', { class: 'btn btn-secondary', href: pageUrl,
-        target: '_blank', rel: 'noopener noreferrer' }, [ico('external'), isStore ? t('فتح المتجر') : t('فتح صفحة التطبيق')]));
+        target: nativePage ? null : '_blank', rel: 'noopener noreferrer',
+        onclick: function (ev) {
+          if (!isNative()) return;
+          ev.preventDefault();
+          if (!bridgeOpenExternal(pageUrl)) openOutside(pageUrl);
+        } }, [ico('external'), isStore ? t('فتح المتجر') : t('فتح صفحة التطبيق')]));
     }
 
     sheet.appendChild(node('div', { class: 'gs-share-grip' }));

@@ -704,17 +704,91 @@ function openCanonicalSite() {
   }
   window.location.href = url;
 }
+/* Round 42d: `document.execCommand('copy')` is the last resort that still works
+   in an Android WebView and in insecure contexts. */
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand && document.execCommand('copy');
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch (e) { return false; }
+}
+
+/* Round 42e: inside the APK the store can also receive a shared link back
+   ("share to Golden Store"), which is what makes the published links useful. */
+const GS_TWA_ORIGIN = 'https://goldenstore.online';
+function bindAndroidShareTarget() {
+  try {
+    if (typeof navigator.shareTarget === 'undefined') return;
+    // Launch Queue (Chrome/Android TWA) — the APK forwards the shared text here.
+    if (window.launchQueue && typeof window.launchQueue.setConsumer === 'function') {
+      window.launchQueue.setConsumer((params) => {
+        try {
+          const files = (params && params.files) || [];
+          if (!files.length) return;
+          toast(t('تم استلام الملف المشترك'), 'success');
+        } catch (e) {}
+      });
+    }
+    const payload = (() => { try { return sessionStorage.getItem('gs_shared_payload') || ''; } catch (e) { return ''; } })();
+    if (payload) {
+      try { sessionStorage.removeItem('gs_shared_payload'); } catch (e) {}
+      toast(t('تم استلام الرابط المشترك'), 'success');
+    }
+  } catch (e) {}
+}
+
 function shareStore(onDone) {
   const url = `https://${CANONICAL_HOST}/`;
   const data = { title: 'Golden Store', text: t('متجر قولدن ستور — تطبيقات وألعاب بأمان وبدون إعلانات مزعجة.'), url };
-  if (navigator.share) { navigator.share(data).then(() => onDone && onDone()).catch(() => {}); return; }
+  /* Round 42d — «روابط النشر لا تعمل»: inside the Android app `navigator.share`
+     does not exist, so «شارك الموقع» used to do nothing until the clipboard
+     fallback. The app bridge is asked first, then the browser sheet. */
+  const bridge = (window.GSAndroid && typeof window.GSAndroid === 'object') ? window.GSAndroid : null;
+  if (bridge) {
+    const fns = ['shareText', 'share', 'shareUrl', 'shareLink'];
+    for (let i = 0; i < fns.length; i++) {
+      try {
+        if (typeof bridge[fns[i]] === 'function') {
+          bridge[fns[i]](data.text + '\n' + url, data.title);
+          if (onDone) onDone();
+          return;
+        }
+      } catch (e) {}
+    }
+  }
+  if (navigator.share) {
+    navigator.share(data).then(() => onDone && onDone()).catch(() => {
+      /* The user dismissing the sheet is not a failure, but a real error must
+         still end in a copy — never in silence («لا تعمل»). */
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+          toast(t('تم نسخ رابط الموقع'), 'success');
+          if (onDone) onDone();
+        }).catch(() => {
+          if (legacyCopy(url)) { toast(t('تم نسخ رابط الموقع'), 'success'); if (onDone) onDone(); }
+        });
+      } else if (legacyCopy(url)) {
+        toast(t('تم نسخ رابط الموقع'), 'success');
+        if (onDone) onDone();
+      }
+    });
+    return;
+  }
   const done = (copied) => {
     toast(copied ? t('تم نسخ رابط الموقع') : t('انسخ الرابط من شريط العنوان'), copied ? 'success' : 'info');
     if (onDone) onDone();
   };
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(() => done(true)).catch(() => done(false));
-  } else done(false);
+    navigator.clipboard.writeText(url).then(() => done(true)).catch(() => done(legacyCopy(url)));
+  } else done(legacyCopy(url));
 }
 
 function openSupportSheet() {
@@ -2344,6 +2418,7 @@ function cancelDownload(slug) {
 /* ----------------------------- Boot ----------------------------- */
 function boot() {
   initAuth();
+  bindAndroidShareTarget();
   pruneStaleApkStates();
   syncNativeStates();
   startHeartbeat();

@@ -715,6 +715,16 @@
       };
       if (window.GSShare && typeof window.GSShare.open === 'function') {
         window.GSShare.open(payload);
+      } else if (isNativeApp() && window.GSAndroid) {
+        /* Round 42d: inside the app there is no navigator.share — without this
+           the share button did nothing at all. */
+        const txt = payload.text + '\n' + url;
+        let shared = false;
+        for (const fn of ['shareText', 'share', 'shareUrl', 'shareLink']) {
+          try { if (typeof window.GSAndroid[fn] === 'function') { window.GSAndroid[fn](txt, payload.title); shared = true; break; } } catch (e) {}
+        }
+        if (!shared) { try { window.GSAndroid.openExternal(url); shared = true; } catch (e) {} }
+        if (!shared) toast(t('انسخ الرابط من شريط العنوان'), 'info');
       } else if (navigator.share) {
         navigator.share({ title: payload.title, text: payload.text, url }).catch(() => {});
       } else if (navigator.clipboard) {

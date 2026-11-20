@@ -672,11 +672,15 @@
     function share(a) {
       const origin = (window.Store && window.Store.publicOrigin) ? window.Store.publicOrigin() : null;
       const slugValue = (a && a.slug) ? a.slug : slug;
-      // The shared link is a real DOWNLOAD link, not the detail page.
-      const url = origin
-        ? `${origin}/api/apps/${encodeURIComponent(slugValue)}/download`
-        : location.href;
-      const pageUrl = origin ? `${origin}/app?slug=${encodeURIComponent(slugValue)}` : '';
+      /* Owner request (round 34): the shared link is the APP PAGE, not the
+         internal `/api/apps/<slug>/download` endpoint — a person receiving the
+         link now lands on the clean detail page (icon, name, install button)
+         and downloads from there. */
+      const pageUrl = (() => {
+        const base = origin || location.origin;
+        return slugValue ? `${base}/app?slug=${encodeURIComponent(slugValue)}` : `${base}/`;
+      })();
+      const url = pageUrl;
       const name = (a && a.name) || 'Golden Store';
       const isGame = !!(a && a.type === 'game');
       const payload = {

@@ -155,7 +155,7 @@
 
     /* ---- one link box: field + icon copy button ---- */
     var urlInput = node('input', { class: 'gs-share-url-input', type: 'text',
-      readonly: 'readonly', value: url, 'aria-label': t('رابط التنزيل'), dir: 'ltr' });
+      readonly: 'readonly', value: url, 'aria-label': t('رابط الصفحة'), dir: 'ltr' });
     var copyBtn = node('button', { class: 'gs-share-copy', type: 'button',
       'aria-label': t('نسخ الرابط'), title: t('نسخ الرابط'),
       onclick: function () { doCopy(url, copyBtn); } }, [ico('copy')]);
@@ -209,7 +209,9 @@
     sheet.appendChild(preview);
     sheet.appendChild(node('div', { class: 'gs-share-label', text: t('انشر عبر') }));
     sheet.appendChild(targets);
-    sheet.appendChild(node('div', { class: 'gs-share-label', text: t('رابط التنزيل') }));
+    /* Round 34: the box holds the APP PAGE link now (not the APK endpoint). */
+    var linkLabel = isStore ? t('رابط المتجر') : (o.kind === 'game' ? t('رابط اللعبة') : t('رابط التطبيق'));
+    sheet.appendChild(node('div', { class: 'gs-share-label', text: linkLabel }));
     sheet.appendChild(urlRow);
     sheet.appendChild(textFold);
     sheet.appendChild(actions);

@@ -1174,8 +1174,8 @@ app.get('/categories', async (c) => {
    limit        1..60 (default 24), offset >= 0
    All values are bound; sort uses a whitelist in lib/d1.ts.
    ========================================================================= */
-/* «عمليات البحث الرائجة» — real rows from the catalogue, ordered by what the
-   store actually has (downloads + reviews). Cached for two minutes. */
+/* «عمليات البحث الرائجة» — terms that people really typed at least FIVE times
+   (from the search_queries log). Nothing is invented. Cached for one minute. */
 app.get('/search/trending', async (c) => {
   try {
     const limit = safeInt(c.req.query('limit') || '14', 1, 24);

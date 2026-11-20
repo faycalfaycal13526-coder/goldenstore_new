@@ -148,15 +148,15 @@ export async function searchApps(env: Env, opts: SearchAppsOptions = {}): Promis
 export async function trendingSearches(env: Env, limit = 14): Promise<{ term: string; slug: string; count: number }[]> {
   const n = Math.min(Math.max(Number(limit) || 14, 1), 24);
   /* REAL search activity only: /api/search logs what people actually typed, and
-     this reads those rows back. A term is listed only if it was really typed at
-     least twice — no catalogue filler, nothing hard-coded. */
+     this reads those rows back. A term is listed only after it was really typed
+     FIVE times (owner's rule) — no catalogue filler, nothing hard-coded. */
   try {
     const res = await env.DB.prepare(
       `SELECT term, COUNT(*) AS hits, MAX(created_at) AS last_at
          FROM search_queries
         WHERE created_at >= ?
         GROUP BY term
-       HAVING COUNT(*) >= 2
+       HAVING COUNT(*) >= 5
         ORDER BY hits DESC, last_at DESC
         LIMIT ?`
     ).bind(Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30, n).all();

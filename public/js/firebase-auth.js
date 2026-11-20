@@ -266,6 +266,43 @@ async function signInWithGoogle(options) {
   }
 }
 
+/* ---------------- E-mail + password (round 36, owner request) ----------------
+   The sign-in page now offers a real e-mail/password form (like the reference
+   app) instead of Google-only. Requires the «Email/Password» provider to be
+   enabled in Firebase Console → Authentication → Sign-in method. */
+function authReady() {
+  initFirebase();
+  if (!_auth) {
+    var e = new Error('auth/sdk-not-ready');
+    e.code = 'auth/sdk-not-ready';
+    throw e;
+  }
+  return _auth;
+}
+
+async function signInWithEmail(email, password) {
+  var auth = authReady();
+  var result = await auth.signInWithEmailAndPassword(String(email || '').trim(), String(password || ''));
+  return result && result.user ? result.user : null;
+}
+
+async function signUpWithEmail(email, password, displayName) {
+  var auth = authReady();
+  var clean = String(email || '').trim();
+  var result = await auth.createUserWithEmailAndPassword(clean, String(password || ''));
+  var user = result && result.user ? result.user : null;
+  if (user && displayName && user.updateProfile) {
+    try { await user.updateProfile({ displayName: String(displayName).trim() }); } catch (e) {}
+  }
+  return user;
+}
+
+async function sendPasswordReset(email) {
+  var auth = authReady();
+  await auth.sendPasswordResetEmail(String(email || '').trim());
+  return true;
+}
+
 async function signOut() {
   if (_auth) await _auth.signOut();
 }
@@ -278,6 +315,9 @@ window.GAuth = {
   getIdToken: getIdToken,
   signInAnonymously: signInAnonymously,
   signInWithGoogle: signInWithGoogle,
+  signInWithEmail: signInWithEmail,
+  signUpWithEmail: signUpWithEmail,
+  sendPasswordReset: sendPasswordReset,
   signOut: signOut,
   isRedirectPending: function() { return _redirectPending; },
   handleNativeGoogleSignIn: handleNativeGoogleSignIn,

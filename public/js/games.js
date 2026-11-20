@@ -18,16 +18,36 @@
     root.innerHTML = '';
     root.append(S.topbarSearch(user));
 
-    let topTab = 'foryou';
+    // Round 41: a shared link such as /apps#top opens on that very tab.
+    let topTab = (function () {
+      const raw = String(location.hash || '').replace(/^#/, '');
+      return TOP_TABS.some((x) => x.key === raw) ? raw : 'foryou';
+    })();
     const tabsBar = el('div', { class: 'tabs' });
     const content = el('div', { class: 'content' });
 
     function renderTabs() {
       tabsBar.innerHTML = '';
       TOP_TABS.forEach((t_item) => {
-        tabsBar.append(el('button', {
-          class: `tab ${t_item.key === topTab ? 'active' : ''}`,
-          onclick: () => { if (topTab !== t_item.key) { topTab = t_item.key; renderTabs(); renderContent(); } },
+        /* Round 41: the top tab is a real link to /games (copyable, openable in
+           a new tab); a plain tap still switches it in place. */
+        const isCurrent = t_item.key === topTab;
+        tabsBar.append(el('a', {
+          class: `tab ${isCurrent ? 'active' : ''}`,
+          href: isCurrent ? '/games' : `/games#${t_item.key}`,
+          role: 'tab',
+          'aria-selected': isCurrent ? 'true' : 'false',
+          'aria-label': t(t_item.label),
+          'data-tab': t_item.key,
+          onclick: (ev) => {
+            if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button === 1)) return;
+            ev.preventDefault();
+            if (topTab !== t_item.key) {
+              topTab = t_item.key;
+              try { history.replaceState(null, '', `/games#${t_item.key}`); } catch (e) {}
+              renderTabs(); renderContent();
+            }
+          },
         }, t(t_item.label)));
       });
     }

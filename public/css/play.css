@@ -4074,14 +4074,17 @@ html[dir="ltr"] .noi-back .icon { transform: scaleX(-1); }
   gap: 12px; padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(255,255,255,.1);
 }
+/* Round 41 (owner): the «فتح في يوتيوب» button wears YouTube red, not gold. */
 .gs-video-open {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 9px 14px; border-radius: 12px;
-  background: #f4c01f; color: #1a1400;
+  background: #ff0000; color: #ffffff;
   font-size: 13px; font-weight: 700; text-decoration: none;
+  box-shadow: 0 4px 14px rgba(255, 0, 0, .28);
 }
-.gs-video-open:hover { background: #ffd45a; text-decoration: none; }
-.gs-video-open .icon { width: 16px; height: 16px; }
+.gs-video-open:hover { background: #cc0000; color: #ffffff; text-decoration: none; }
+.gs-video-open .icon { color: #ffffff; }
+.gs-video-open .icon { width: 16px; height: 16px; stroke: #ffffff; }
 
 /* =====================================================================
    Legendary update dialog / banner — responsive hardening (2026-11-07)
@@ -4759,3 +4762,9 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
     border: 1px solid var(--border);
   }
 }
+
+/* Round 41 — the top tabs are real links now (copyable/shareable), keeping the
+   exact same look as before. */
+a.tab { text-decoration: none; color: inherit; -webkit-tap-highlight-color: transparent; }
+a.tab:active { text-decoration: none; }
+a.tab.active { text-decoration: none; }

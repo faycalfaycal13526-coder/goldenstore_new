@@ -153,6 +153,15 @@
      A like is delivered as a notification to the review's AUTHOR, which needs
      that author to have an account. Reviews written without signing in cannot
      receive one, so the composer states it plainly instead of failing silently. */
+  /* Round 41 — a single «you need an account» gate for likes, ratings and
+     comments. Native app: the bridge has its own session, so nothing is asked. */
+  async function requireAccountFor(what) {
+    if (isNativeApp()) return true;
+    try { if (S.isLoggedIn && S.isLoggedIn()) return true; } catch (e) {}
+    toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + what, 'info');
+    try { await S.requireAuth(); return true; } catch (e) { return false; }
+  }
+
   function likeHintNode() {
     let signed = false;
     try { signed = !!(S.isLoggedIn && S.isLoggedIn()); } catch (e) { signed = false; }
@@ -830,7 +839,12 @@
   function reviewCard(r) {
     const review = r || {};
     const id = review.id ? String(review.id) : '';
-    const canInteract = !!id;
+    /* Round 41: a review row is «interactive» for a signed-in visitor (or in the
+       native app). A guest can still READ everything; tapping like opens the
+       sign-in gate instead of doing nothing. */
+    let signedIn = isNativeApp();
+    try { if (S.isLoggedIn && S.isLoggedIn()) signedIn = true; } catch (e) {}
+    const canInteract = !!id && signedIn;
     const initial = ((review.name || 'م').trim().charAt(0) || 'م').toUpperCase();
     const stars = el('div', { class: 'stars' });
     const rt = Math.round(Number(review.rating) || 0);
@@ -841,14 +855,19 @@
 
     const liked = !!review.liked;
     const likeLabel = liked ? t('إزالة الإعجاب') : t('أعجبني');
+    /* Round 41 (owner): «إذا المستخدم لم يسجل لا يستطيع التعليق ولا التقييم ولا
+       الإعجاب» — a guest gets ONE clear invitation to sign in instead of a
+       button that silently does nothing (the old `disabled`). */
     const likeBtn = el('button', {
-      class: `review-like${liked ? ' is-liked' : ''}`,
+      class: `review-like${liked ? ' is-liked' : ''}${canInteract ? '' : ' is-guest'}`,
       type: 'button',
       'aria-pressed': liked ? 'true' : 'false',
       'aria-label': likeLabel,
       title: likeLabel,
-      disabled: canInteract ? null : 'disabled',
-      onclick: () => toggleReviewLike(review),
+      onclick: () => {
+        if (!canInteract) { requireAccountFor(t('الإعجاب')); return; }
+        toggleReviewLike(review);
+      },
     },
       ico('heart', 'icon icon-sm'),
       el('span', { class: 'review-like-count' }, formatNum(Number(review.likes_count) || 0)),
@@ -1122,6 +1141,21 @@
        only an ADVANCING value counts as real progress. */
     let lastRealValue = 0;
     let dlStartedAt = 0;
+    /* Round 41 — «يتوقف شريط التنزيل ويتجمّد العداد في 49».
+       The creep clock used to start at the TAP, so the ~10 s advertisement was
+       already counted as download time: by the time the transfer began the bar
+       sat at ~45–50 %, and the honest cap (last real value + 12 points) kept it
+       there forever → a frozen 49 %. The clock is now armed only when the real
+       transfer starts, and a long silence refreshes that cap. */
+    let transferStartedAt = 0;
+    function markTransferStart() {
+      if (!transferStartedAt) transferStartedAt = Date.now();
+      dlStartedAt = Date.now();
+    }
+    function armDownloadClock() {
+      transferStartedAt = 0;
+      dlStartedAt = 0;
+    }
     function stopCreep() {
       if (creepTimer) { clearInterval(creepTimer); creepTimer = null; }
     }
@@ -1130,7 +1164,7 @@
        WebView shows the ad in another app, so on return the bar is already at
        the right position instead of restarting from zero. */
     function creepFromClock() {
-      if (!dlStartedAt) return 0;
+      if (!dlStartedAt || !transferStartedAt) return 0;
       const elapsed = Math.max(0, (Date.now() - dlStartedAt) / 1000);
       return Math.min(0.95, 0.01 + elapsed * 0.045);   // ~21s to 95%
     }
@@ -1138,7 +1172,8 @@
       stopCreep();
       const base = Math.max(0, Math.min(0.94, Number(from) || 0));
       // A new download starts its own clock; a resume keeps the old one.
-      if (!dlStartedAt || base <= 0.02) dlStartedAt = Date.now();
+      // A zero clock means «transfer not started yet» (the ad is playing).
+      if (base <= 0.02 && dlStartedAt) dlStartedAt = Date.now();
       creepValue = Math.max(base, creepFromClock());
       if (creepValue <= 0) setProgress(0.01);
       creepTimer = setInterval(() => {
@@ -1150,9 +1185,13 @@
           if (clock > creepValue + 0.05) creepValue = clock;
           return;
         }
-        // Silence: move forward at a steady, visible pace — but stay honest,
-        // never more than ~12 points ahead of the last real value, never >95%.
-        const cap = lastRealValue > 0 ? Math.min(0.95, lastRealValue + 0.12) : 0.95;
+        // Silence: move forward at a steady, visible pace — but stay honest.
+        // The cap grows with the silence (12 points for a short hiccup, up to
+        // 45 after ~20 s of nothing), otherwise a stalled bridge froze the bar
+        // at exactly «last real value + 12» (the reported 49 %).
+        const silentSec = silent / 1000;
+        const headroom = lastRealValue > 0 ? Math.min(0.45, 0.12 + silentSec * 0.0125) : 0.95;
+        const cap = Math.min(0.97, lastRealValue + headroom);
         const step = lastRealValue > 0 ? creepValue + 0.012 : Math.max(creepValue + 0.012, clock);
         const nextVal = Math.min(cap, step);
         if (nextVal <= creepValue + 0.0005) return;
@@ -1179,6 +1218,7 @@
       lastRealValue = 0;
       lastRealProgressAt = 0;
       dlStartedAt = 0;
+      transferStartedAt = 0;      // round 41: a reset means «no transfer yet»
       btn.classList.remove('installing', 'indeterminate');
       fill.style.transition = 'none';
       fill.style.width = '0%';
@@ -1921,7 +1961,11 @@
       try {
         // The ad plays INSIDE the app first; the download starts when it ends.
         cancelRequested = false;
-        if (!justOpens) await showInAppAd();
+        if (!justOpens) {
+          armDownloadClock();          // round 41: the ad is NOT download time
+          await showInAppAd();
+          markTransferStart();
+        }
         if (cancelRequested) { updateIntent = false; updateFlowActive = false; return; }
         return await runInstallLaunch({ fresh, update });
       } finally {
@@ -2026,6 +2070,7 @@
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
+        markTransferStart();          // round 41: real transfer begins now
         setIndeterminate();
         S.setActiveDownload({
           slug: app.slug,
@@ -2066,6 +2111,7 @@
       }
 
       setCancelVisible(true);
+      markTransferStart();            // round 41: real transfer begins now
       const controller = new AbortController();
       activeDownloadController = controller;
       S.registerWebDownload(app.slug, controller);
@@ -2416,6 +2462,11 @@
       el('div', { class: 'who' }, el('div', { class: 'nm' }, accountName), el('div', { class: 'dt' }, t('تنشر باسم حسابك'))),
     );
     const commentInput = el('textarea', { class: 'field', maxlength: '2000', placeholder: t('شارك رأيك في هذا التطبيق…') });
+    /* Round 41: guests read every review but cannot write one — the box asks for
+       an account the moment they try, instead of letting them type and lose it. */
+    commentInput.addEventListener('focus', async () => {
+      if (!(await requireAccountFor(t('التعليق')))) { try { commentInput.blur(); } catch (e) {} }
+    });
     const submitBtn = el('button', { class: 'btn btn-primary' }, t('نشر المراجعة'));
     submitBtn.addEventListener('click', () => submit());
     const form = el('div', { class: 'review-form' }, identity, commentInput, el('div', { class: 'actions' }, submitBtn));
@@ -2540,9 +2591,7 @@
       }
       if (voted) { toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info'); return; }
       if (!selected) { toast(t('اختر عدد النجوم أولاً'), 'info'); return; }
-      if (!isNativeApp() && !S.isLoggedIn()) {
-        try { await S.requireAuth(); } catch { return; }
-      }
+      if (!(await requireAccountFor(t('التقييم')))) return;
       submitBtn.disabled = true;
       const myComment = commentInput.value.trim();
       const myName = accountName;

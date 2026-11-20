@@ -4600,21 +4600,18 @@ body[data-page="maintenance"] { background: #050507 !important; overflow: hidden
    Google button at the bottom. Colours follow the store theme (never a fixed
    white page), so it matches the rest of Golden Store in dark and light.
    ========================================================================== */
+/* Round 38: the visible back/title row was removed; the heading stays for
+   screen readers only, so the page keeps a name without drawing anything. */
+.auth-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 .auth-page {
   min-height: 100dvh; width: 100%; max-width: 520px; margin: 0 auto;
   padding: max(10px, env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; gap: 18px;
   background: var(--bg); color: var(--text);
 }
-.auth-top { display: flex; align-items: center; gap: 10px; padding: 6px 0 2px; }
-.auth-back {
-  width: 40px; height: 40px; border-radius: 50%; display: inline-flex;
-  align-items: center; justify-content: center; color: var(--text);
-  text-decoration: none; background: transparent; border: 0;
-}
-.auth-back:active { background: var(--surface-2); }
-.auth-back .icon { width: 22px; height: 22px; }
-.auth-top-title { font-size: 20px; font-weight: 800; margin: 0; flex: 1; text-align: end; }
 .auth-page .legal-consent { margin: 2px 0; font-size: 12.5px; }
 .auth-page .legal-consent input[type="checkbox"] {
   width: 20px; height: 20px; accent-color: var(--gold, #f4c01f); flex: 0 0 auto;
@@ -4728,8 +4725,6 @@ html[dir="ltr"] .auth-field input[dir="ltr"] { text-align: left; }
 }
 .auth-page .gate-error.hidden { display: none; }
 .auth-page .gate-spinner { margin: 10px auto 0; }
-.auth-page .auth-back { cursor: pointer; }
-.auth-page .auth-back .icon { transform: none; }          /* points back in RTL via chevronEnd */
 @media (min-width: 720px) {
   .auth-required-overlay { padding: 24px; }
   .auth-required-overlay .auth-page {

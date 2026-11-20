@@ -1075,9 +1075,7 @@ function authGateForm(opts) {
   var onCancel = typeof opts.onCancel === 'function' ? opts.onCancel : function () {};
   var compact = !!opts.compact;
 
-  var title = el('h1', { class: 'auth-top-title' }, t('تسجيل الدخول'));
-  var back = el('button', { class: 'auth-back', type: 'button', 'aria-label': t('رجوع'), onclick: onCancel },
-    ico('chevronEnd', 'icon'));
+  var title = el('h1', { class: 'auth-sr', 'data-auth-title': '' }, t('تسجيل الدخول'));
   var note = el('p', { class: 'auth-note' }, t('قم بتسجيل حسابك بالبريد الإلكتروني الخاص بك'));
   var errBox = el('div', { class: 'gate-error hidden' });
 
@@ -1219,7 +1217,7 @@ function authGateForm(opts) {
     el('span', { class: 'auth-third-sub' }, t('الجوجل')));
 
   var wrap = el('div', { class: 'auth-page is-gate' + (compact ? ' is-compact' : '') },
-    el('header', { class: 'auth-top' }, title, back),
+    title,
     el('div', { class: 'auth-hero' },
       el('img', { class: 'auth-hero-logo', src: '/images/logo.png', alt: 'Golden Store', width: '96', height: '96' }),
       el('div', { class: 'auth-hero-name' }, 'Golden', el('b', null, 'Store')),

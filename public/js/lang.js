@@ -127,6 +127,9 @@
     var k = cNorm(t);
     if (!k || k.length < 2) return null;
     if (CC[k] != null) return CC[k];
+    // Shipped table: the catalogue is pre-translated, so it paints instantly.
+    var T = window.GS_CONTENT;
+    if (T && T[k] && T[k][lang]) return T[k][lang];
     // Unknown strings are queued in small batches instead of one request each.
     cWork[k] = true;
     if (cTimer) clearTimeout(cTimer);
@@ -190,7 +193,7 @@
         var e = list[i];
         var src = e.getAttribute(CONTENT_ATTRS[a]) || '';
         if (!src) continue;
-        var out = CC[cNorm(src)];
+        var out = contentOut(src);
         if (out == null) continue;
         if (e.textContent !== out) { applying = true; try { e.textContent = out; } finally { applying = false; } }
       }
@@ -208,7 +211,7 @@
         var e = list[i];
         var src = e.getAttribute(CONTENT_ATTRS[a]) || '';
         if (!src) continue;
-        var out = CC[cNorm(src)];
+        var out = contentOut(src);
         if (out != null && e.textContent !== out) {
           applying = true; try { e.textContent = out; } finally { applying = false; }
         } else if (out == null) contentOut(src);

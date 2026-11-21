@@ -34,28 +34,43 @@
   // time, Arabic for a few). Brand names stay untouched in every language;
   // only descriptive titles are localised. Unknown names fall back to the
   // stored name, so a new app is never broken by a missing entry.
+  // App / game names in every language. Branded titles keep their official
+  // spelling (Google Play does the same); Arabic-stored titles get their real
+  // name, and descriptive titles are translated. Anything published later falls
+  // back to the content engine, so a new app is never left untranslated.
   var APP_NAMES = {
-    // The one entry stored in Arabic: everyone else reads CapCut.
-    'كاب كات': { ar: 'كاب كات', en: 'CapCut', fr: 'CapCut', es: 'CapCut', tr: 'CapCut', de: 'CapCut', pt: 'CapCut', ru: 'CapCut', hi: 'CapCut', zh: 'CapCut' },
-    // A generic English title gets a real Arabic name for Arabic visitors.
-    'Speed test': { ar: 'اختبار السرعة', en: 'Speed Test', fr: 'Test de vitesse', es: 'Prueba de velocidad', tr: 'Hız testi', de: 'Geschwindigkeitstest', pt: 'Teste de velocidade', ru: 'Тест скорости', hi: 'गति परीक्षण', zh: '速度测试' },
-    // Branded titles stay in their own script — Google Play does the same.
-    'Good pizza, great pizza': { ar: 'Good pizza, great pizza', en: 'Good Pizza, Great Pizza', fr: 'Good Pizza, Great Pizza', es: 'Good Pizza, Great Pizza', tr: 'Good Pizza, Great Pizza', de: 'Good Pizza, Great Pizza', pt: 'Good Pizza, Great Pizza', ru: 'Good Pizza, Great Pizza', hi: 'Good Pizza, Great Pizza', zh: 'Good Pizza, Great Pizza' },
-    'The Walking Zombie': { ar: 'The Walking Zombie', en: 'The Walking Zombie', fr: 'The Walking Zombie', es: 'The Walking Zombie', tr: 'The Walking Zombie', de: 'The Walking Zombie', pt: 'The Walking Zombie', ru: 'The Walking Zombie', hi: 'The Walking Zombie', zh: 'The Walking Zombie' },
-    'Film Maker Pro': { ar: 'Film Maker Pro', en: 'Film Maker Pro', fr: 'Film Maker Pro', es: 'Film Maker Pro', tr: 'Film Maker Pro', de: 'Film Maker Pro', pt: 'Film Maker Pro', ru: 'Film Maker Pro', hi: 'Film Maker Pro', zh: 'Film Maker Pro' },
-    'Hole.io - Original Hole Game': { ar: 'Hole.io - Original Hole Game', en: 'Hole.io - Original Hole Game', fr: 'Hole.io - Original Hole Game', es: 'Hole.io - Original Hole Game', tr: 'Hole.io - Original Hole Game', de: 'Hole.io - Original Hole Game', pt: 'Hole.io - Original Hole Game', ru: 'Hole.io - Original Hole Game', hi: 'Hole.io - Original Hole Game', zh: 'Hole.io - Original Hole Game' },
-    '8 Ball Pool': { ar: '8 Ball Pool', en: '8 Ball Pool', fr: '8 Ball Pool', es: '8 Ball Pool', tr: '8 Ball Pool', de: '8 Ball Pool', pt: '8 Ball Pool', ru: '8 Ball Pool', hi: '8 Ball Pool', zh: '8 Ball Pool' },
-    'Stick War: Saga': { ar: 'Stick War: Saga', en: 'Stick War: Saga', fr: 'Stick War: Saga', es: 'Stick War: Saga', tr: 'Stick War: Saga', de: 'Stick War: Saga', pt: 'Stick War: Saga', ru: 'Stick War: Saga', hi: 'Stick War: Saga', zh: 'Stick War: Saga' },
-    'Dynamons World': { ar: 'Dynamons World', en: 'Dynamons World', fr: 'Dynamons World', es: 'Dynamons World', tr: 'Dynamons World', de: 'Dynamons World', pt: 'Dynamons World', ru: 'Dynamons World', hi: 'Dynamons World', zh: 'Dynamons World' },
-    'Jurassic World™: The Game': { ar: 'Jurassic World™: The Game', en: 'Jurassic World™: The Game', fr: 'Jurassic World™: The Game', es: 'Jurassic World™: The Game', tr: 'Jurassic World™: The Game', de: 'Jurassic World™: The Game', pt: 'Jurassic World™: The Game', ru: 'Jurassic World™: The Game', hi: 'Jurassic World™: The Game', zh: 'Jurassic World™: The Game' },
-    'Subway Surfers': { ar: 'Subway Surfers', en: 'Subway Surfers', fr: 'Subway Surfers', es: 'Subway Surfers', tr: 'Subway Surfers', de: 'Subway Surfers', pt: 'Subway Surfers', ru: 'Subway Surfers', hi: 'Subway Surfers', zh: 'Subway Surfers' },
-    'Snake.io': { ar: 'Snake.io', en: 'Snake.io', fr: 'Snake.io', es: 'Snake.io', tr: 'Snake.io', de: 'Snake.io', pt: 'Snake.io', ru: 'Snake.io', hi: 'Snake.io', zh: 'Snake.io' },
-    'Firefight': { ar: 'Firefight', en: 'Firefight', fr: 'Firefight', es: 'Firefight', tr: 'Firefight', de: 'Firefight', pt: 'Firefight', ru: 'Firefight', hi: 'Firefight', zh: 'Firefight' },
+    // Arabic-stored titles keep their Arabic name for Arabic readers.
     'Aite': { ar: 'Aite', en: 'Aite', fr: 'Aite', es: 'Aite', tr: 'Aite', de: 'Aite', pt: 'Aite', ru: 'Aite', hi: 'Aite', zh: 'Aite' },
-    'Drama Box': { ar: 'Drama Box', en: 'Drama Box', fr: 'Drama Box', es: 'Drama Box', tr: 'Drama Box', de: 'Drama Box', pt: 'Drama Box', ru: 'Drama Box', hi: 'Drama Box', zh: 'Drama Box' },
+    'The Walking Zombie': { ar: 'The Walking Zombie', en: 'The Walking Zombie', fr: 'The Walking Zombie', es: 'The Walking Zombie', tr: 'The Walking Zombie', de: 'The Walking Zombie', pt: 'The Walking Zombie', ru: 'The Walking Zombie', hi: 'The Walking Zombie', zh: 'The Walking Zombie' },
+    'Jurassic World™: The Game': { ar: 'Jurassic World™: The Game', en: 'Jurassic World™: The Game', fr: 'Jurassic World™: The Game', es: 'Jurassic World™: The Game', tr: 'Jurassic World™: The Game', de: 'Jurassic World™: The Game', pt: 'Jurassic World™: The Game', ru: 'Jurassic World™: The Game', hi: 'Jurassic World™: The Game', zh: 'Jurassic World™: The Game' },
+    'Dynamons World': { ar: 'Dynamons World', en: 'Dynamons World', fr: 'Dynamons World', es: 'Dynamons World', tr: 'Dynamons World', de: 'Dynamons World', pt: 'Dynamons World', ru: 'Dynamons World', hi: 'Dynamons World', zh: 'Dynamons World' },
+    'Good pizza, great pizza': { ar: 'Good Pizza, Great Pizza', en: 'Good Pizza, Great Pizza', fr: 'Good Pizza, Great Pizza', es: 'Good Pizza, Great Pizza', tr: 'Good Pizza, Great Pizza', de: 'Good Pizza, Great Pizza', pt: 'Good Pizza, Great Pizza', ru: 'Good Pizza, Great Pizza', hi: 'Good Pizza, Great Pizza', zh: 'Good Pizza, Great Pizza' },
+    'Stick War: Saga': { ar: 'Stick War: Saga', en: 'Stick War: Saga', fr: 'Stick War: Saga', es: 'Stick War: Saga', tr: 'Stick War: Saga', de: 'Stick War: Saga', pt: 'Stick War: Saga', ru: 'Stick War: Saga', hi: 'Stick War: Saga', zh: 'Stick War: Saga' },
+    'Hole.io - Original Hole Game': { ar: 'Hole.io - Original Hole Game', en: 'Hole.io - Original Hole Game', fr: 'Hole.io - Original Hole Game', es: 'Hole.io - Original Hole Game', tr: 'Hole.io - Original Hole Game', de: 'Hole.io - Original Hole Game', pt: 'Hole.io - Original Hole Game', ru: 'Hole.io - Original Hole Game', hi: 'Hole.io - Original Hole Game', zh: 'Hole.io - Original Hole Game' },
+    'Firefight': { ar: 'Firefight', en: 'Firefight', fr: 'Firefight', es: 'Firefight', tr: 'Firefight', de: 'Firefight', pt: 'Firefight', ru: 'Firefight', hi: 'Firefight', zh: 'Firefight' },
+    'Roblox': { ar: 'Roblox', en: 'Roblox', fr: 'Roblox', es: 'Roblox', tr: 'Roblox', de: 'Roblox', pt: 'Roblox', ru: 'Roblox', hi: 'Roblox', zh: 'Roblox' },
+    // Stored in Arabic, shown as its real brand name elsewhere.
+    'ماين كرافت': { ar: 'ماين كرافت', en: 'Minecraft', fr: 'Minecraft', es: 'Minecraft', tr: 'Minecraft', de: 'Minecraft', pt: 'Minecraft', ru: 'Minecraft', hi: 'Minecraft', zh: 'Minecraft' },
+    'Netflix': { ar: 'Netflix', en: 'Netflix', fr: 'Netflix', es: 'Netflix', tr: 'Netflix', de: 'Netflix', pt: 'Netflix', ru: 'Netflix', hi: 'Netflix', zh: 'Netflix' },
+    'KineMaster': { ar: 'KineMaster', en: 'KineMaster', fr: 'KineMaster', es: 'KineMaster', tr: 'KineMaster', de: 'KineMaster', pt: 'KineMaster', ru: 'KineMaster', hi: 'KineMaster', zh: 'KineMaster' },
+    'Film Maker Pro': { ar: 'Film Maker Pro', en: 'Film Maker Pro', fr: 'Film Maker Pro', es: 'Film Maker Pro', tr: 'Film Maker Pro', de: 'Film Maker Pro', pt: 'Film Maker Pro', ru: 'Film Maker Pro', hi: 'Film Maker Pro', zh: 'Film Maker Pro' },
+    'Alight Motion': { ar: 'Alight Motion', en: 'Alight Motion', fr: 'Alight Motion', es: 'Alight Motion', tr: 'Alight Motion', de: 'Alight Motion', pt: 'Alight Motion', ru: 'Alight Motion', hi: 'Alight Motion', zh: 'Alight Motion' },
+    'Snake.io': { ar: 'Snake.io', en: 'Snake.io', fr: 'Snake.io', es: 'Snake.io', tr: 'Snake.io', de: 'Snake.io', pt: 'Snake.io', ru: 'Snake.io', hi: 'Snake.io', zh: 'Snake.io' },
+    'Subway Surfers': { ar: 'Subway Surfers', en: 'Subway Surfers', fr: 'Subway Surfers', es: 'Subway Surfers', tr: 'Subway Surfers', de: 'Subway Surfers', pt: 'Subway Surfers', ru: 'Subway Surfers', hi: 'Subway Surfers', zh: 'Subway Surfers' },
+    '8 Ball Pool': { ar: '8 Ball Pool', en: '8 Ball Pool', fr: '8 Ball Pool', es: '8 Ball Pool', tr: '8 Ball Pool', de: '8 Ball Pool', pt: '8 Ball Pool', ru: '8 Ball Pool', hi: '8 Ball Pool', zh: '8 Ball Pool' },
+    'Spotify': { ar: 'Spotify', en: 'Spotify', fr: 'Spotify', es: 'Spotify', tr: 'Spotify', de: 'Spotify', pt: 'Spotify', ru: 'Spotify', hi: 'Spotify', zh: 'Spotify' },
     'NetShort': { ar: 'NetShort', en: 'NetShort', fr: 'NetShort', es: 'NetShort', tr: 'NetShort', de: 'NetShort', pt: 'NetShort', ru: 'NetShort', hi: 'NetShort', zh: 'NetShort' },
+    'Drama Box': { ar: 'Drama Box', en: 'Drama Box', fr: 'Drama Box', es: 'Drama Box', tr: 'Drama Box', de: 'Drama Box', pt: 'Drama Box', ru: 'Drama Box', hi: 'Drama Box', zh: 'Drama Box' },
+    'Truecaller': { ar: 'Truecaller', en: 'Truecaller', fr: 'Truecaller', es: 'Truecaller', tr: 'Truecaller', de: 'Truecaller', pt: 'Truecaller', ru: 'Truecaller', hi: 'Truecaller', zh: 'Truecaller' },
     'CamScanner': { ar: 'CamScanner', en: 'CamScanner', fr: 'CamScanner', es: 'CamScanner', tr: 'CamScanner', de: 'CamScanner', pt: 'CamScanner', ru: 'CamScanner', hi: 'CamScanner', zh: 'CamScanner' },
+    'VN Video Editor': { ar: 'VN Video Editor', en: 'VN Video Editor', fr: 'VN Video Editor', es: 'VN Video Editor', tr: 'VN Video Editor', de: 'VN Video Editor', pt: 'VN Video Editor', ru: 'VN Video Editor', hi: 'VN Video Editor', zh: 'VN Video Editor' },
     'PhotoRoom': { ar: 'PhotoRoom', en: 'PhotoRoom', fr: 'PhotoRoom', es: 'PhotoRoom', tr: 'PhotoRoom', de: 'PhotoRoom', pt: 'PhotoRoom', ru: 'PhotoRoom', hi: 'PhotoRoom', zh: 'PhotoRoom' },
+    'Duolingo': { ar: 'Duolingo', en: 'Duolingo', fr: 'Duolingo', es: 'Duolingo', tr: 'Duolingo', de: 'Duolingo', pt: 'Duolingo', ru: 'Duolingo', hi: 'Duolingo', zh: 'Duolingo' },
+    'Picsart': { ar: 'Picsart', en: 'Picsart', fr: 'Picsart', es: 'Picsart', tr: 'Picsart', de: 'Picsart', pt: 'Picsart', ru: 'Picsart', hi: 'Picsart', zh: 'Picsart' },
+    // Stored in Arabic, shown as its real brand name elsewhere.
+    'كاب كات': { ar: 'كاب كات', en: 'CapCut', fr: 'CapCut', es: 'CapCut', tr: 'CapCut', de: 'CapCut', pt: 'CapCut', ru: 'CapCut', hi: 'CapCut', zh: 'CapCut' },
+    // A generic English title gets a real translated name everywhere.
+    'Speed test': { ar: 'اختبار السرعة', en: 'Speed Test', fr: 'Test de vitesse', es: 'Prueba de velocidad', tr: 'Hız testi', de: 'Geschwindigkeitstest', pt: 'Teste de velocidade', ru: 'Тест скорости', hi: 'गति परीक्षण', zh: '速度测试' },
   };
   // Normalise a stored name (Blogger/APK metadata often carries an RTL mark).
   function nameKey(n) {
@@ -68,6 +83,11 @@
     if (hit && hit[lang]) {
       // keep any trailing RTL mark the store put there for mixed-direction text
       return hit[lang] + (/[\u200f]$/.test(raw) ? '\u200f' : '');
+    }
+    // Not curated yet: every title is translated too, through the content cache.
+    if (lang !== 'ar') {
+      var auto = contentOut(raw.trim());
+      if (auto != null) return auto + (/[\u200f]$/.test(raw) ? '\u200f' : '');
     }
     return raw;
   }
@@ -83,6 +103,118 @@
       var out = appName(src);
       if (e.textContent !== out) e.textContent = out;
     }
+  }
+
+  // ---- Store content (app/game names, descriptions, developer lines, reviews) ----
+  // Written in English or Arabic by the publishers, so it is translated on
+  // demand and cached in two places: localStorage per language (instant on the
+  // next visit) and the server's i18n_cache (shared by every visitor).
+  var CONTENT_ATTRS = ['data-i18n-content', 'data-i18n-desc', 'data-i18n-dev', 'data-i18n-app'];
+  var cKey = 'gs_cx1_' + lang;
+  var CC = {};
+  try { CC = JSON.parse(localStorage.getItem(cKey) || '{}') || {}; } catch (e) { CC = {}; }
+  var cDirty = false;
+  var cPending = {};
+  var cWork = {};
+  var cTimer = null;
+  var cAbsent = {};
+
+  function cNorm(t) { return String(t == null ? '' : t).replace(/[\u200e\u200f\u061c]/g, '').replace(/\s+/g, ' ').trim(); }
+  // Arabic content is translated from Arabic, English content from English.
+  function cSource(t) { return /[\u0600-\u06FF]/.test(t) ? 'ar' : 'en'; }
+
+  function contentOut(t) {
+    var k = cNorm(t);
+    if (!k || k.length < 2) return null;
+    if (CC[k] != null) return CC[k];
+    // Unknown strings are queued in small batches instead of one request each.
+    cWork[k] = true;
+    if (cTimer) clearTimeout(cTimer);
+    cTimer = setTimeout(function () { cTimer = null; flushContent(); }, 380);
+    return null;
+  }
+
+  function saveContent() {
+    if (!cDirty) return;
+    try { localStorage.setItem(cKey, JSON.stringify(CC)); cDirty = false; } catch (e) {}
+  }
+  setInterval(saveContent, 3000);
+  window.addEventListener('beforeunload', saveContent);
+
+  function flushContent() {
+    var keys = Object.keys(cWork);
+    cWork = {};
+    var todo = keys.filter(function (k) { return CC[k] == null && !cAbsent[k] && k.length <= 1200; });
+    if (!todo.length) return;
+    var payload = {}, src = 'en';
+    todo.forEach(function (k) {
+      payload[lang + '::' + k] = 1;
+      if (cSource(k) === 'ar') src = 'ar';
+    });
+    // Mixed pages (Arabic sourced names next to English ones) are split, so a
+    // single request never tells the provider the wrong source language.
+    var arKeys = todo.filter(function (k) { return cSource(k) === 'ar'; });
+    var enKeys = todo.filter(function (k) { return cSource(k) === 'en'; });
+    var groups = [];
+    if (arKeys.length) groups.push({ src: 'ar', keys: arKeys });
+    if (enKeys.length) groups.push({ src: 'en', keys: enKeys });
+    if (!groups.length) return;
+    groups.forEach(function (g) {
+      var map = {};
+      g.keys.forEach(function (k) { map[lang + '::' + k] = 1; });
+      fetch('/api/i18n-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys: map, source: g.src }),
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        var t = (data && data.t) || {};
+        var got = 0;
+        g.keys.forEach(function (k) {
+          var v = t[lang + '::' + k];
+          if (typeof v === 'string' && v && cNorm(v) !== k) { CC[k] = v; got++; }
+          // Nothing translated: stop asking for 10 minutes, then retry.
+          else if (!cAbsent[k]) { cAbsent[k] = Date.now() + 10 * 60 * 1000; setTimeout(function () { delete cAbsent[k]; }, 10 * 60 * 1000); }
+        });
+        if (got) { cDirty = true; saveContent(); repaintContent(); }
+      }).catch(function () {});
+    });
+  }
+
+  // Replace the text of every holder whose source string is now translated.
+  function repaintContent(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    if (!scope.querySelectorAll) return;
+    for (var a = 0; a < CONTENT_ATTRS.length; a++) {
+      var list = scope.querySelectorAll('[' + CONTENT_ATTRS[a] + ']');
+      for (var i = 0; i < list.length; i++) {
+        var e = list[i];
+        var src = e.getAttribute(CONTENT_ATTRS[a]) || '';
+        if (!src) continue;
+        var out = CC[cNorm(src)];
+        if (out == null) continue;
+        if (e.textContent !== out) { applying = true; try { e.textContent = out; } finally { applying = false; } }
+      }
+    }
+    applyAppNames(scope);
+  }
+
+  // Mark text so it is retranslated when the language changes.
+  function markContent(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    if (!scope.querySelectorAll) return;
+    for (var a = 0; a < CONTENT_ATTRS.length; a++) {
+      var list = scope.querySelectorAll('[' + CONTENT_ATTRS[a] + ']');
+      for (var i = 0; i < list.length; i++) {
+        var e = list[i];
+        var src = e.getAttribute(CONTENT_ATTRS[a]) || '';
+        if (!src) continue;
+        var out = CC[cNorm(src)];
+        if (out != null && e.textContent !== out) {
+          applying = true; try { e.textContent = out; } finally { applying = false; }
+        } else if (out == null) contentOut(src);
+      }
+    }
+    applyAppNames(scope);
   }
 
   // ---- Curated overrides: exact Arabic text -> per-language translation. ----
@@ -1800,10 +1932,15 @@
     if (root.nodeType !== 1) return;
     if (root.closest && root.closest('[data-noi18n]')) return;
 
+    var CONTENT_SEL = '[data-i18n-app],[data-i18n-desc],[data-i18n-dev]';
     var tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
-        if (!n.nodeValue || !AR.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        if (!n.nodeValue) return NodeFilter.FILTER_REJECT;
         var p = n.parentNode;
+        // Names, descriptions and developer lines belong to the content engine:
+        // they are English too, so the Arabic-only walker must not fight it.
+        if (p && p.nodeType === 1 && p.closest && p.closest(CONTENT_SEL)) return NodeFilter.FILTER_REJECT;
+        if (!AR.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
         while (p && p.nodeType === 1) {
           if (SKIP_TAGS[p.tagName] || (p.hasAttribute && p.hasAttribute('data-noi18n'))) return NodeFilter.FILTER_REJECT;
           p = p.parentNode;
@@ -1832,7 +1969,7 @@
       else if (m.addedNodes) {
         for (var j = 0; j < m.addedNodes.length; j++) {
           var n = m.addedNodes[j];
-          if (n.nodeType === 1) walk(n);
+          if (n.nodeType === 1) { walk(n); markContent(n); }
           else if (n.nodeType === 3) doTextNode(n);
         }
       }
@@ -1841,6 +1978,10 @@
 
   function start() {
     applyAppNames(document);
+    // Content (names/descriptions) is painted from the local cache first, then
+    // anything still missing is requested in one batch.
+    markContent(document);
+    if (lang !== 'ar') flushContent();
     if (lang === 'ar') return;
     walk(document.body);
     observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
@@ -1904,6 +2045,10 @@
     lang: lang,
     appName: appName,
     applyAppNames: applyAppNames,
+    content: contentOut,
+    contentAttrs: CONTENT_ATTRS,
+    repaintContent: repaintContent,
+    markContent: markContent,
     isRTL: dir === 'rtl',
     setLang: setLang,
     switcherEl: switcherEl,

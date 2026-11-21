@@ -225,7 +225,7 @@
         a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
       el('span', { class: 'ms-info' },
         el('span', { class: 'ms-name' }, el('bdi', { 'data-i18n-app': a.name || '' }, appName(a))),
-        el('span', { class: 'ms-sub' }, el('bdi', null, a.developer || S.categoryName(a.category) || t('تطبيق'))),
+        el('span', { class: 'ms-sub' }, el('bdi', { 'data-i18n-dev': String(a.developer || '').replace(/[\u200e\u200f\u061c]/g, '').trim() }, a.developer || S.categoryName(a.category) || t('تطبيق'))),
         meta.length ? el('span', { class: 'ms-meta' }, ...meta) : null,
       ),
       ico('chevronStart', 'icon icon-sm ms-go'),

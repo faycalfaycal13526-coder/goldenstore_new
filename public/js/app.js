@@ -760,7 +760,7 @@
       iconBtn,
       el('div', { class: 'd-titles' },
         el('div', { class: 'd-name', 'data-i18n-app': app.name }, S.appName(app)),
-        el('div', { class: 'd-dev' }, app.developer || S.STORE.name),
+        el('div', { class: 'd-dev', 'data-i18n-dev': String(app.developer || '').replace(/[\u200e\u200f\u061c]/g, '').trim() }, app.developer || S.STORE.name),
         el('div', { class: 'd-sub' }, S.categoryName(app.category) || S.STORE.name),
       ),
     ));
@@ -779,9 +779,10 @@
     if (screenshots.length || videos.length) content.append(renderScreenshots(screenshots, videos));
 
     if (app.short_description || app.description) {
+      const _desc = app.description || app.short_description || '';
       content.append(el('div', { class: 'd-section' },
         el('h3', null, t('لمحة عن هذا التطبيق')),
-        el('div', { class: 'd-desc' }, app.description || app.short_description),
+        el('div', { class: 'd-desc', 'data-i18n-desc': _desc }, _desc),
       ));
     }
 

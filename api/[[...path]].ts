@@ -104,7 +104,7 @@ function getClientIp(c: any): string {
    ========================================================================= */
 const LEGACY_IMPORT_TEMP = /^\/api\/import-[a-z0-9_-]*temp(?:\/|$)/i;
 const PUBLIC_WRITE_EXACT = new Set([
-  '/api/login', '/api/logout', '/api/legal/consent', '/api/translate',
+  '/api/login', '/api/logout', '/api/legal/consent', '/api/translate', '/api/i18n-content',
   '/api/notifications/register-token', '/api/notifications/register-web',
   '/api/notifications/register-device', '/api/notifications/unregister-token',
   '/api/notifications/preference', '/api/notifications/receipt',
@@ -122,6 +122,7 @@ const PUBLIC_WRITE_PATTERNS: RegExp[] = [
 const WRITE_BUCKETS: Record<string, { max: number; sec: number }> = {
   '/api/login': { max: 8, sec: 60 },
   '/api/translate': { max: 40, sec: 60 },
+  '/api/i18n-content': { max: 30, sec: 60 },
   '/api/notifications/unregister-token': { max: 20, sec: 60 },
   '/api/profile/demographics': { max: 15, sec: 60 },
   '/api/apps/:slug/report': { max: 10, sec: 60 },
@@ -1106,10 +1107,10 @@ function pickTranslation(data: any, text: string): string | null {
 }
 
 // Primary: dict-chrome-ex is a different Google host and is not bot-blocked.
-async function chromeTranslate(text: string, target: string): Promise<TrResult> {
+async function chromeTranslate(text: string, target: string, src = 'ar'): Promise<TrResult> {
   try {
     const res = await fetch(
-      `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=ar&tl=${target}&q=${encodeURIComponent(text)}`,
+      `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${src}&tl=${target}&q=${encodeURIComponent(text)}`,
       { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; GoldenStore/1.0)' } },
     );
     const raw = await res.text();
@@ -1159,10 +1160,10 @@ async function memoryTranslate(text: string, target: string): Promise<TrResult> 
   } catch (e: any) { return { tr: null, why: `err/${String(e && e.message || e).slice(0, 60)}` }; }
 }
 
-async function translateOne(text: string, target: string, steps?: string[]): Promise<string | null> {
+async function translateOne(text: string, target: string, steps?: string[], src = 'ar'): Promise<string | null> {
   const providers = [chromeTranslate, gtxTranslate, memoryTranslate];
   for (const p of providers) {
-    const r = await p(text, target);
+    const r = p === chromeTranslate ? await p(text, target, src) : await p(text, target);
     if (steps) steps.push(`${p.name}=${r.tr ? 'ok' : r.why}`);
     if (r.tr) return r.tr;
   }
@@ -1173,7 +1174,10 @@ app.post('/translate', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const target = String(body.target || '').toLowerCase();
   const q = Array.isArray(body.q) ? body.q.slice(0, 60).map((x: any) => String(x||'')) : [];
-  if (!['en','fr','es','tr','de','pt','ru','hi','zh'].includes(target) || !q.length) return c.json({ t: q });
+  if (!SUPPORTED_TARGETS.has(target) || !q.length) return c.json({ t: q });
+  // Source language: 'ar' for the UI dictionary, 'en' for store content
+  // (app/game names, descriptions, developer lines) written in English.
+  const source = String(body.source || 'ar').toLowerCase() === 'en' ? 'en' : 'ar';
   const debug = body.debug === true;
   const diag: any[] = [];
 
@@ -1186,7 +1190,7 @@ app.post('/translate', async (c) => {
   if (debug) diag.push({ src: '__meta__', steps: [paused ? 'cooldown=active' : 'cooldown=off'], translated: false });
   for (let i=0; i<q.length; i++) {
     if (!q[i] || q[i].length > 5000) { out[i] = q[i]; continue; }
-    const id = await sha1Hex(target + '::' + q[i]);
+    const id = await sha1Hex(source + '::' + target + '::' + q[i]);
     let cached: string | null = null;
     try {
       const row: any = await db.prepare('SELECT out FROM i18n_cache WHERE id = ?').bind(id).first();
@@ -1207,7 +1211,7 @@ app.post('/translate', async (c) => {
         return;
       }
       const steps: string[] = [];
-      const tr = await translateOne(item.text, target, debug ? steps : undefined);
+      const tr = await translateOne(item.text, target, debug ? steps : undefined, source);
       out[item.i] = tr || item.text;
       if (debug) diag.push({ src: item.text, steps, translated: !!tr });
       // Persist only real translations. INSERT OR REPLACE overwrites stale
@@ -1226,6 +1230,63 @@ app.post('/translate', async (c) => {
   }
   for (let i=0; i<q.length; i++) if (out[i] == null) out[i] = q[i];
   return c.json(debug ? { t: out, debug: diag } : { t: out });
+});
+
+const SUPPORTED_TARGETS = new Set(['en', 'fr', 'es', 'tr', 'de', 'pt', 'ru', 'hi', 'zh']);
+
+// Bulk translation of store content (app/game names, descriptions, developer
+// lines, review text). The client sends a map { "<lang>::<text>": true } of the
+// pieces it needs; everything comes back from i18n_cache when warm, so a page
+// load costs one round trip instead of one request per string.
+app.post('/i18n-content', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const keys = body && body.keys && typeof body.keys === 'object' ? Object.keys(body.keys) : [];
+  const src = String((body && body.source) || 'en').toLowerCase() === 'ar' ? 'ar' : 'en';
+  const t: Record<string, string> = {};
+  if (!keys.length) return c.json({ t });
+
+  const db: any = c.env.DB;
+  await ensureTranslateCache(db);
+
+  const work: Array<{ k: string; target: string; text: string; id: string }> = [];
+  for (const k of keys.slice(0, 600)) {
+    const cut = k.indexOf('::');
+    if (cut < 2) continue;
+    const target = k.slice(0, cut);
+    const text = k.slice(cut + 2);
+    if (!SUPPORTED_TARGETS.has(target) || !text || text.length > 1200) { t[k] = text; continue; }
+    const id = await sha1Hex(src + '::' + target + '::' + text);
+    let cached: string | null = null;
+    try {
+      const row: any = await db.prepare('SELECT out FROM i18n_cache WHERE id = ?').bind(id).first();
+      if (row && row.out && row.out !== text) cached = String(row.out);
+    } catch { /* no cache table: fall through */ }
+    if (cached != null) t[k] = cached;
+    else work.push({ k, target, text, id });
+  }
+
+  // Cap the live work per request so a cold start can never stall the page.
+  const paused = Date.now() < providerCooldownUntil;
+  const live = paused ? [] : work.slice(0, 24);
+  for (const item of work) t[item.k] = item.text;
+
+  for (let k = 0; k < live.length; k += 6) {
+    await Promise.all(live.slice(k, k + 6).map(async (item) => {
+      const tr = await translateOne(item.text, item.target, undefined, src);
+      if (!tr) return;
+      t[item.k] = tr;
+      try {
+        await db.prepare('INSERT OR REPLACE INTO i18n_cache (id, target, src, out, ts) VALUES (?, ?, ?, ?, ?)')
+          .bind(item.id, item.target, item.text, tr, nowSec()).run();
+      } catch { /* caching is best-effort */ }
+    }));
+  }
+  if (!paused && live.length) {
+    const anySuccess = live.some((item) => t[item.k] !== item.text);
+    if (!anySuccess) providerCooldownUntil = Date.now() + 5 * 60 * 1000;
+  }
+  c.header('Cache-Control', 'no-store');
+  return c.json({ t, remaining: Math.max(0, work.length - live.length) });
 });
 
 // Apps List & Categories

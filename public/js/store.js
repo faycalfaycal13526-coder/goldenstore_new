@@ -278,7 +278,7 @@ function listRow(a, opts = {}) {
     el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'info' },
       el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
-      el('div', { class: 'sub' }, el('bdi', null, a.developer || cat || STORE.name)),
+      el('div', { class: 'sub' }, el('bdi', devAttrs(a.developer), a.developer || cat || STORE.name)),
       el('div', { class: 'meta-line' },
         rt ? el('span', null, rt) : el('span', null, t('جديد')),
         rt ? ico('star', 'icon fill') : null,
@@ -318,9 +318,9 @@ function featureSlide(a) {
       ? el('img', { class: 'fc-fallback-ico', src: a.icon_url, alt: '', loading: 'lazy' })
       : ico('package', 'icon icon-lg'));
   }
-  const desc = a.short_description || a.description || '';
+  const desc = descText(a);
   if (desc) {
-    media.append(el('div', { class: 'fc-desc' }, desc));
+    media.append(el('div', Object.assign({ class: 'fc-desc' }, descAttrs(a)), desc));
   }
   const rt = ratingOf(a);
   slide.append(
@@ -330,7 +330,7 @@ function featureSlide(a) {
       el('div', { class: 'fc-bar-text' },
         el('div', { class: 'fc-bar-name' }, appName(a)),
         el('div', { class: 'fc-bar-sub' },
-          el('span', null, a.developer || ''),
+          el('span', devAttrs(a.developer), a.developer || ''),
           rt ? el('span', { class: 'fc-bar-rate' }, rt, ico('star', 'icon fill')) : null,
         ),
       ),
@@ -455,6 +455,26 @@ function appNameAttrs(a) {
   // Lets the translation layer fill the name in when the language changes.
   const nm = a && a.name ? String(a.name) : '';
   return nm ? { 'data-i18n-app': nm } : {};
+}
+// Descriptions and developer lines are translated too: the attribute keeps the
+// original text so a language switch can repaint it without a reload.
+function descText(a) {
+  if (!a) return '';
+  return String(a.description || a.short_description || '');
+}
+function descAttrs(a) {
+  const d = descText(a);
+  return d ? { 'data-i18n-desc': d } : {};
+}
+function devText(a) {
+  if (!a || !a.developer) return '';
+  return String(a.developer);
+}
+function devAttrs(v) {
+  // Publishers paste an RTL mark into the developer line; the attribute keeps
+  // the readable text so the same phrase can be translated consistently.
+  const d = String(v || '').replace(/[\u200e\u200f\u061c]/g, '').trim();
+  return d ? { 'data-i18n-dev': d } : {};
 }
 function categoryName(slug) {
   if (!slug) return '';
@@ -1162,7 +1182,7 @@ const GOOGLE_G_HTML = '<svg class="gico" viewBox="0 0 48 48"><path fill="#EA4335
 
 function fromBrandLockup() {
   return el('div', { class: 'gs-from', role: 'img', 'aria-label': 'from The Pirate Bay' },
-    el('span', { class: 'gs-from-label' }, 'from'),
+    el('span', { class: 'gs-from-label', 'data-i18n-content': 'from' }, 'from'),
     el('img', {
       class: 'gs-from-mark', src: '/images/from-brand-blue.png',
       alt: 'The Pirate Bay', width: '612', height: '96',

@@ -156,7 +156,7 @@ function appCard(a) {
     ),
     el('div', { class: 'meta' },
       el('div', { class: 'name' }, el('bdi', { 'data-i18n-app': a.name || '' }, (a.name_t || a.name))),
-      a.developer ? el('div', { class: 'dev' }, a.developer) : null,
+      a.developer ? el('div', { class: 'dev', 'data-i18n-dev': String(a.developer).replace(/[\u200e\u200f\u061c]/g, '').trim() }, a.developer) : null,
     ),
     el('div', { class: 'stats' },
       el('span', { class: 'size' }, formatBytes(a.size_bytes || 0)),

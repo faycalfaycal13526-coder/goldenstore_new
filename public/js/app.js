@@ -1874,89 +1874,33 @@
     /* ---------------- In-app advertisement ---------------- */
     /* The ad is BACK, but it never leaves the app: it is rendered as a layer
        inside the page (an <iframe>), never with window.open / target=_blank,
-       so Chrome is never launched. It runs for exactly AD_SECONDS seconds and
+       so Chrome is never launched. It runs for a random AD_SECONDS_MIN..AD_SECONDS_MAX
+       length (5…30s, decided per launch) and
        the transfer only starts when it closes: the 0 % bar is already painted
        underneath, so the moment the ad goes away the real progress takes over. */
     const AD_URL = 'https://www.profitableratecpmnetwork.com/q3nni29t?key=f23e7306d9c04fd6816a2df86159c110';
-    const AD_SECONDS = 10;
+    const AD_SECONDS_MIN = 5;
+    const AD_SECONDS_MAX = 30;
+    function adDuration() {
+      const lo = AD_SECONDS_MIN;
+      const hi = AD_SECONDS_MAX;
+      return lo + Math.floor(Math.random() * (hi - lo + 1));   // 5 … 30 inclusive
+    }
+    let adDurationNow = adDuration();
     let adLayerEl = null, adTimer = null, adResolve = null;
-    /* Round 42i (owner: «الإعلانات تبع زر التنزيل بعض الأحيان لا تظهر»):
-       the creative used to be an <iframe> of a SCRIPT endpoint. When the network
-       did not fill, that iframe stayed a white/black rectangle for ten seconds —
-       «الإعلان لا يظهر». Now two things are guaranteed:
-         1) the layer always paints a real, on-brand ad screen (logo + name +
-            «إعلان»), so the box is never empty;
-         2) the network is mounted the way it expects to be — its script inside
-            the page, retried once — and whatever it injects shows on top.
-       The download still starts only when the full countdown ends. */
-    let adScriptEl = null, adScriptRetry = null, adInjected = [];
-    /* A countdown pill that stays ABOVE whatever the network paints (its overlay
-       uses the maximum z-index; a later sibling wins the tie). Without it the
-       visitor stares at a full-screen creative with no idea that the download
-       is coming — which is the other half of «الإعلان لا يظهر». */
-    let adPillEl = null;
-    function bringPillFront() {
-      try {
-        if (!adPillEl || !adInjected.length) return;   // no overlay: the header already shows it
-        (document.body || document.documentElement).appendChild(adPillEl);
-        adPillEl.style.setProperty('z-index', '2147483647', 'important');
-        adPillEl.style.setProperty('display', 'inline-flex', 'important');
-      } catch (e) {}
-    }
+    /* Round 42: the caller may start the transport while the ad is playing. */
     let adStartHook = null;
-    function adBridge() {
-      return (window.GSAndroid && typeof window.GSAndroid === 'object') ? window.GSAndroid : null;
-    }
-    function mountNetworkAd() {
-      try {
-        if (adScriptEl && adScriptEl.isConnected) return;
-        const before = Array.prototype.slice.call(document.body ? document.body.children : []);
-        const tag = document.createElement('script');
-        tag.src = AD_URL + '&gs_ad_t=' + Date.now();
-        tag.async = true;
-        tag.setAttribute('data-gs-ad-script', '1');
-        try { tag.referrerPolicy = 'origin'; } catch (e) {}
-        tag.onerror = () => {};
-        (document.body || document.documentElement).appendChild(tag);
-        adScriptEl = tag;
-        setTimeout(() => {
-          try {
-            Array.prototype.slice.call(document.body.children).forEach((n) => {
-              if (!before.includes(n) && n !== tag && n !== adLayerEl && !n.hasAttribute('data-gs-ad-script')) {
-                adInjected.push(n);
-              }
-            });
-          } catch (e) {}
-        }, 600);
-      } catch (e) {}
-    }
-    function unmountNetworkAd() {
-      if (adScriptRetry) { clearTimeout(adScriptRetry); adScriptRetry = null; }
-      try { if (adScriptEl && adScriptEl.parentNode) adScriptEl.parentNode.removeChild(adScriptEl); } catch (e) {}
-      adScriptEl = null;
-      /* Whatever the network painted on top of the page is removed with the ad,
-         so it can never cover the download button afterwards. */
-      adInjected.forEach((n) => {
-        try {
-          const cs = getComputedStyle(n);
-          if (cs && cs.position === 'fixed' && n.parentNode) n.parentNode.removeChild(n);
-        } catch (e) {}
-      });
-      adInjected = [];
-    }
     function closeInAppAd() {
       if (adTimer) { clearInterval(adTimer); adTimer = null; }
-      if (adPillEl && adPillEl.parentNode) adPillEl.parentNode.removeChild(adPillEl);
-      adPillEl = null;
-      unmountNetworkAd();
       if (adLayerEl && adLayerEl.parentNode) adLayerEl.parentNode.removeChild(adLayerEl);
       adLayerEl = null;
       const r = adResolve; adResolve = null;
       if (r) { try { r(); } catch (e) {} }
     }
     /* The ad layer must be impossible to lose: it is created on every launch,
-       pinned with !important inline declarations, and watched by a 1s watchdog
-       that re-attaches it if a re-render removes it. */
+       pinned with !important inline declarations, sandboxed so the creative
+       cannot navigate the WebView away (that was the «sometimes no ad» bug),
+       and watched by a 1s watchdog that re-attaches it if anything removes it. */
     function pinAdLayer(layer) {
       const set = (k, v) => { try { layer.style.setProperty(k, v, 'important'); } catch (e) { layer.style[k] = v; } };
       set('position', 'fixed'); set('top', '0'); set('left', '0'); set('right', '0'); set('bottom', '0');
@@ -1965,31 +1909,6 @@
       set('display', 'flex'); set('flex-direction', 'column'); set('overflow', 'hidden');
       set('visibility', 'visible'); set('opacity', '1'); set('transform', 'none');
       set('pointer-events', 'auto'); set('border-radius', '0');
-    }
-    /* The always-visible creative: an on-brand ad screen, never a blank box. */
-    function houseAdNode() {
-      const wrap = document.createElement('div');
-      wrap.id = 'gs-ad-house';
-      wrap.setAttribute('style', 'position:absolute;inset:0;display:flex;flex-direction:column;'
-        + 'align-items:center;justify-content:center;gap:14px;padding:28px;text-align:center;'
-        + 'background:radial-gradient(circle at 50% 30%,#1b1b26 0%,#0b0b10 70%);color:#fff;');
-      const logo = document.createElement('img');
-      logo.src = '/images/logo.png';
-      logo.alt = 'Golden Store';
-      logo.setAttribute('style', 'width:104px;height:104px;object-fit:contain;filter:drop-shadow(0 10px 24px rgba(245,197,66,.28))');
-      logo.onerror = () => { logo.style.display = 'none'; };
-      const name = document.createElement('div');
-      name.setAttribute('style', 'font-size:24px;font-weight:800;letter-spacing:-.01em');
-      name.textContent = 'Golden Store';
-      const line = document.createElement('div');
-      line.setAttribute('style', 'font-size:14px;font-weight:600;color:#cfcfd8;max-width:280px;line-height:1.6');
-      line.textContent = t('تطبيقات وألعاب مختارة كل يوم — بأمان وبسرعة');
-      const badge = document.createElement('div');
-      badge.setAttribute('style', 'margin-top:4px;font-size:11px;font-weight:800;letter-spacing:.06em;'
-        + 'color:#0b0b10;background:#f5c542;padding:4px 10px;border-radius:6px');
-      badge.textContent = t('إعلان');
-      wrap.append(logo, name, line, badge);
-      return wrap;
     }
     function showInAppAd() {
       return new Promise((resolve) => {
@@ -2012,41 +1931,35 @@
         cdEl.id = 'gs-ad-count';
         cdEl.setAttribute('style', 'margin-inline-start:auto;font-size:13px;font-weight:600;'
           + 'color:#cfcfd8;font-variant-numeric:tabular-nums');
-        const creative = document.createElement('div');
-        creative.setAttribute('style', 'position:relative;flex:1 1 auto;width:100%;overflow:hidden;background:#0b0b10');
-        creative.appendChild(houseAdNode());
+        const frame = document.createElement('iframe');
+        frame.id = 'gs-ad-frame';
+        frame.setAttribute('title', t('إعلان'));
+        frame.setAttribute('style', 'flex:1 1 auto;width:100%;height:100%;border:0;background:#fff;display:block');
+        // No allow-top-navigation: the creative can never replace the store.
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms');
+        frame.setAttribute('referrerpolicy', 'no-referrer');
+        let frameLoaded = false;
+        frame.addEventListener('load', () => { frameLoaded = true; });
+        const loadSrc = () => { try { frame.src = AD_URL + '&gs_ad_t=' + Date.now(); } catch (e) {} };
+        loadSrc();
         head.appendChild(tagEl); head.appendChild(cdEl);
-        layer.appendChild(head); layer.appendChild(creative);
+        layer.appendChild(head); layer.appendChild(frame);
         pinAdLayer(layer);
         (document.body || document.documentElement).appendChild(layer);
         adLayerEl = layer;
         /* Round 42 (owner: «اجعله حتى يكمل الإعلان ثم يبدأ التنزيل»): the file
            starts moving DURING the advertisement — the server connection is
            opened and the response is buffered while the creative plays — and
-           the save/UI only happens after the countdown hits zero. */
+           the save/UI only happens after the countdown hits zero. Counting
+           starts from the first painted frame, so the ad really completes. */
         try { if (typeof adStartHook === 'function') adStartHook(); } catch (e) {}
-        mountNetworkAd();
-        // One retry: a script that never answered gets a second, fresh request.
-        adScriptRetry = setTimeout(() => { try { mountNetworkAd(); } catch (e) {} }, 3500);
-        adPillEl = document.createElement('div');
-        adPillEl.id = 'gs-ad-pill';
-        adPillEl.setAttribute('style', 'position:fixed;top:calc(env(safe-area-inset-top, 0px) + 10px);'
-          + 'left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;'
-          + 'padding:8px 14px;border-radius:999px;background:rgba(12,12,18,.92);color:#fff;'
-          + 'font:700 13px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
-          + 'border:1px solid rgba(245,197,66,.55);box-shadow:0 6px 22px rgba(0,0,0,.45);'
-          + 'pointer-events:none;display:none');
-        adPillEl.textContent = '';
-        bringPillFront();
-        setTimeout(bringPillFront, 700);
-        setTimeout(bringPillFront, 3600);
-        let left = AD_SECONDS;
+        const total = adDurationNow;
+        let left = total;
+        let retried = false;
         const paintCd = () => {
-          const label = left > 0
+          cdEl.textContent = left > 0
             ? `${t('يبدأ التحميل بعد')} ${left}`
             : t('جارٍ بدء التحميل…');
-          cdEl.textContent = label;
-          if (adPillEl) adPillEl.textContent = label;
         };
         paintCd();
         adTimer = setInterval(() => {
@@ -2057,6 +1970,9 @@
           }
           left -= 1;
           if (left <= 0) { closeInAppAd(); return; }
+          // A creative that never renders would leave a black screen: retry it
+          // once, then keep the countdown running regardless.
+          if (!frameLoaded && !retried && left <= total - 3) { retried = true; loadSrc(); }
           paintCd();
         }, 1000);
       });
@@ -2081,12 +1997,13 @@
       paintLaunchUi();
       forceReflow();
       launchInFlight = true;
-      const releaseLaunch = setTimeout(() => { launchInFlight = false; }, (AD_SECONDS + 8) * 1000);
+      const releaseLaunch = setTimeout(() => { launchInFlight = false; }, (adDurationNow + 8) * 1000);
       try {
         // The ad plays INSIDE the app first; the download starts when it ends.
         cancelRequested = false;
         if (!justOpens) {
-          armDownloadClock();          // round 41: the ad is NOT download time
+          adDurationNow = adDuration();   // a new random length for this ad
+          armDownloadClock();             // round 41: the ad is NOT download time
           primedTransfer = null;
           adStartHook = () => { try { primeDownloadTransfer(); } catch (e) {} };
           await showInAppAd();         // runs the FULL countdown

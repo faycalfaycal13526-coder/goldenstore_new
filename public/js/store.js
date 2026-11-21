@@ -318,10 +318,8 @@ function featureSlide(a) {
       ? el('img', { class: 'fc-fallback-ico', src: a.icon_url, alt: '', loading: 'lazy' })
       : ico('package', 'icon icon-lg'));
   }
-  const desc = descText(a);
-  if (desc) {
-    media.append(el('div', Object.assign({ class: 'fc-desc' }, descAttrs(a)), desc));
-  }
+  // Owner request: the hero (featured) image stays clean — the full description
+  // is NOT overlaid on it. It still appears on the app page and on the list cards.
   const rt = ratingOf(a);
   slide.append(
     media,

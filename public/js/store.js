@@ -1768,8 +1768,15 @@ async function checkForUpdates(opts = {}) {
 function formatReleaseDate(ts) {
   const n = Number(ts || 0);
   if (!n || !Number.isFinite(n)) return '—';
-  try { return new Date(n > 1e12 ? n : n * 1000).toLocaleDateString('ar-EG-u-nu-latn', { year: 'numeric', month: 'short', day: 'numeric' }); }
-  catch (e) { return '—'; }
+  // The date must follow the UI language: it used to be pinned to ar-EG, so a
+  // Chinese or Russian dialog showed an Arabic month name like «نوفمبر».
+  const lg = (window.GSI18N && window.GSI18N.lang) || 'ar';
+  const locale = lg === 'ar' ? 'ar-EG-u-nu-latn' : lg;
+  try { return new Date(n > 1e12 ? n : n * 1000).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric', numberingSystem: 'latn' }); }
+  catch (e) {
+    try { return new Date(n > 1e12 ? n : n * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
+    catch (e2) { return '—'; }
+  }
 }
 
 // Shared by both popups: language switcher + Telegram news. Falls back to a
@@ -1818,7 +1825,22 @@ function showUpdateDialog(update, opts = {}) {
     'aria-modal': 'true', 'aria-labelledby': 'gs-update-title', 'data-noi18n': '',
   });
   const apkUrl = updateApkUrl(update);
-  const notes = update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.');
+  // Release notes come from the admin/API in whatever language the owner typed
+  // (usually English). Route them through the content translator so they read in
+  // the visitor's language; the shipped table paints instantly, unknown notes
+  // are translated on demand and cached.
+  const rawNotes = update.notes || t('يتوفر إصدار جديد من التطبيق. حمّله الآن للحصول على أحدث الميزات والإصلاحات.');
+  // Keep the source in the DOM and let the shared content engine fill it in:
+  // `data-i18n-content` holders are repainted automatically when a translation
+  // arrives, so the dialog never shows an empty card while it is fetching.
+  let notes = rawNotes;
+  try {
+    const g = window.GSI18N;
+    if (g && typeof g.content === 'function' && !update.notes_is_ui) {
+      const hit = g.content(rawNotes);
+      if (typeof hit === 'string' && hit) notes = hit;
+    }
+  } catch (e) {}
   const prevFocus = document.activeElement;
   const size = Number(update.size_bytes || 0);
   const sizeText = size > 0 ? formatBytes(size) : '—';
@@ -1862,7 +1884,7 @@ function showUpdateDialog(update, opts = {}) {
       ),
       el('div', { class: 'gs-update-notes' },
         el('span', { class: 'gs-update-notes-label' }, t('ما الجديد')),
-        el('p', null, notes),
+        el('p', update.notes_is_ui ? null : { 'data-i18n-content': rawNotes }, notes),
       ),
       el('div', { class: 'gs-update-chips' },
         el('span', { class: 'gs-update-chip' }, ico('shield', 'icon'), t('تحميل آمن')),

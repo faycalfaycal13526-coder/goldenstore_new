@@ -1790,8 +1790,30 @@
 
   // Number/size unit labels per language.
   var UNITS = {
-    bytes: { ar: ['ب', 'ك.ب', 'م.ب', 'ج.ب'], en: ['B', 'KB', 'MB', 'GB'], fr: ['o', 'Ko', 'Mo', 'Go'], es: ['B', 'KB', 'MB', 'GB'] },
-    count: { ar: ['', 'ألف', 'مليون', 'مليار'], en: ['', 'K', 'M', 'B'], fr: ['', 'K', 'M', 'Md'], es: ['', 'K', 'M', 'MM'] },
+    bytes: {
+      ar: ['ب', 'ك.ب', 'م.ب', 'ج.ب'],
+      en: ['B', 'KB', 'MB', 'GB'],
+      fr: ['o', 'Ko', 'Mo', 'Go'],
+      es: ['B', 'KB', 'MB', 'GB'],
+      tr: ['B', 'KB', 'MB', 'GB'],
+      de: ['B', 'KB', 'MB', 'GB'],
+      pt: ['B', 'KB', 'MB', 'GB'],
+      ru: ['Б', 'КБ', 'МБ', 'ГБ'],
+      hi: ['बाइट', 'केबी', 'एमबी', 'जीबी'],
+      zh: ['字节', 'KB', 'MB', 'GB'],
+    },
+    count: {
+      ar: ['', 'ألف', 'مليون', 'مليار'],
+      en: ['', 'K', 'M', 'B'],
+      fr: ['', 'K', 'M', 'Md'],
+      es: ['', 'K', 'M', 'MM'],
+      tr: ['', 'B', 'Mn', 'Mr'],
+      de: ['', 'Tsd.', 'Mio.', 'Mrd.'],
+      pt: ['', 'mil', 'mi', 'bi'],
+      ru: ['', 'тыс.', 'млн', 'млрд'],
+      hi: ['', 'हज़ार', 'लाख', 'अरब'],
+      zh: ['', '千', '百万', '十亿'],
+    },
   };
   function units(kind) { var u = UNITS[kind]; return (u && (u[lang] || u.ar)) || []; }
 

@@ -1765,7 +1765,10 @@ function modalExtras() {
   const row = el('div', { class: 'gs-modal-extras', 'data-noi18n': '' });
   const sel = el('select', { class: 'gs-modal-lang-select', 'aria-label': t('اللغة') },
     el('option', { value: 'ar' }, 'العربية'), el('option', { value: 'en' }, 'English'),
-    el('option', { value: 'fr' }, 'Français'), el('option', { value: 'es' }, 'Español'));
+    el('option', { value: 'fr' }, 'Français'), el('option', { value: 'es' }, 'Español'),
+    el('option', { value: 'tr' }, 'Türkçe'), el('option', { value: 'de' }, 'Deutsch'),
+    el('option', { value: 'pt' }, 'Português'), el('option', { value: 'ru' }, 'Русский'),
+    el('option', { value: 'hi' }, 'हिन्दी'), el('option', { value: 'zh' }, '中文'));
   sel.onchange = () => {
     try { localStorage.setItem('gs_lang', sel.value); } catch (e) {}
     try {

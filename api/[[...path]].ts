@@ -1173,7 +1173,7 @@ app.post('/translate', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const target = String(body.target || '').toLowerCase();
   const q = Array.isArray(body.q) ? body.q.slice(0, 60).map((x: any) => String(x||'')) : [];
-  if (!['en','fr','es'].includes(target) || !q.length) return c.json({ t: q });
+  if (!['en','fr','es','tr','de','pt','ru','hi','zh'].includes(target) || !q.length) return c.json({ t: q });
   const debug = body.debug === true;
   const diag: any[] = [];
 

@@ -1494,7 +1494,7 @@ section { margin: 56px 0; }
   position: absolute; top: calc(100% + 6px); inset-inline-end: 0;
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px;
   box-shadow: 0 12px 32px rgba(0,0,0,.4); padding: 6px; min-width: 150px; z-index: 80;
-  display: none; flex-direction: column; gap: 2px;
+  display: none; flex-direction: column; gap: 2px; max-height: min(70vh, 430px); overflow-y: auto;
 }
 .lang-switch.open .lang-menu { display: flex; }
 .lang-item {

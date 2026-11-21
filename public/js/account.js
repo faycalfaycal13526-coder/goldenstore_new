@@ -876,6 +876,12 @@
       { code: 'en', label: 'English' },
       { code: 'fr', label: 'Français' },
       { code: 'es', label: 'Español' },
+      { code: 'tr', label: 'Türkçe' },
+      { code: 'de', label: 'Deutsch' },
+      { code: 'pt', label: 'Português' },
+      { code: 'ru', label: 'Русский' },
+      { code: 'hi', label: 'हिन्दी' },
+      { code: 'zh', label: '中文' },
     ];
     const currentLang = (window.GSI18N && window.GSI18N.lang) || 'ar';
     const current = langs.find((l) => l.code === currentLang) || langs[0];
@@ -981,7 +987,7 @@
 
   function langLabel() {
     const lang = (window.GSI18N && window.GSI18N.lang) || 'ar';
-    const map = { ar: 'العربية', en: 'English', fr: 'Français', es: 'Español' };
+    const map = { ar: 'العربية', en: 'English', fr: 'Français', es: 'Español', tr: 'Türkçe', de: 'Deutsch', pt: 'Português', ru: 'Русский', hi: 'हिन्दी', zh: '中文' };
     return map[lang] || lang;
   }
 })();

@@ -150,7 +150,7 @@
     btn.appendChild(iconNode('globe'));
     btn.appendChild(node('span', 'gs-modal-lang-code', String(currentLang()).toUpperCase()));
     var menu = node('div', 'gs-modal-lang-menu');
-    [['ar', 'العربية'], ['en', 'English'], ['fr', 'Français'], ['es', 'Español']].forEach(function (pair) {
+    [['ar', 'العربية'], ['en', 'English'], ['fr', 'Français'], ['es', 'Español'], ['tr', 'Türkçe'], ['de', 'Deutsch'], ['pt', 'Português'], ['ru', 'Русский'], ['hi', 'हिन्दी'], ['zh', '中文']].forEach(function (pair) {
       var it = node('button', 'gs-modal-lang-item' + (pair[0] === currentLang() ? ' is-on' : ''), pair[1]);
       it.type = 'button';
       it.onclick = function (e) { e.stopPropagation(); changeLang(pair[0]); };

@@ -1167,6 +1167,12 @@
       { code: 'en', name: t('الإنجليزية'), native: 'English', dir: 'LTR', flag: '🇬🇧' },
       { code: 'fr', name: t('الفرنسية'), native: 'Français', dir: 'LTR', flag: '🇫🇷' },
       { code: 'es', name: t('الإسبانية'), native: 'Español', dir: 'LTR', flag: '🇪🇸' },
+      { code: 'tr', name: t('التركية'), native: 'Türkçe', dir: 'LTR', flag: '🇹🇷' },
+      { code: 'de', name: t('الألمانية'), native: 'Deutsch', dir: 'LTR', flag: '🇩🇪' },
+      { code: 'pt', name: t('البرتغالية'), native: 'Português', dir: 'LTR', flag: '🇵🇹' },
+      { code: 'ru', name: t('الروسية'), native: 'Русский', dir: 'LTR', flag: '🇷🇺' },
+      { code: 'hi', name: t('الهندية'), native: 'हिन्दी', dir: 'LTR', flag: '🇮🇳' },
+      { code: 'zh', name: t('الصينية'), native: '中文', dir: 'LTR', flag: '🇨🇳' },
     ];
     body.innerHTML = '';
     function activate(code) {
@@ -1191,14 +1197,14 @@
       el('div', { class: 'admin-page-head' },
         el('div', null,
           el('h1', { class: 'admin-page-title' }, t('اللغات')),
-          el('p', { class: 'admin-page-sub' }, t('بدّل لغة لوحة التحكم والمتجر من مكان واحد. أربع لغات مترجمة يدوياً، فورية وبلا خدمة ترجمة خارجية.'))),
+          el('p', { class: 'admin-page-sub' }, t('بدّل لغة لوحة التحكم والمتجر من مكان واحد. عشر لغات مترجمة يدوياً، فورية وبلا خدمة ترجمة خارجية.'))),
         el('div', { class: 'admin-head-actions' }, adminLangSwitcher())),
       el('div', { class: 'admin-lang-grid' }, ...cards),
       el('div', { class: 'panel cc-panel' },
         el('div', { class: 'panel-head' }, ico('globe', 'icon'), t('كيف تعمل الترجمة')),
         el('div', { class: 'cc-config-list' },
           el('div', { class: 'cc-config-row' }, el('span', null, t('المصدر')), el('strong', null, 'public/js/lang.js'), el('i', { class: 'cc-config-dot is-ok' })),
-          el('div', { class: 'cc-config-row' }, el('span', null, t('اللغات المدعومة')), el('strong', null, 'AR · EN · FR · ES'), el('i', { class: 'cc-config-dot is-ok' })),
+          el('div', { class: 'cc-config-row' }, el('span', null, t('اللغات المدعومة')), el('strong', null, 'AR · EN · FR · ES · TR · DE · PT · RU · HI · ZH'), el('i', { class: 'cc-config-dot is-ok' })),
           el('div', { class: 'cc-config-row' }, el('span', null, t('الاتجاه')), el('strong', null, t('عربي من اليمين لليسار، والباقي من اليسار لليمين')), el('i', { class: 'cc-config-dot is-ok' })),
           el('div', { class: 'cc-config-row' }, el('span', null, t('الاعتماد على الشبكة')), el('strong', null, t('لا يوجد')), el('i', { class: 'cc-config-dot is-ok' }))),
         el('div', { class: 'hint' }, t('كل نصوص الواجهة مترجمة يدوياً بقاموس ثابت؛ لا تُستخدم خدمة ترجمة آلية للواجهة.'))),
@@ -1544,7 +1550,7 @@
       { key: 'theme_default', label: 'المظهر الافتراضي', type: 'select', options: [['dark','داكن'],['light','فاتح'],['system','حسب الجهاز']] },
       { key: 'accent', label: 'اللون المميز', type: 'select', options: [['gold','ذهبي'],['blue','أزرق'],['green','أخضر'],['purple','بنفسجي']] },
       { key: 'density', label: 'كثافة الواجهة', type: 'select', options: [['comfortable','مريحة'],['compact','مضغوطة']] },
-      { key: 'default_language', label: 'اللغة الافتراضية', type: 'select', options: [['ar','العربية'],['en','English'],['fr','Français'],['es','Español']] },
+      { key: 'default_language', label: 'اللغة الافتراضية', type: 'select', options: [['ar','العربية'],['en','English'],['fr','Français'],['es','Español'],['tr','Türkçe'],['de','Deutsch'],['pt','Português'],['ru','Русский'],['hi','हिन्दी'],['zh','中文']] },
     ] },
     { id: 'content', label: 'المحتوى والنشر', icon: 'apps', fields: [
       { key: 'default_type', label: 'النوع الافتراضي', type: 'select', options: [['app','تطبيق'],['game','لعبة']] },

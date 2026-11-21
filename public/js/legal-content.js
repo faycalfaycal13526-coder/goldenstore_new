@@ -84,7 +84,8 @@
         "Support chat",
         "Future advertising",
         "Sharing & deletion",
-        "Changes to this policy"
+        "Changes to this policy",
+        "Optional demographics"
       ],
       "sections": [
         {
@@ -147,6 +148,12 @@
           "title": "Changes to this policy",
           "paras": [
             "We may update this policy when features change; the last-updated date appears at the top, and we may request fresh consent to a revised version before you continue signing in."
+          ]
+        },
+        {
+          "title": "Optional demographics",
+          "paras": [
+            "You may optionally share an age group, gender and country anonymously and with explicit consent, for aggregated statistics only. This data is never linked to your account, and we never collect your name, e-mail or date of birth. You can withdraw consent or delete the data at any time from your account page. If this option is not enabled in the dashboard, nothing is collected."
           ]
         }
       ]
@@ -305,7 +312,8 @@
         "Chat d’assistance",
         "Publicité future",
         "Partage et suppression",
-        "Modifications"
+        "Modifications",
+        "Données démographiques facultatives"
       ],
       "sections": [
         {
@@ -368,6 +376,12 @@
           "title": "Modifications",
           "paras": [
             "Cette politique peut être mise à jour lors de changements de fonctionnalités ; la date de dernière mise à jour figure en haut, et un nouveau consentement peut être demandé avant de poursuivre la connexion."
+          ]
+        },
+        {
+          "title": "Données démographiques facultatives",
+          "paras": [
+            "Vous pouvez choisir de partager de façon anonyme une tranche d’âge, un genre et un pays, avec un consentement explicite et à des fins statistiques agrégées uniquement. Ces données ne sont jamais liées à votre compte et nous ne collectons ni votre nom, ni votre e-mail, ni votre date de naissance. Vous pouvez retirer votre consentement ou supprimer ces données à tout moment depuis votre page de compte. Si cette option n’est pas activée dans le tableau de bord, aucune donnée n’est collectée."
           ]
         }
       ]
@@ -526,7 +540,8 @@
         "Chat de soporte",
         "Publicidad futura",
         "Compartir y eliminación",
-        "Cambios en la política"
+        "Cambios en la política",
+        "Datos demográficos opcionales"
       ],
       "sections": [
         {
@@ -589,6 +604,12 @@
           "title": "Cambios en la política",
           "paras": [
             "Podemos actualizar esta política cuando cambien las funciones; la fecha de última actualización aparece arriba y podemos pedir un nuevo consentimiento antes de continuar con el inicio de sesión."
+          ]
+        },
+        {
+          "title": "Datos demográficos opcionales",
+          "paras": [
+            "Puedes compartir opcionalmente un grupo de edad, género y país de forma anónima y con consentimiento explícito, solo con fines estadísticos agregados. Estos datos nunca se vinculan a tu cuenta y no recopilamos tu nombre, correo electrónico ni fecha de nacimiento. Puedes retirar el consentimiento o eliminar los datos en cualquier momento desde tu página de cuenta. Si esta opción no está activada en el panel, no se recopila nada."
           ]
         }
       ]
@@ -747,7 +768,8 @@
         "Destek sohbeti",
         "Gelecekteki reklamcılık",
         "Paylaşma ve silme",
-        "Bu politikadaki değişiklikler"
+        "Bu politikadaki değişiklikler",
+        "İsteğe bağlı demografik veriler"
       ],
       "sections": [
         {
@@ -810,6 +832,12 @@
           "title": "Bu politikadaki değişiklikler",
           "paras": [
             "Özellikler değiştiğinde bu politikayı güncelleyebiliriz; son güncelleme tarihi en üstte görünür ve oturum açmaya devam etmeden önce revize edilmiş bir sürüm için yeni onay talep edebiliriz."
+          ]
+        },
+        {
+          "title": "İsteğe bağlı demografik veriler",
+          "paras": [
+            "Açık rızanızla yaş grubu, cinsiyet ve ülke bilgilerinizi isteğe bağlı olarak anonim şekilde ve yalnızca toplu istatistik amacıyla paylaşabilirsiniz. Bu veriler hesabınıza hiçbir zaman bağlanmaz; adınızı, e-postanızı veya doğum tarihinizi toplamayız. Onayınızı istediğiniz zaman hesap sayfanızdan geri çekebilir veya verileri silebilirsiniz. Bu seçenek panelden etkinleştirilmediyse hiçbir şey toplanmaz."
           ]
         }
       ]
@@ -968,7 +996,8 @@
         "Support-Chat",
         "Zukünftige Werbung",
         "Teilen und Löschen",
-        "Änderungen an dieser Richtlinie"
+        "Änderungen an dieser Richtlinie",
+        "Optionale demografische Daten"
       ],
       "sections": [
         {
@@ -1031,6 +1060,12 @@
           "title": "Änderungen an dieser Richtlinie",
           "paras": [
             "Wir können diese Richtlinie aktualisieren, wenn sich Funktionen ändern; Das Datum der letzten Aktualisierung wird oben angezeigt. Möglicherweise fordern wir eine erneute Zustimmung zu einer überarbeiteten Version an, bevor Sie sich weiter anmelden."
+          ]
+        },
+        {
+          "title": "Optionale demografische Daten",
+          "paras": [
+            "Sie können freiwillig eine Altersgruppe, ein Geschlecht und ein Land anonym und mit ausdrücklicher Einwilligung ausschließlich für aggregierte Statistiken teilen. Diese Daten werden niemals mit Ihrem Konto verknüpft, und wir erheben weder Ihren Namen noch Ihre E-Mail-Adresse oder Ihr Geburtsdatum. Sie können Ihre Einwilligung jederzeit über Ihre Kontoseite widerrufen oder die Daten löschen. Ist diese Option im Dashboard nicht aktiviert, werden keine Daten erhoben."
           ]
         }
       ]
@@ -1189,7 +1224,8 @@
         "Bate-papo de suporte",
         "Publicidade futura",
         "Compartilhamento e exclusão",
-        "Alterações nesta política"
+        "Alterações nesta política",
+        "Dados demográficos opcionais"
       ],
       "sections": [
         {
@@ -1252,6 +1288,12 @@
           "title": "Alterações nesta política",
           "paras": [
             "Poderemos atualizar esta política quando os recursos mudarem; a data da última atualização aparece na parte superior e poderemos solicitar novo consentimento para uma versão revisada antes de você continuar fazendo login."
+          ]
+        },
+        {
+          "title": "Dados demográficos opcionais",
+          "paras": [
+            "Você pode compartilhar opcionalmente uma faixa etária, gênero e país de forma anônima e com consentimento explícito, apenas para estatísticas agregadas. Esses dados nunca são vinculados à sua conta, e não coletamos seu nome, e-mail ou data de nascimento. Você pode retirar o consentimento ou excluir os dados a qualquer momento na página da sua conta. Se esta opção não estiver ativada no painel, nada será coletado."
           ]
         }
       ]
@@ -1410,7 +1452,8 @@
         "Чат поддержки",
         "Будущая реклама",
         "Публикация и удаление",
-        "Изменения в этой политике"
+        "Изменения в этой политике",
+        "Дополнительные демографические данные"
       ],
       "sections": [
         {
@@ -1473,6 +1516,12 @@
           "title": "Изменения в этой политике",
           "paras": [
             "Мы можем обновлять эту политику при изменении функций; дата последнего обновления отображается вверху, и мы можем запросить новое согласие на исправленную версию, прежде чем вы продолжите вход в систему."
+          ]
+        },
+        {
+          "title": "Дополнительные демографические данные",
+          "paras": [
+            "Вы можете по желанию поделиться возрастной группой, полом и страной анонимно и с явного согласия — исключительно для агрегированной статистики. Эти данные никогда не связываются с вашей учётной записью, и мы не собираем ваше имя, адрес электронной почты или дату рождения. Вы можете отозвать согласие или удалить данные в любое время на странице своей учётной записи. Если этот параметр не включён в панели управления, никакие данные не собираются."
           ]
         }
       ]
@@ -1631,7 +1680,8 @@
         "समर्थन चैट",
         "भविष्य का विज्ञापन",
         "साझा करना और हटाना",
-        "इस नीति में परिवर्तन"
+        "इस नीति में परिवर्तन",
+        "वैकल्पिक जनसांख्यिकीय डेटा"
       ],
       "sections": [
         {
@@ -1694,6 +1744,12 @@
           "title": "इस नीति में परिवर्तन",
           "paras": [
             "सुविधाएँ बदलने पर हम इस नीति को अद्यतन कर सकते हैं; अंतिम अद्यतन तिथि शीर्ष पर दिखाई देती है, और आपके साइन इन करना जारी रखने से पहले हम संशोधित संस्करण के लिए नई सहमति का अनुरोध कर सकते हैं।"
+          ]
+        },
+        {
+          "title": "वैकल्पिक जनसांख्यिकीय डेटा",
+          "paras": [
+            "आप स्पष्ट सहमति के साथ आयु वर्ग, लिंग और देश को गुमनाम रूप से केवल समग्र आंकड़ों के लिए वैकल्पिक रूप से साझा कर सकते हैं। यह डेटा कभी भी आपके खाते से नहीं जोड़ा जाता, और हम आपका नाम, ईमेल या जन्म तिथि एकत्र नहीं करते। आप किसी भी समय अपने खाता पृष्ठ से सहमति वापस ले सकते हैं या डेटा हटा सकते हैं। यदि यह विकल्प डैशबोर्ड में सक्षम नहीं है, तो कुछ भी एकत्र नहीं किया जाता।"
           ]
         }
       ]
@@ -1852,7 +1908,8 @@
         "支持聊天",
         "未来广告",
         "分享与删除",
-        "本政策的变更"
+        "本政策的变更",
+        "可选的人口统计数据"
       ],
       "sections": [
         {
@@ -1915,6 +1972,12 @@
           "title": "本政策的变更",
           "paras": [
             "当功能发生变化时，我们可能会更新本政策；最后更新日期显示在顶部，在您继续登录之前，我们可能会请求您重新同意修订版本。"
+          ]
+        },
+        {
+          "title": "可选的人口统计数据",
+          "paras": [
+            "您可以自愿、匿名并在明确同意的情况下分享年龄段、性别和国家，仅用于汇总统计。这些数据绝不会与您的账户关联，我们也不会收集您的姓名、电子邮件或出生日期。您可以随时从账户页面撤回同意或删除数据。如果此选项未在仪表板中启用，则不会收集任何内容。"
           ]
         }
       ]

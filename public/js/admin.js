@@ -449,18 +449,60 @@
     const completedParts = [];
     let totalUploaded = 0;
 
+    // 2. Upload each part with retry.
+    //
+    // PART URLS EXPIRE AFTER ONE HOUR. A multi-GB APK on a slow mobile uplink
+    // needs one to three hours, so the parts still pending when the hour ran
+    // out came back 403 — and 403 was never retried, which killed the whole
+    // publish on a perfectly healthy connection. The remaining URLs are now
+    // re-signed before they expire (and again if a part still comes back 403),
+    // so the upload simply continues from where it stopped.
+    const SIGNED_URL_LIFETIME = 45 * 60 * 1000;   // renew before the 1-hour expiry
+    let signedAt = Date.now();
+    let pending = partUrls.map((p) => ({ partNumber: p.partNumber, url: p.url }));
+
+    async function ressignParts(fromIndex) {
+      const part_numbers = pending.slice(fromIndex).map((p) => p.partNumber);
+      if (!part_numbers.length) return;
+      const fresh = await api('/api/admin/multipart/sign-parts', {
+        method: 'POST',
+        timeoutMs: 60000,
+        body: { key, uploadId, part_numbers },
+      });
+      const urlByNum = new Map((fresh && fresh.parts || []).map((p) => [p.partNumber, p.url]));
+      for (let k = fromIndex; k < pending.length; k++) {
+        const u = urlByNum.get(pending[k].partNumber);
+        if (u) pending[k] = { partNumber: pending[k].partNumber, url: u };
+      }
+      signedAt = Date.now();
+    }
+
     try {
-      // 2. Upload each part with retry
-      for (let i = 0; i < partUrls.length; i++) {
+      for (let i = 0; i < pending.length; i++) {
         const start = i * partSize;
         const end = Math.min(start + partSize, file.size);
         const chunk = file.slice(start, end);
-        const partNum = partUrls[i].partNumber;
-        const partUrl = partUrls[i].url;
+        const partNum = pending[i].partNumber;
 
-        const etag = await retryXhrPut(partUrl, chunk, null, (loaded) => {
-          if (onProgress) onProgress((totalUploaded + loaded) / file.size);
-        }, 3, 10 * 60 * 1000);  // 10-min timeout per 10MB part
+        if (Date.now() - signedAt > SIGNED_URL_LIFETIME) await ressignParts(i);
+
+        let etag = null;
+        for (let attempt = 0; attempt <= 1; attempt++) {
+          try {
+            etag = await retryXhrPut(pending[i].url, chunk, null, (loaded) => {
+              if (onProgress) onProgress((totalUploaded + loaded) / file.size);
+            }, 3, 10 * 60 * 1000);  // 10-min timeout per 10MB part
+            break;
+          } catch (e) {
+            // 403 = this part's signed URL expired mid-upload. Get a fresh one
+            // and try the same part again instead of failing the publish.
+            if (attempt === 0 && /_403$/.test(String(e && e.message))) {
+              await ressignParts(i);
+              continue;
+            }
+            throw e;
+          }
+        }
 
         if (!etag) {
           throw new Error('upload_etag_missing');

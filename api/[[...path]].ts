@@ -2934,6 +2934,34 @@ app.post('/admin/multipart/complete', async (c) => {
   return c.json({ ok: true, key: body.key });
 });
 
+// Re-sign parts whose pre-signed URL already expired.
+//
+// A multipart upload signs every part URL when it is created. Those URLs live
+// for one hour, but a multi-GB APK on a slow mobile uplink (a few hundred KB/s)
+// needs one to three HOURS. Parts still pending when the hour runs out came
+// back 403, and a 403 is not retried, so the whole publish died — even though
+// the bytes were fine and the connection was fine. The client asks for fresh
+// URLs for whatever is left and carries on from the current part.
+app.post('/admin/multipart/sign-parts', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const key = String(body.key || '');
+  const uploadId = String(body.uploadId || '');
+  const nums = Array.isArray(body.part_numbers) ? body.part_numbers : [];
+  if (!key || !uploadId || !nums.length) return c.json({ error: 'missing_fields' }, 400);
+  if (!/^(apk|ss|icon|feature|vthumb)\//.test(key) || key.includes('..')) {
+    return c.json({ error: 'invalid_key' }, 400);
+  }
+  if (nums.length > 10000) return c.json({ error: 'too_many_parts' }, 400);
+  const ttl = Number(body.expires || 6 * 3600);
+  const parts = [];
+  for (const raw of nums) {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > 10000) continue;
+    parts.push({ partNumber: n, url: await r2PresignUploadPart(c.env, key, uploadId, n, Math.min(Math.max(ttl, 600), 6 * 3600)) });
+  }
+  return c.json({ parts });
+});
+
 app.post('/admin/multipart/abort', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (body.key && body.uploadId) await r2AbortMultipartUpload(c.env, body.key, body.uploadId);

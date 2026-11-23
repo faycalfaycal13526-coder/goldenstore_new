@@ -334,9 +334,19 @@
   }
 
   const MULTIPART_THRESHOLD = 10 * 1024 * 1024; // 10 MB
-  // Part size for large APKs. 8 MB keeps every request well under the
-  // Worker/proxy limits and short enough for a weak mobile connection.
+  // Part size for large APKs. Small files use 8 MB (short requests, friendly to
+  // a weak mobile link); a very large APK switches to 32 MB so it is split into
+  // far fewer parts and the per-request timeout stops mattering.
   const MULTIPART_PART_SIZE = 8 * 1024 * 1024;
+  const MULTIPART_PART_SIZE_BIG = 32 * 1024 * 1024;
+  const BIG_FILE = 512 * 1024 * 1024;   // 512 MB and above
+  function partSizeFor(size) {
+    return size >= BIG_FILE ? MULTIPART_PART_SIZE_BIG : MULTIPART_PART_SIZE;
+  }
+  // How long each presigned part stays valid. A 4 GB APK on a 4G uplink can
+  // take hours, so a 1-hour window expired mid-upload and the transfer failed
+  // near the end. Always 12 h: generous, and R2 accepts it.
+  const MULTIPART_URL_TTL = 12 * 3600;
 
   function xhrPut(url, data, contentType, onProgress, timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -346,7 +356,10 @@
       // Default timeout: 5 min for small files, 30 min for large parts.
       // 0 means no timeout (default for XHR). We set it to ensure uploads
       // don't hang silently forever on flaky mobile networks.
-      xhr.timeout = timeoutMs > 0 ? timeoutMs : (5 * 60 * 1000);
+      // Large parts on a slow mobile link can legitimately take a long time;
+      // 0 (no timeout) is used for parts because the retry loop above already
+      // bounds the total effort.
+      xhr.timeout = timeoutMs > 0 ? timeoutMs : 0;
       if (onProgress) {
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) onProgress(e.loaded, e.total);
@@ -449,7 +462,8 @@
         content_type: contentType,
         slug_hint: slugHint || file.name,
         file_size: file.size,
-        part_size: MULTIPART_PART_SIZE,
+        part_size: partSizeFor(file.size),
+        url_ttl: MULTIPART_URL_TTL,
       },
     });
 
@@ -466,9 +480,11 @@
         const partNum = partUrls[i].partNumber;
         const partUrl = partUrls[i].url;
 
+        // A 4G link can drop repeatedly; 6 attempts per part with exponential
+        // backoff rides out the gaps instead of failing the whole upload.
         const etag = await retryXhrPut(partUrl, chunk, null, (loaded) => {
           if (onProgress) onProgress((totalUploaded + loaded) / file.size);
-        }, 3, 10 * 60 * 1000);  // 10-min timeout per 10MB part
+        }, 6, 30 * 60 * 1000);  // 30-min timeout per part
 
         if (!etag) {
           throw new Error('upload_etag_missing');
@@ -555,10 +571,30 @@
         row = el('div', { class: 'item' },
           el('span', null, chosen[idx]?.name || ''),
           el('div', { class: 'progress' }, el('div', null)),
+          el('span', { class: 'muted upload-pct' }, ''),
         );
         list.append(row);
+        row._t0 = Date.now();
+        row._last = 0;
       }
-      row.querySelector('.progress > div').style.width = `${Math.round(ratio * 100)}%`;
+      const pct = Math.max(0, Math.min(1, ratio || 0));
+      row.querySelector('.progress > div').style.width = `${Math.round(pct * 100)}%`;
+      // A 4 GB APK on 4G can run for hours, so show the percentage and a
+      // rough remaining time instead of a bar that looks stuck.
+      const label = row.querySelector('.upload-pct');
+      if (label) {
+        let text = `${Math.round(pct * 100)}%`;
+        const elapsed = (Date.now() - (row._t0 || Date.now())) / 1000;
+        if (pct > 0.02 && elapsed > 20) {
+          const total = elapsed / pct;
+          const left = Math.max(0, total - elapsed);
+          text += ' · ' + (left >= 60
+            ? `${Math.round(left / 60)} ${t('دقيقة متبقية')}`
+            : `${Math.round(left)} ${t('ثانية متبقية')}`);
+        }
+        if (label.textContent !== text) label.textContent = text;
+      }
+      row._last = pct;
     };
     return wrap;
   }

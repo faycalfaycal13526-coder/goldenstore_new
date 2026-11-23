@@ -2929,10 +2929,16 @@ app.post('/admin/multipart/create', async (c) => {
   const partSize = Math.min(Math.max(asked || 8 * 1024 * 1024, 5 * 1024 * 1024), 5 * 1024 * 1024 * 1024);
   const fileSize = Math.max(0, Number(body.file_size) || 0);
   if (!fileSize) return c.json({ error: 'file_size_required' }, 400);
+  // A 4 GB APK on a 4G uplink takes hours, so a 1-hour presign window expired
+  // mid-upload and the transfer failed near the end. The window is chosen from
+  // the file size and can be raised by the client (clamped to 24 h).
+  const askedTtl = Number(body.url_ttl) || 0;
+  const ttl = Math.min(Math.max(askedTtl || 3600, 3600), 24 * 3600);
   const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
   const parts = [];
-  for (let i = 1; i <= Math.ceil(fileSize / partSize); i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });
-  return c.json({ key, uploadId, partSize, parts });
+  const count = Math.ceil(fileSize / partSize);
+  for (let i = 1; i <= count; i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, ttl) });
+  return c.json({ key, uploadId, partSize, urlTtl: ttl, parts });
 });
 
 app.post('/admin/multipart/complete', async (c) => {

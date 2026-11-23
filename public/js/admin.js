@@ -334,16 +334,6 @@
   }
 
   const MULTIPART_THRESHOLD = 10 * 1024 * 1024; // 10 MB
-  // Part size for large APKs. Small files use 8 MB (short requests, friendly to
-  // a weak mobile link); a very large APK switches to 32 MB so it is split into
-  // far fewer parts and the per-request timeout stops mattering.
-  // The server owns the part size: it applies R2's 10,000-part ceiling and can
-  // raise it for huge files. 0 means "you decide".
-  function partSizeFor() { return 0; }
-  // How long each presigned part stays valid. A 4 GB APK on a 4G uplink can
-  // take hours, so a 1-hour window expired mid-upload and the transfer failed
-  // near the end. Always 12 h: generous, and R2 accepts it.
-  const MULTIPART_URL_TTL = 12 * 3600;
 
   function xhrPut(url, data, contentType, onProgress, timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -353,10 +343,7 @@
       // Default timeout: 5 min for small files, 30 min for large parts.
       // 0 means no timeout (default for XHR). We set it to ensure uploads
       // don't hang silently forever on flaky mobile networks.
-      // Large parts on a slow mobile link can legitimately take a long time;
-      // 0 (no timeout) is used for parts because the retry loop above already
-      // bounds the total effort.
-      xhr.timeout = timeoutMs > 0 ? timeoutMs : 0;
+      xhr.timeout = timeoutMs > 0 ? timeoutMs : (5 * 60 * 1000);
       if (onProgress) {
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) onProgress(e.loaded, e.total);
@@ -365,12 +352,8 @@
       xhr.ontimeout = () => reject(new Error('upload_timeout'));
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          let etag = '';
-          try { etag = xhr.getResponseHeader('ETag') || ''; } catch (e) { etag = ''; }
-          resolve(etag ? etag.trim() : '');
-        } else if (xhr.status === 413) {
-          // Large file rejected upstream (Worker/proxy body cap).
-          reject(new Error('upload_too_large'));
+          const etag = xhr.getResponseHeader('ETag');
+          resolve(etag);
         } else {
           reject(new Error(`upload_failed_${xhr.status}`));
         }
@@ -380,54 +363,23 @@
     });
   }
 
-  // Waits for the connection to come back instead of burning attempts while
-  // the phone is offline. Resolves on `online`, or after a timeout so a device
-  // that reports the wrong state can still retry.
-  function waitForOnline(maxMs) {
-    return new Promise((resolve) => {
-      if (typeof navigator === 'undefined' || navigator.onLine !== false) {
-        resolve(); return;
-      }
-      let done = false;
-      const finish = () => { if (done) return; done = true; window.removeEventListener('online', finish); resolve(); };
-      window.addEventListener('online', finish);
-      setTimeout(finish, maxMs || 60000);
-    });
-  }
-
   async function retryXhrPut(url, data, contentType, onProgress, maxRetries, timeoutMs) {
-    // maxRetries < 0 means "keep trying for as long as the upload is wanted".
-    const endless = maxRetries < 0;
     let lastErr;
-    for (let attempt = 0; endless || attempt <= maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await xhrPut(url, data, contentType, onProgress, timeoutMs);
       } catch (err) {
         lastErr = err;
-        // A 4xx means the presigned URL itself is wrong — retrying can't fix
-        // that, so the caller restarts the upload with fresh URLs instead.
+        // Don't retry on 4xx (the presigned URL or its content-type is wrong,
+        // retrying won't fix that). Retry on network errors and 5xx.
         if (err && err.message && /_4\d\d$/.test(err.message)) throw err;
-        await waitForOnline(60000);
-        if (!endless && attempt >= maxRetries) break;
-        // Exponential backoff capped at 30 s: a long outage must not hammer
-        // the link, but the upload must never give up on its own.
-        const wait = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
-        await new Promise((r) => setTimeout(r, wait));
+        if (attempt < maxRetries) {
+          // Exponential backoff: 1s, 2s, 4s, 8s…
+          await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
       }
     }
     throw lastErr;
-  }
-
-  // Turns raw upload error codes into a message the owner can act on.
-  function uploadErrorText(err) {
-    const code = String((err && err.message) || err || '');
-    if (code === 'upload_too_large') return t('الملف أكبر من الحد المسموح على الخادم');
-    if (code === 'upload_etag_missing') return t('تعذّر إكمال الرفع المجزّأ، أعد المحاولة');
-    if (code === 'upload_timeout') return t('انتهت مهلة الرفع، تحقّق من الاتصال وأعد المحاولة');
-    if (code === 'upload_error') return t('انقطع الاتصال أثناء الرفع، أعد المحاولة');
-    if (/^upload_failed_5/.test(code)) return t('خطأ مؤقت في الخادم، أعد المحاولة');
-    if (/^upload_failed_4/.test(code)) return t('رفض الخادم الملف، تحقّق من الصلاحيات');
-    return code;
   }
 
   async function r2Upload(file, kind, slugHint, onProgress) {
@@ -467,78 +419,8 @@
     return key;
   }
 
-  // ---- Resume state ----------------------------------------------------
-  // While a large upload is running, warn before the tab is closed: the parts
-  // already sent are saved, but the upload stops until the page is reopened.
-  let uploadInProgress = false;
-  function setUploading(on) {
-    if (uploadInProgress === on) return;
-    uploadInProgress = on;
-    try {
-      if (on) window.addEventListener('beforeunload', uploadLeaveGuard);
-      else window.removeEventListener('beforeunload', uploadLeaveGuard);
-    } catch (e) {}
-  }
-  function uploadLeaveGuard(e) {
-    if (!uploadInProgress) return;
-    e.preventDefault();
-    e.returnValue = '';
-    return '';
-  }
-
-  // A 4 GB upload to a 4G phone can be interrupted hours in. The upload id,
-  // the key and the finished part numbers are kept in localStorage so the next
-  // attempt continues where it stopped instead of starting over.
-  function resumeId(f) {
-    return `gs_up_${f.size}_${f.name.replace(/[^a-z0-9.]/gi, '').slice(0, 40)}`;
-  }
-  function loadResume(f) {
-    try {
-      const raw = localStorage.getItem(resumeId(f));
-      if (!raw) return null;
-      const st = JSON.parse(raw);
-      if (!st || st.key == null || !st.uploadId) return null;
-      if (Date.now() - (st.ts || 0) > 20 * 3600 * 1000) return null;   // stale
-      return st;
-    } catch (e) { return null; }
-  }
-  function saveResume(f, st) {
-    try { localStorage.setItem(resumeId(f), JSON.stringify({ ...st, ts: Date.now() })); } catch (e) {}
-  }
-  function clearResume(f) {
-    try { localStorage.removeItem(resumeId(f)); } catch (e) {}
-  }
-
-  // Uploads that must survive a weak or flapping connection: the body is
-  // wrapped in a loop that re-mints presigned URLs and resumes from the last
-  // finished part, however many times the network gives up.
   async function r2MultipartUpload(file, kind, slugHint, contentType, onProgress) {
-    let attempt = 0;
-    let lastErr = null;
-    // MAX_ROUNDS only guards against a bug causing an instant retry storm;
-    // with the backoff below this is many hours of trying.
-    while (attempt < 200) {
-      attempt++;
-      try {
-        return await r2MultipartOnce(file, kind, slugHint, contentType, onProgress, attempt);
-      } catch (err) {
-        lastErr = err;
-        const msg = String((err && err.message) || '');
-        // 4xx on a part means the signed URL expired or was rejected: mint new
-        // ones and continue from the saved part. Everything else is a network
-        // drop, which is handled the same way.
-        if (onProgress) onProgress(null, { retryRound: attempt, reason: msg });
-        await waitForOnline(120000);
-        await new Promise((r) => setTimeout(r, Math.min(2000 * attempt, 60000)));
-      }
-    }
-    throw lastErr || new Error('upload_failed');
-  }
-
-  async function r2MultipartOnce(file, kind, slugHint, contentType, onProgress, round) {
-    // 0. Resume an interrupted attempt if we kept its state.
-    const saved = loadResume(file);
-    // 1. Create (or rejoin) the multipart upload and get presigned part URLs.
+    // 1. Create multipart upload and get presigned part URLs
     const mp = await api('/api/admin/multipart/create', {
       method: 'POST',
       timeoutMs: 60000,
@@ -548,70 +430,35 @@
         content_type: contentType,
         slug_hint: slugHint || file.name,
         file_size: file.size,
-        part_size: partSizeFor(file.size),
-        url_ttl: MULTIPART_URL_TTL,
-        resume_key: saved ? saved.key : undefined,
-        resume_upload_id: saved ? saved.uploadId : undefined,
-        resume_part_size: saved ? saved.partSize : undefined,
-        resume_from_part: saved ? (saved.done || []).length + 1 : 1,
       },
     });
 
     const { key, uploadId, partSize, parts: partUrls } = mp;
-    // Parts finished in an earlier attempt are already in R2 — reuse their
-    // ETags and only upload the missing range.
-    const completedParts = (saved && saved.key === key && Array.isArray(saved.parts) ? saved.parts : [])
-      .slice(0, Math.max(0, (mp.resumeFrom || 1) - 1));
-    let totalUploaded = completedParts.length * partSize;
-    if (onProgress && totalUploaded > 0) onProgress(totalUploaded / file.size);
-    let doneCount = completedParts.length;
+    const completedParts = [];
+    let totalUploaded = 0;
 
     try {
-      // 2. Upload the parts. Four run at a time: a single 4G stream wastes most
-      // of the link, and 500 sequential requests is 500 chances to fail.
-      const inflight = {};
-      let nextIdx = 0;
-
-      async function uploadOne(i) {
-        const start = (partUrls[i].partNumber - 1) * partSize;
+      // 2. Upload each part with retry
+      for (let i = 0; i < partUrls.length; i++) {
+        const start = i * partSize;
         const end = Math.min(start + partSize, file.size);
         const chunk = file.slice(start, end);
         const partNum = partUrls[i].partNumber;
-        // A 4G link can drop repeatedly; 6 attempts per part with exponential
-        // backoff rides out the gaps instead of failing the whole upload.
-        const etag = await retryXhrPut(partUrls[i].url, chunk, null, (loaded) => {
-          // `totalUploaded` counts only finished parts, so the live bytes of
-          // every in-flight part are added on top — the bar never goes back.
-          inflight[i] = loaded;
-          let live = 0;
-          for (const k in inflight) live += inflight[k];
-          if (onProgress) onProgress(Math.min(1, (totalUploaded + live) / file.size));
-        }, -1, 30 * 60 * 1000);  // -1 = never give up; 30-min timeout per part
+        const partUrl = partUrls[i].url;
 
-        if (!etag) throw new Error('upload_etag_missing');
-        delete inflight[i];
-        totalUploaded += (end - start);
-        doneCount++;
-        if (onProgress) onProgress(Math.min(1, totalUploaded / file.size));
-        completedParts.push({ PartNumber: partNum, ETag: etag });
-        // Remember progress so a dropped connection resumes here, not at zero.
-        saveResume(file, {
-          key, uploadId, partSize,
-          parts: completedParts.slice().sort((a, b) => a.PartNumber - b.PartNumber),
-          done: completedParts.map((x) => x.PartNumber),
-        });
-      }
+        const etag = await retryXhrPut(partUrl, chunk, null, (loaded) => {
+          if (onProgress) onProgress((totalUploaded + loaded) / file.size);
+        }, 3, 10 * 60 * 1000);  // 10-min timeout per 10MB part
 
-      const CONCURRENCY = 4;
-      async function worker() {
-        while (nextIdx < partUrls.length) {
-          const i = nextIdx++;
-          await uploadOne(i);
+        if (!etag) {
+          throw new Error('upload_etag_missing');
         }
+
+        totalUploaded += (end - start);
+        if (onProgress) onProgress(totalUploaded / file.size);
+
+        completedParts.push({ PartNumber: partNum, ETag: etag });
       }
-      const workers = [];
-      for (let w = 0; w < Math.min(CONCURRENCY, partUrls.length); w++) workers.push(worker());
-      await Promise.all(workers);
 
       // 3. Complete multipart upload (with retry — transient failures here
       // used to leave fully-uploaded files dangling as aborted uploads).
@@ -630,12 +477,13 @@
         }
       }
 
-      clearResume(file);   // finished — nothing left to resume
       return key;
     } catch (err) {
-      // NEVER abort here. A dropped 4G connection is not a cancelled upload:
-      // the part progress is already saved, so the next attempt resumes from
-      // the last finished part instead of throwing away hours of transfer.
+      // Abort multipart upload on failure (cleanup)
+      api('/api/admin/multipart/abort', {
+        method: 'POST',
+        body: { key, uploadId },
+      }).catch(() => {});
       throw err;
     }
   }
@@ -681,53 +529,16 @@
     wrap.appendChild(inp);
     wrap.getFiles = () => chosen;
     wrap.reset = () => { chosen = []; inp.value = ''; updateUI(); list.innerHTML = ''; };
-    wrap.setProgress = (idx, ratio, info) => {
-      // `ratio === null` means "the link dropped, still retrying": keep the bar
-      // where it is and say so, instead of freezing with no explanation.
-      if (ratio === null) {
-        let row = list.children[idx];
-        if (row) {
-          const label = row.querySelector('.upload-pct');
-          if (label) {
-            const txt = `${t('انقطع الاتصال… إعادة المحاولة تلقائياً')} (${(info && info.retryRound) || 1})`;
-            if (label.textContent !== txt) label.textContent = txt;
-          }
-          const box = row.querySelector('.progress');
-          if (box) box.classList.add('is-retrying');
-        }
-        return;
-      }
+    wrap.setProgress = (idx, ratio) => {
       let row = list.children[idx];
       if (!row) {
         row = el('div', { class: 'item' },
           el('span', null, chosen[idx]?.name || ''),
           el('div', { class: 'progress' }, el('div', null)),
-          el('span', { class: 'muted upload-pct' }, ''),
         );
         list.append(row);
-        row._t0 = Date.now();
-        row._last = 0;
       }
-      const pct = Math.max(0, Math.min(1, ratio || 0));
-      row.querySelector('.progress > div').style.width = `${Math.round(pct * 100)}%`;
-      const box2 = row.querySelector('.progress');
-      if (box2) box2.classList.remove('is-retrying');
-      // A 4 GB APK on 4G can run for hours, so show the percentage and a
-      // rough remaining time instead of a bar that looks stuck.
-      const label = row.querySelector('.upload-pct');
-      if (label) {
-        let text = `${Math.round(pct * 100)}%`;
-        const elapsed = (Date.now() - (row._t0 || Date.now())) / 1000;
-        if (pct > 0.02 && elapsed > 20) {
-          const total = elapsed / pct;
-          const left = Math.max(0, total - elapsed);
-          text += ' · ' + (left >= 60
-            ? `${Math.round(left / 60)} ${t('دقيقة متبقية')}`
-            : `${Math.round(left)} ${t('ثانية متبقية')}`);
-        }
-        if (label.textContent !== text) label.textContent = text;
-      }
-      row._last = pct;
+      row.querySelector('.progress > div').style.width = `${Math.round(ratio * 100)}%`;
     };
     return wrap;
   }
@@ -2955,13 +2766,7 @@
         saveBtn.disabled = true;
         try {
           toast(t('جارٍ رفع APK…'));
-          setUploading(true);
-          let apk_key;
-          try {
-            apk_key = await r2Upload(files[0], 'apk', 'goldenstore-app', (r, info) => apkDz.setProgress(0, r, info));
-          } finally {
-            setUploading(false);
-          }
+          const apk_key = await r2Upload(files[0], 'apk', 'goldenstore-app', (r) => apkDz.setProgress(0, r));
           const res = await api('/api/admin/app-update', {
             method: 'POST',
             body: { version_name, version_code, apk_key, notes,
@@ -4043,13 +3848,7 @@
 
         // Upload APK first
         toast('بدء رفع الملفات…');
-        setUploading(true);
-        let apk_key;
-        try {
-          apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r, info) => apkDz.setProgress(0, r, info));
-        } finally {
-          setUploading(false);
-        }
+        const apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
         let icon_key = null;
         const iconFiles = iconDz.getFiles();
         if (iconFiles.length) icon_key = await r2Upload(iconFiles[0], 'icon', slugHint, (r) => iconDz.setProgress(0, r));
@@ -4085,7 +3884,7 @@
         activeTab = `edit:${res.id}`;
         renderApp();
       } catch (err) {
-        toast(t('فشل الرفع') + ': ' + uploadErrorText(err), 'error');
+        toast(t('فشل الرفع') + ': ' + (err.message || ''), 'error');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '';
         submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));
@@ -4221,13 +4020,7 @@
         const vn = apkForm.querySelector('[name=version_name]').value;
         const vc = apkForm.querySelector('[name=version_code]').value;
         try {
-          setUploading(true);
-          let apk_key;
-          try {
-            apk_key = await r2Upload(files[0], 'apk', app.slug, (r, info) => apkDz.setProgress(0, r, info));
-          } finally {
-            setUploading(false);
-          }
+          const apk_key = await r2Upload(files[0], 'apk', app.slug, (r) => apkDz.setProgress(0, r));
           await api(`/api/admin/apps/${id}/apk`, {
             method: 'POST',
             body: { apk_key, version_name: vn || undefined, version_code: vc ? Number(vc) : undefined },

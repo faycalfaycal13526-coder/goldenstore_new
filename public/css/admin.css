@@ -328,6 +328,10 @@
   overflow: hidden;
 }
 .upload-list .progress > div { height: 100%; background: var(--primary); width: 0%; transition: width .2s; }
+/* The link dropped but the upload is still trying: pulse instead of freezing. */
+.upload-list .progress.is-retrying > div { background: #f59e0b; animation: gs-upload-pulse 1.2s ease-in-out infinite; }
+.upload-list .item .upload-pct { font-size: 11px; margin-inline-start: 8px; }
+@keyframes gs-upload-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* ---------- Notifications / Requests ---------- */
 .notif-list, .req-list { display: flex; flex-direction: column; gap: 12px; }

@@ -2922,10 +2922,17 @@ app.post('/admin/multipart/create', async (c) => {
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
   const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : body.kind === 'video-thumb' ? 'vthumb' : 'ss';
   const key = `${folder}/${slugify(String(body.slug_hint || 'app'))}-${Date.now()}-${randomId().slice(0, 6)}.${ext}`;
+  // Part size is chosen by the client (8 MB by default). Anything outside
+  // R2's 5 MB .. 5 GB window is clamped so a bad value can never presign an
+  // invalid upload.
+  const asked = Number(body.part_size) || 0;
+  const partSize = Math.min(Math.max(asked || 8 * 1024 * 1024, 5 * 1024 * 1024), 5 * 1024 * 1024 * 1024);
+  const fileSize = Math.max(0, Number(body.file_size) || 0);
+  if (!fileSize) return c.json({ error: 'file_size_required' }, 400);
   const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
   const parts = [];
-  for (let i = 1; i <= Math.ceil(Number(body.file_size) / (10 * 1024 * 1024)); i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });
-  return c.json({ key, uploadId, partSize: 10 * 1024 * 1024, parts });
+  for (let i = 1; i <= Math.ceil(fileSize / partSize); i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });
+  return c.json({ key, uploadId, partSize, parts });
 });
 
 app.post('/admin/multipart/complete', async (c) => {

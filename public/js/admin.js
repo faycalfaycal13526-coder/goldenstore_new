@@ -334,6 +334,9 @@
   }
 
   const MULTIPART_THRESHOLD = 10 * 1024 * 1024; // 10 MB
+  // Part size for large APKs. 8 MB keeps every request well under the
+  // Worker/proxy limits and short enough for a weak mobile connection.
+  const MULTIPART_PART_SIZE = 8 * 1024 * 1024;
 
   function xhrPut(url, data, contentType, onProgress, timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -352,8 +355,12 @@
       xhr.ontimeout = () => reject(new Error('upload_timeout'));
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          const etag = xhr.getResponseHeader('ETag');
-          resolve(etag);
+          let etag = '';
+          try { etag = xhr.getResponseHeader('ETag') || ''; } catch (e) { etag = ''; }
+          resolve(etag ? etag.trim() : '');
+        } else if (xhr.status === 413) {
+          // Large file rejected upstream (Worker/proxy body cap).
+          reject(new Error('upload_too_large'));
         } else {
           reject(new Error(`upload_failed_${xhr.status}`));
         }
@@ -380,6 +387,18 @@
       }
     }
     throw lastErr;
+  }
+
+  // Turns raw upload error codes into a message the owner can act on.
+  function uploadErrorText(err) {
+    const code = String((err && err.message) || err || '');
+    if (code === 'upload_too_large') return t('الملف أكبر من الحد المسموح على الخادم');
+    if (code === 'upload_etag_missing') return t('تعذّر إكمال الرفع المجزّأ، أعد المحاولة');
+    if (code === 'upload_timeout') return t('انتهت مهلة الرفع، تحقّق من الاتصال وأعد المحاولة');
+    if (code === 'upload_error') return t('انقطع الاتصال أثناء الرفع، أعد المحاولة');
+    if (/^upload_failed_5/.test(code)) return t('خطأ مؤقت في الخادم، أعد المحاولة');
+    if (/^upload_failed_4/.test(code)) return t('رفض الخادم الملف، تحقّق من الصلاحيات');
+    return code;
   }
 
   async function r2Upload(file, kind, slugHint, onProgress) {
@@ -430,6 +449,7 @@
         content_type: contentType,
         slug_hint: slugHint || file.name,
         file_size: file.size,
+        part_size: MULTIPART_PART_SIZE,
       },
     });
 
@@ -3884,7 +3904,7 @@
         activeTab = `edit:${res.id}`;
         renderApp();
       } catch (err) {
-        toast(t('فشل الرفع') + ': ' + (err.message || ''), 'error');
+        toast(t('فشل الرفع') + ': ' + uploadErrorText(err), 'error');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '';
         submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));

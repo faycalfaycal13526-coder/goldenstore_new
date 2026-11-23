@@ -337,12 +337,9 @@
   // Part size for large APKs. Small files use 8 MB (short requests, friendly to
   // a weak mobile link); a very large APK switches to 32 MB so it is split into
   // far fewer parts and the per-request timeout stops mattering.
-  const MULTIPART_PART_SIZE = 8 * 1024 * 1024;
-  const MULTIPART_PART_SIZE_BIG = 32 * 1024 * 1024;
-  const BIG_FILE = 512 * 1024 * 1024;   // 512 MB and above
-  function partSizeFor(size) {
-    return size >= BIG_FILE ? MULTIPART_PART_SIZE_BIG : MULTIPART_PART_SIZE;
-  }
+  // The server owns the part size: it applies R2's 10,000-part ceiling and can
+  // raise it for huge files. 0 means "you decide".
+  function partSizeFor() { return 0; }
   // How long each presigned part stays valid. A 4 GB APK on a 4G uplink can
   // take hours, so a 1-hour window expired mid-upload and the transfer failed
   // near the end. Always 12 h: generous, and R2 accepts it.
@@ -451,8 +448,34 @@
     return key;
   }
 
+  // ---- Resume state ----------------------------------------------------
+  // A 4 GB upload to a 4G phone can be interrupted hours in. The upload id,
+  // the key and the finished part numbers are kept in localStorage so the next
+  // attempt continues where it stopped instead of starting over.
+  function resumeId(f) {
+    return `gs_up_${f.size}_${f.name.replace(/[^a-z0-9.]/gi, '').slice(0, 40)}`;
+  }
+  function loadResume(f) {
+    try {
+      const raw = localStorage.getItem(resumeId(f));
+      if (!raw) return null;
+      const st = JSON.parse(raw);
+      if (!st || st.key == null || !st.uploadId) return null;
+      if (Date.now() - (st.ts || 0) > 20 * 3600 * 1000) return null;   // stale
+      return st;
+    } catch (e) { return null; }
+  }
+  function saveResume(f, st) {
+    try { localStorage.setItem(resumeId(f), JSON.stringify({ ...st, ts: Date.now() })); } catch (e) {}
+  }
+  function clearResume(f) {
+    try { localStorage.removeItem(resumeId(f)); } catch (e) {}
+  }
+
   async function r2MultipartUpload(file, kind, slugHint, contentType, onProgress) {
-    // 1. Create multipart upload and get presigned part URLs
+    // 0. Resume an interrupted attempt if we kept its state.
+    const saved = loadResume(file);
+    // 1. Create (or rejoin) the multipart upload and get presigned part URLs.
     const mp = await api('/api/admin/multipart/create', {
       method: 'POST',
       timeoutMs: 60000,
@@ -464,37 +487,68 @@
         file_size: file.size,
         part_size: partSizeFor(file.size),
         url_ttl: MULTIPART_URL_TTL,
+        resume_key: saved ? saved.key : undefined,
+        resume_upload_id: saved ? saved.uploadId : undefined,
+        resume_part_size: saved ? saved.partSize : undefined,
+        resume_from_part: saved ? (saved.done || []).length + 1 : 1,
       },
     });
 
     const { key, uploadId, partSize, parts: partUrls } = mp;
-    const completedParts = [];
-    let totalUploaded = 0;
+    // Parts finished in an earlier attempt are already in R2 — reuse their
+    // ETags and only upload the missing range.
+    const completedParts = (saved && saved.key === key && Array.isArray(saved.parts) ? saved.parts : [])
+      .slice(0, Math.max(0, (mp.resumeFrom || 1) - 1));
+    let totalUploaded = completedParts.length * partSize;
+    if (onProgress && totalUploaded > 0) onProgress(totalUploaded / file.size);
+    let doneCount = completedParts.length;
 
     try {
-      // 2. Upload each part with retry
-      for (let i = 0; i < partUrls.length; i++) {
-        const start = i * partSize;
+      // 2. Upload the parts. Four run at a time: a single 4G stream wastes most
+      // of the link, and 500 sequential requests is 500 chances to fail.
+      const inflight = {};
+      let nextIdx = 0;
+
+      async function uploadOne(i) {
+        const start = (partUrls[i].partNumber - 1) * partSize;
         const end = Math.min(start + partSize, file.size);
         const chunk = file.slice(start, end);
         const partNum = partUrls[i].partNumber;
-        const partUrl = partUrls[i].url;
-
         // A 4G link can drop repeatedly; 6 attempts per part with exponential
         // backoff rides out the gaps instead of failing the whole upload.
-        const etag = await retryXhrPut(partUrl, chunk, null, (loaded) => {
-          if (onProgress) onProgress((totalUploaded + loaded) / file.size);
+        const etag = await retryXhrPut(partUrls[i].url, chunk, null, (loaded) => {
+          // `totalUploaded` counts only finished parts, so the live bytes of
+          // every in-flight part are added on top — the bar never goes back.
+          inflight[i] = loaded;
+          let live = 0;
+          for (const k in inflight) live += inflight[k];
+          if (onProgress) onProgress(Math.min(1, (totalUploaded + live) / file.size));
         }, 6, 30 * 60 * 1000);  // 30-min timeout per part
 
-        if (!etag) {
-          throw new Error('upload_etag_missing');
-        }
-
+        if (!etag) throw new Error('upload_etag_missing');
+        delete inflight[i];
         totalUploaded += (end - start);
-        if (onProgress) onProgress(totalUploaded / file.size);
-
+        doneCount++;
+        if (onProgress) onProgress(Math.min(1, totalUploaded / file.size));
         completedParts.push({ PartNumber: partNum, ETag: etag });
+        // Remember progress so a dropped connection resumes here, not at zero.
+        saveResume(file, {
+          key, uploadId, partSize,
+          parts: completedParts.slice().sort((a, b) => a.PartNumber - b.PartNumber),
+          done: completedParts.map((x) => x.PartNumber),
+        });
       }
+
+      const CONCURRENCY = 4;
+      async function worker() {
+        while (nextIdx < partUrls.length) {
+          const i = nextIdx++;
+          await uploadOne(i);
+        }
+      }
+      const workers = [];
+      for (let w = 0; w < Math.min(CONCURRENCY, partUrls.length); w++) workers.push(worker());
+      await Promise.all(workers);
 
       // 3. Complete multipart upload (with retry — transient failures here
       // used to leave fully-uploaded files dangling as aborted uploads).
@@ -513,6 +567,7 @@
         }
       }
 
+      clearResume(file);   // finished — nothing left to resume
       return key;
     } catch (err) {
       // Abort multipart upload on failure (cleanup)

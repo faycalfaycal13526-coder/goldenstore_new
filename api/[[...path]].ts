@@ -2926,19 +2926,44 @@ app.post('/admin/multipart/create', async (c) => {
   // R2's 5 MB .. 5 GB window is clamped so a bad value can never presign an
   // invalid upload.
   const asked = Number(body.part_size) || 0;
-  const partSize = Math.min(Math.max(asked || 8 * 1024 * 1024, 5 * 1024 * 1024), 5 * 1024 * 1024 * 1024);
   const fileSize = Math.max(0, Number(body.file_size) || 0);
   if (!fileSize) return c.json({ error: 'file_size_required' }, 400);
+  // R2 caps a single upload at 10,000 parts, so the part size grows with the
+  // file instead of being fixed: a 4 GB APK at 8 MB would need 512 parts, and
+  // every part is another chance to fail on a 3-hour mobile upload.
+  // Only step up the part size when the file genuinely cannot fit in 10,000
+  // parts. Everything else keeps the client's 8 MB (short requests, resumable).
+  const minParts = Math.ceil(fileSize / (9000 * 5 * 1024 * 1024));
+  const partSize = Math.min(
+    Math.max(asked || 8 * 1024 * 1024, minParts * 5 * 1024 * 1024, 5 * 1024 * 1024),
+    5 * 1024 * 1024 * 1024,
+  );
   // A 4 GB APK on a 4G uplink takes hours, so a 1-hour presign window expired
-  // mid-upload and the transfer failed near the end. The window is chosen from
-  // the file size and can be raised by the client (clamped to 24 h).
+  // mid-upload and the transfer failed near the end.
   const askedTtl = Number(body.url_ttl) || 0;
   const ttl = Math.min(Math.max(askedTtl || 3600, 3600), 24 * 3600);
-  const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
-  const parts = [];
   const count = Math.ceil(fileSize / partSize);
-  for (let i = 1; i <= count; i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, ttl) });
-  return c.json({ key, uploadId, partSize, urlTtl: ttl, parts });
+
+  // ---- Resume: the browser may come back after a dropped connection. ----
+  // A finished part is never uploaded twice; only the missing range is signed.
+  const resumeKey = typeof body.resume_key === 'string' && isValidR2Key(body.resume_key, 'apk') ? body.resume_key : null;
+  const resumeId = typeof body.resume_upload_id === 'string' ? body.resume_upload_id : null;
+  let uploadId = resumeId;
+  let resumeFrom = 1;
+  if (resumeKey && resumeId && body.resume_part_size === partSize) {
+    const from = Math.max(1, Math.min(count, Number(body.resume_from_part) || 1));
+    resumeFrom = from;
+  } else {
+    uploadId = null;
+  }
+  if (!uploadId) {
+    uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
+  }
+  const parts = [];
+  for (let i = resumeFrom; i <= count; i++) {
+    parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId!, i, ttl) });
+  }
+  return c.json({ key, uploadId, partSize, urlTtl: ttl, totalParts: count, resumeFrom, parts });
 });
 
 app.post('/admin/multipart/complete', async (c) => {

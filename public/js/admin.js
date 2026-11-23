@@ -419,6 +419,18 @@
     return key;
   }
 
+  // After a client-side timeout, decide whether the publish actually happened.
+  // Prevents the old "Internet error" that showed up while the app was created.
+  async function findCreatedApp(name) {
+    if (!name) return null;
+    const want = String(name).trim().toLowerCase();
+    const res = await api('/api/admin/apps?limit=60', { timeoutMs: 20000 }).catch(() => null);
+    const list = (res && (res.apps || res)) || [];
+    if (!Array.isArray(list)) return null;
+    const hit = list.find((a) => String(a.name || '').trim().toLowerCase() === want);
+    return hit ? { id: hit.id, slug: hit.slug } : null;
+  }
+
   async function r2MultipartUpload(file, kind, slugHint, contentType, onProgress) {
     // 1. Create multipart upload and get presigned part URLs
     const mp = await api('/api/admin/multipart/create', {
@@ -3879,7 +3891,21 @@
           screenshot_keys,
           videos: ve.getVideos(),
         };
-        const res = await api('/api/admin/apps', { method: 'POST', body: payload });
+        // Publishing fans out a push to every device, so the response can be
+        // slower than the default request timeout. Wait much longer here, and
+        // if it still times out, check whether the app was actually created
+        // before telling the owner it failed.
+        let res;
+        try {
+          res = await api('/api/admin/apps', { method: 'POST', body: payload, timeoutMs: 120000 });
+        } catch (e) {
+          const timedOut = e && (e.message === 'timeout' || e.status === 0);
+          if (!timedOut) throw e;
+          // The upload is done and the row may already exist: look for it.
+          const found = await findCreatedApp(payload.name).catch(() => null);
+          if (!found) throw e;
+          res = found;
+        }
         toast('تم رفع التطبيق بنجاح', 'success');
         activeTab = `edit:${res.id}`;
         renderApp();

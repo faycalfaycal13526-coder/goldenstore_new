@@ -2980,13 +2980,27 @@ app.post('/admin/apps', async (c) => {
 
   // Automated push on app upload (behind the store setting), with a rich
   // image + deep link into the new app's page.
+  //
+  // The broadcast is NOT awaited: it fans out to every device through FCM and
+  // can take far longer than the browser's request timeout. Awaiting it made a
+  // successful publish look like a network error ("Internet error") after the
+  // app row had already been created — which is why REPLACING an APK (no
+  // broadcast) always appeared to work. The row is written first, then the
+  // push runs in the background.
   if ((await getStoreSettings(c.env)).notify_new_publications) {
-    await addNotification(c.env, {
-      type: 'new_app', title: body.name, body: '', app_slug: slug,
+    const note = {
+      type: 'new_app' as const, title: body.name, body: '', app_slug: slug,
       image_url: icon_url(body.icon_key, c.env) || '',
       click_url: `/app?slug=${encodeURIComponent(slug)}`,
       created_at: now,
-    });
+    };
+    try {
+      c.executionCtx.waitUntil(addNotification(c.env, note).catch(() => {}));
+    } catch {
+      // No execution context (tests/edge cases): fall back to a plain call so
+      // the notification is still delivered.
+      await addNotification(c.env, note).catch(() => {});
+    }
   }
   
   // إبطال الكاش بعد الإضافة

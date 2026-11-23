@@ -419,6 +419,41 @@
     return key;
   }
 
+  // Turn a publish failure into a plain, actionable sentence in the UI
+  // language — never a raw code like `upload_failed_403`. The step names what
+  // the owner was doing, so the message points at the real culprit.
+  function publishErrorText(err, step, appName) {
+    const st = Number(err && err.status) || 0;
+    const code = String((err && err.message) || '');
+    const where = {
+      apk: t('ملف التطبيق'), icon: t('الأيقونة'), feature: t('الصورة العرضية'),
+      screenshots: t('الصور'), create: t('إنشاء صفحة التطبيق'),
+    }[step] || t('الملفات');
+
+    if (code === 'upload_timeout' || code === 'timeout') {
+      return t('انقطع الاتصال أثناء رفع') + ' ' + where + '. ' + t('أعد المحاولة — الرفع يستأنف من الصفر.');
+    }
+    if (/_403$/.test(code) || st === 403) {
+      return t('انتهت صلاحية رابط الرفع. أعد المحاولة.');
+    }
+    if (/_413$/.test(code) || st === 413) {
+      return t('الملف أكبر من الحد المسموح على الخادم.');
+    }
+    if (st === 401 || st === 403) {
+      return t('انتهت جلستك في لوحة الإدارة. سجّل الدخول من جديد.');
+    }
+    if (st >= 500 || code === 'upload_error' || st === 0) {
+      return t('تعذّر الاتصال بالخادم أثناء') + ' ' + where + '. ' + t('أعد المحاولة بعد لحظات.');
+    }
+    if (code === 'apk_not_found') {
+      return t('لم يُعثر على ملف التطبيق بعد الرفع. أعد المحاولة.');
+    }
+    if (code === 'missing_fields') {
+      return t('املأ الاسم واسم الحزمة وملف التطبيق.');
+    }
+    return t('فشل الرفع') + ' — ' + where + (st ? ` (${st})` : '');
+  }
+
   // After a client-side timeout, decide whether the publish actually happened.
   // Prevents the old "Internet error" that showed up while the app was created.
   async function findCreatedApp(name) {
@@ -3897,6 +3932,7 @@
       submitBtn.innerHTML = '';
       submitBtn.append(el('div', { class: 'spinner', style: 'width:18px; height:18px; border-width:2px;' }));
 
+      let step = 'apk';
       try {
         const slugHint = (data.name || 'app').slice(0, 60);
 
@@ -3905,12 +3941,15 @@
         const apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
         let icon_key = null;
         const iconFiles = iconDz.getFiles();
+        step = 'icon';
         if (iconFiles.length) icon_key = await r2Upload(iconFiles[0], 'icon', slugHint, (r) => iconDz.setProgress(0, r));
         let feature_key = null;
         const featFiles = featDz.getFiles();
+        step = 'feature';
         if (featFiles.length) feature_key = await r2Upload(featFiles[0], 'feature', slugHint, (r) => featDz.setProgress(0, r));
         const screenshot_keys = [];
         const ssFiles = ssDz.getFiles();
+        step = 'screenshots';
         for (let i = 0; i < ssFiles.length; i++) {
           const k = await r2Upload(ssFiles[i], 'screenshot', slugHint, (r) => ssDz.setProgress(i, r));
           screenshot_keys.push(k);
@@ -3937,13 +3976,15 @@
         // slower than the default request timeout. Wait much longer here, and
         // if it still times out, check whether the app was actually created
         // before telling the owner it failed.
+        step = 'create';
         let res;
         try {
           res = await api('/api/admin/apps', { method: 'POST', body: payload, timeoutMs: 120000 });
         } catch (e) {
-          const timedOut = e && (e.message === 'timeout' || e.status === 0);
-          if (!timedOut) throw e;
-          // The upload is done and the row may already exist: look for it.
+          // The bytes are already in R2 and the row may already exist even when
+          // the response never arrives (the browser reports a network error).
+          // Always check before telling the owner it failed — that false
+          // "Internet error" is exactly what was reported.
           const found = await findCreatedApp(payload.name).catch(() => null);
           if (!found) throw e;
           res = found;
@@ -3952,7 +3993,7 @@
         activeTab = `edit:${res.id}`;
         renderApp();
       } catch (err) {
-        toast(t('فشل الرفع') + ': ' + (err.message || ''), 'error');
+        toast(publishErrorText(err, step, data.name), 'error');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '';
         submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));

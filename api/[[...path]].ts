@@ -1106,6 +1106,26 @@ function pickTranslation(data: any, text: string): string | null {
   return tr && tr !== text ? tr : null;
 }
 
+// Guard against a provider answering with junk. When Google's gtx endpoint is
+// bot-blocked it can return the English UI of its own error page, and a naive
+// parse of that HTML yields a one-letter "translation" ('e', 'l'…). Such a
+// value then looks like a REAL translation, so it used to be cached and served
+// to every visitor — every app name rendered as «e». Anything that collapses a
+// whole phrase into one or two characters is rejected here.
+function plausibleTranslation(input: string, output: string | null): string | null {
+  if (!output) return null;
+  const src = String(input || '').trim();
+  const out = String(output || '').trim();
+  if (!out) return null;
+  if (out === src) return null;
+  // A translation that is a single character, while the source is a word of
+  // two or more characters, is never a real translation for our content.
+  if (out.length <= 2 && src.length > 3) return null;
+  // Provider boilerplate leaking through.
+  if (/google|sorry|automated queries|translate\.googleapis|\\u003c/i.test(out)) return null;
+  return out;
+}
+
 // Primary: dict-chrome-ex is a different Google host and is not bot-blocked.
 async function chromeTranslate(text: string, target: string, src = 'ar'): Promise<TrResult> {
   try {
@@ -1115,7 +1135,7 @@ async function chromeTranslate(text: string, target: string, src = 'ar'): Promis
     );
     const raw = await res.text();
     if (!raw || raw.charAt(0) !== '[') return { tr: null, why: `html/${res.status}` };
-    const tr = pickTranslation(JSON.parse(raw), text);
+    const tr = plausibleTranslation(text, pickTranslation(JSON.parse(raw), text));
     return { tr, why: tr ? 'ok' : 'unchanged' };
   } catch (e: any) { return { tr: null, why: `err/${String(e && e.message || e).slice(0, 60)}` }; }
 }
@@ -1133,7 +1153,7 @@ async function gtxTranslate(text: string, target: string): Promise<TrResult> {
       gtxBackoffUntil = Date.now() + 5 * 60 * 1000;
       return { tr: null, why: `html/${res.status}` };
     }
-    const tr = pickTranslation(JSON.parse(raw), text);
+    const tr = plausibleTranslation(text, pickTranslation(JSON.parse(raw), text));
     return { tr, why: tr ? 'ok' : 'unchanged' };
   } catch (e: any) { return { tr: null, why: `err/${String(e && e.message || e).slice(0, 60)}` }; }
 }
@@ -1161,6 +1181,11 @@ async function memoryTranslate(text: string, target: string): Promise<TrResult> 
 }
 
 async function translateOne(text: string, target: string, steps?: string[], src = 'ar'): Promise<string | null> {
+  // Translating a language into itself is a no-op. Sending it to a provider is
+  // what produced the «e» corruption: Google answered with its own block page
+  // and the parse produced a single letter, which was then cached as a real
+  // translation. Return the text untouched so callers keep the original.
+  if (target === src) { if (steps) steps.push('noop=same-language'); return String(text || ''); }
   const providers = [chromeTranslate, gtxTranslate, memoryTranslate];
   for (const p of providers) {
     const r = p === chromeTranslate ? await p(text, target, src) : await p(text, target);
@@ -1194,8 +1219,10 @@ app.post('/translate', async (c) => {
     let cached: string | null = null;
     try {
       const row: any = await db.prepare('SELECT out FROM i18n_cache WHERE id = ?').bind(id).first();
-      // Self-heal rows poisoned by the old code (out === source text).
-      if (row && row.out && row.out !== q[i]) cached = String(row.out);
+      // Self-heal rows poisoned by the old code: either out === source text, or
+      // the junk a blocked provider produced ('e'). Both must be translated
+      // again instead of being served.
+      if (row && row.out && row.out !== q[i] && plausibleTranslation(q[i], String(row.out))) cached = String(row.out);
     } catch { /* no cache table: fall through to live translation */ }
     if (cached != null) {
       out[i] = cached;
@@ -1216,7 +1243,7 @@ app.post('/translate', async (c) => {
       if (debug) diag.push({ src: item.text, steps, translated: !!tr });
       // Persist only real translations. INSERT OR REPLACE overwrites stale
       // poisoned rows so subsequent requests are served from cache.
-      if (tr) {
+      if (tr && plausibleTranslation(item.text, tr)) {
         try {
           await db.prepare('INSERT OR REPLACE INTO i18n_cache (id, target, src, out, ts) VALUES (?, ?, ?, ?, ?)')
             .bind(item.id, target, item.text, tr, nowSec()).run();
@@ -1259,7 +1286,7 @@ app.post('/i18n-content', async (c) => {
     let cached: string | null = null;
     try {
       const row: any = await db.prepare('SELECT out FROM i18n_cache WHERE id = ?').bind(id).first();
-      if (row && row.out && row.out !== text) cached = String(row.out);
+      if (row && row.out && row.out !== text && plausibleTranslation(text, String(row.out))) cached = String(row.out);
     } catch { /* no cache table: fall through */ }
     if (cached != null) t[k] = cached;
     else work.push({ k, target, text, id });
@@ -2942,6 +2969,26 @@ app.post('/admin/multipart/complete', async (c) => {
 // back 403, and a 403 is not retried, so the whole publish died — even though
 // the bytes were fine and the connection was fine. The client asks for fresh
 // URLs for whatever is left and carries on from the current part.
+// Purge translation-cache rows that hold junk instead of a translation.
+// A blocked provider once returned a single letter, which was stored as if it
+// were a real translation, so app names rendered as «e» for every visitor.
+// The read path now self-heals, this removes the bad rows immediately.
+app.post('/admin/purge-translations', async (c) => {
+  const db: any = c.env.DB;
+  await ensureTranslateCache(db);
+  const rows: any = await db.prepare('SELECT id, src, out FROM i18n_cache').all();
+  let removed = 0;
+  for (const r of (rows.results || [])) {
+    const src = String(r.src || '');
+    const out = String(r.out || '');
+    if (!out) continue;
+    if (out === src || (out.trim().length <= 2 && src.trim().length > 3)) {
+      try { await db.prepare('DELETE FROM i18n_cache WHERE id = ?').bind(r.id).run(); removed++; } catch { /* best effort */ }
+    }
+  }
+  return c.json({ ok: true, scanned: (rows.results || []).length, removed });
+});
+
 app.post('/admin/multipart/sign-parts', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const key = String(body.key || '');

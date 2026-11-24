@@ -76,6 +76,17 @@
   function nameKey(n) {
     return String(n || '').replace(/[\u200e\u200f\u061c]/g, '').trim();
   }
+  // A translation is only believable when it is not a stub. A blocked provider
+  // once answered with a single letter ('e'), which was cached and repainted
+  // every app name as «e». Reject that shape here too before it reaches a DOM.
+  function saneTranslation(src, out) {
+    var s0 = String(src == null ? '' : src).trim();
+    var o0 = String(out == null ? '' : out).trim();
+    if (!o0) return '';
+    if (o0 === s0) return '';
+    if (o0.length <= 2 && s0.length > 3) return '';
+    return o0;
+  }
   function appName(name) {
     var raw = String(name || '');
     if (!raw) return '';
@@ -86,9 +97,10 @@
     }
     // Not curated yet: every title is translated too, through the content cache.
     if (lang !== 'ar') {
-      var auto = contentOut(raw.trim());
-      if (auto != null) return auto + (/[\u200f]$/.test(raw) ? '\u200f' : '');
+      var auto = saneTranslation(raw.trim(), contentOut(raw.trim()));
+      if (auto) return auto + (/[\u200f]$/.test(raw) ? '\u200f' : '');
     }
+    // Always fall back to the name as stored — never to a stub.
     return raw;
   }
   // Fill [data-i18n-app] holders after a render or a language switch.
@@ -193,8 +205,8 @@
         var e = list[i];
         var src = e.getAttribute(CONTENT_ATTRS[a]) || '';
         if (!src) continue;
-        var out = contentOut(src);
-        if (out == null) continue;
+        var out = saneTranslation(src, contentOut(src));
+        if (!out) continue;
         if (e.textContent !== out) { applying = true; try { e.textContent = out; } finally { applying = false; } }
       }
     }
@@ -211,8 +223,8 @@
         var e = list[i];
         var src = e.getAttribute(CONTENT_ATTRS[a]) || '';
         if (!src) continue;
-        var out = contentOut(src);
-        if (out != null && e.textContent !== out) {
+        var out = saneTranslation(src, contentOut(src));
+        if (out && e.textContent !== out) {
           applying = true; try { e.textContent = out; } finally { applying = false; }
         } else if (out == null) contentOut(src);
       }

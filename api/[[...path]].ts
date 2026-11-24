@@ -1586,16 +1586,23 @@ app.get('/apps/:slug/reviews', async (c) => {
     ratingSnapshot(c.env, aliases),
   ]);
 
-  const reviews = votes.map((v: any) => ({
-    id: String(v.id),
-    name: v.name || 'مستخدم',
-    rating: Math.round(Number(v.rating) || 0),
-    comment: v.comment,
-    photo_url: v.photo_url || null,
-    ts: Number(v.ts) || 0,
-    likes_count: Number(v.likes_count) || 0,
-    liked: !!v.liked_by_me,
-  }));
+  const reviews = votes.map((v: any) => {
+    // A rating can be stars only. It still belongs in the list: the page shows
+    // «N ratings» counted from the same rows, so leaving these out made the
+    // number and the list disagree.
+    const comment = String(v.comment == null ? '' : v.comment).trim();
+    return {
+      id: String(v.id),
+      name: v.name || 'مستخدم',
+      rating: Math.round(Number(v.rating) || 0),
+      comment,
+      has_comment: comment.length > 0,
+      photo_url: v.photo_url || null,
+      ts: Number(v.ts) || 0,
+      likes_count: Number(v.likes_count) || 0,
+      liked: !!v.liked_by_me,
+    };
+  });
 
   c.header('Cache-Control', 'private, no-store');
   // `rating_count` = real votes; `total`/`reviews_count` = written comments.

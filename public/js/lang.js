@@ -724,6 +724,7 @@
     'لم نجد تطبيقات تطابق': { en: 'No apps matching', fr: 'Aucune app correspondant à', es: 'No encontramos apps que coincidan con', tr: 'Eşleşen uygulama bulamadık', de: 'Wir haben keine passenden Apps gefunden', pt: 'Não encontramos aplicativos correspondentes', ru: 'Мы не нашли подходящих приложений', hi: 'हमें कोई मिलता जुलता ऐप्स नहीं मिला', zh: '我们没有找到匹配的应用程序' },
 
     // ratings & reviews
+    'قيّم بالنجوم بدون تعليق': { en: 'Rated with stars only', fr: 'Noté avec des étoiles uniquement', es: 'Valorado solo con estrellas', tr: 'Yalnızca yıldızla değerlendirildi', de: 'Nur mit Sternen bewertet', pt: 'Avaliado apenas com estrelas', ru: 'Оценено только звёздами', hi: 'केवल सितारों से रेट किया गया', zh: '仅用星级评分' },
     'تقييم': { en: 'ratings', fr: 'évaluations', es: 'valoraciones', tr: 'değerlendirme', de: 'Auswertung', pt: 'avaliação', ru: 'оценка', hi: 'मूल्यांकन', zh: '评估' },
     'تقييمات': { en: 'ratings', fr: 'évaluations', es: 'valoraciones', tr: 'Yorumlar', de: 'Rezensionen', pt: 'Avaliações', ru: 'Отзывы', hi: 'समीक्षा', zh: '评论' },
     'تقييمك': { en: 'Your rating', fr: 'Votre note', es: 'Tu valoración', tr: 'Derecelendirmeniz', de: 'Ihre Bewertung', pt: 'Sua classificação', ru: 'Ваш рейтинг', hi: 'आपकी रेटिंग', zh: '您的评价' },

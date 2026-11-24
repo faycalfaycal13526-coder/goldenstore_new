@@ -928,7 +928,11 @@
         menuWrap,
       ),
       stars,
-      review.comment ? el('div', { class: 'body' }, review.comment) : null,
+      // A rating can be stars only. Say so explicitly instead of leaving an
+      // empty card, so the list always accounts for the «N ratings» header.
+      review.comment
+        ? el('div', { class: 'body' }, review.comment)
+        : el('div', { class: 'body muted review-stars-only' }, t('قيّم بالنجوم بدون تعليق')),
       el('div', { class: 'review-actions' }, likeBtn),
     );
   }

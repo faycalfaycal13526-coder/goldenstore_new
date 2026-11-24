@@ -331,8 +331,6 @@ export async function listReviews(env: Env, app_id: string | string[], limit: nu
       ) AS liked_by_me
     FROM star_votes v
     WHERE v.app_id IN (${aliases.map(() => '?').join(',')})
-      AND v.comment IS NOT NULL
-      AND TRIM(v.comment) <> ''
     ORDER BY v.ts DESC, v.id DESC
     LIMIT ?
   `).bind(viewerId, ...aliases, limit).all();
@@ -340,6 +338,15 @@ export async function listReviews(env: Env, app_id: string | string[], limit: nu
 }
 
 /** Total number of written reviews (independent of the page limit). */
+/**
+ * How many ratings the list under the stars will actually show.
+ *
+ * This counts EVERY vote, including a rating that was submitted without any
+ * written comment. Counting only rows with a comment made the page contradict
+ * itself: it said «2 ratings» while the list below showed one, because the
+ * other person had only tapped the stars. The header number and the list now
+ * come from the same set.
+ */
 export async function countReviews(env: Env, app_id: string | string[]): Promise<number> {
   const aliases = Array.from(new Set((Array.isArray(app_id) ? app_id : [app_id]).map(String).filter(Boolean)));
   if (!aliases.length) return 0;
@@ -347,7 +354,6 @@ export async function countReviews(env: Env, app_id: string | string[]): Promise
     SELECT COUNT(*) AS total
     FROM star_votes
     WHERE app_id IN (${aliases.map(() => '?').join(',')})
-      AND comment IS NOT NULL AND TRIM(comment) <> ''
   `).bind(...aliases).first().catch(() => null);
   return Number(row?.total || 0);
 }

@@ -932,7 +932,7 @@
       // empty card, so the list always accounts for the «N ratings» header.
       review.comment
         ? el('div', { class: 'body' }, review.comment)
-        : el('div', { class: 'body muted review-stars-only' }, t('قيّم بالنجوم بدون تعليق')),
+        : el('div', { class: 'body muted review-stars-only' }, t('تقييم قديم بالنجوم بدون تعليق')),
       el('div', { class: 'review-actions' }, likeBtn),
     );
   }
@@ -2758,8 +2758,15 @@
         toast(t('سجّل الدخول أولاً لتستطيع') + ' ' + t('التقييم'), 'info');
         return;
       }
-      submitBtn.disabled = true;
+      // The owner asked that a rating is only published together with a written
+      // review, so an empty box blocks the request before it is sent.
       const myComment = commentInput.value.trim();
+      if (myComment.length < 3) {
+        toast(t('اكتب تعليقك أولاً — لا يُنشر التقييم بدون تعليق'), 'info');
+        try { commentInput.focus(); } catch (e) {}
+        return;
+      }
+      submitBtn.disabled = true;
       const myName = accountName;
       try {
         if (!fingerprint) fingerprint = await getFingerprint();
@@ -2786,6 +2793,8 @@
           lockVoted(selected, myComment);
           toast(t('لقد قيّمت هذا التطبيق مسبقاً'), 'info');
           if (e.data && typeof e.data.rating === 'number') refreshAverage(e.data.rating, Number(e.data.rating_count || 0));
+        } else if (e && e.data && e.data.error === 'comment_required') {
+          toast(t('اكتب تعليقك أولاً — لا يُنشر التقييم بدون تعليق'), 'info');
         } else if (e && e.data && e.data.error === 'invalid_rating') {
           toast(t('اختر عدد النجوم أولاً'), 'info');
         } else {

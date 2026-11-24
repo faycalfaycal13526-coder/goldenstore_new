@@ -1512,6 +1512,11 @@ app.post('/apps/:slug/star', async (c) => {
   const rating = Math.round(Number(body.rating)), clientFp = String(body.fp || '').trim();
   if (rating < 1 || rating > 5 || clientFp.length < 16) return c.json({ error: 'invalid_data' }, 400);
 
+  // A rating is only published together with a written comment. Stars on their
+  // own are no longer accepted, so every row in the list is an actual review.
+  const comment = sanitizeText(body.comment, 2000).trim();
+  if (comment.length < COMMENT_MIN_LENGTH) return c.json({ error: 'comment_required', min_length: COMMENT_MIN_LENGTH }, 400);
+
   const voteHash = await sha256Hex(`${clientFp}::${serverFingerprint(c)}`);
   const uid = sanitizeText(body.uid, 128);
 
@@ -1523,7 +1528,7 @@ app.post('/apps/:slug/star', async (c) => {
 
   const voteId = randomId();
   await c.env.DB.prepare(`INSERT INTO star_votes (id, app_id, hash, server_hash, uid, rating, comment, name, photo_url, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(voteId, appData.id, voteHash, await sha256Hex(serverFingerprint(c)), uid||null, rating, sanitizeText(body.comment, 2000), sanitizeText(body.name, 60), sanitizeUrl(body.photo_url)||null, nowSec()).run();
+    .bind(voteId, appData.id, voteHash, await sha256Hex(serverFingerprint(c)), uid||null, rating, comment, sanitizeText(body.name, 60), sanitizeUrl(body.photo_url)||null, nowSec()).run();
 
   // Recompute from real rows: incremental `old + 1` arithmetic preserved any
   // pre-existing drift forever (e.g. comments deleted before this fix).
@@ -1538,7 +1543,7 @@ app.post('/apps/:slug/star', async (c) => {
   const ts = nowSec();
   return c.json({
     ok: true, rating: newAvg, rating_count: newCount,
-    review: { id: voteId, name: body.name || 'مستخدم', rating, comment: body.comment, photo_url: body.photo_url, ts, likes_count: 0, liked: false },
+    review: { id: voteId, name: body.name || 'مستخدم', rating, comment, has_comment: true, photo_url: body.photo_url, ts, likes_count: 0, liked: false },
   });
 });
 
@@ -1597,6 +1602,9 @@ app.get('/apps/:slug/reviews', async (c) => {
       rating: Math.round(Number(v.rating) || 0),
       comment,
       has_comment: comment.length > 0,
+    // Legacy rows written before a comment became mandatory. The list still
+    // shows them (never hide a real vote), but the UI labels them clearly.
+    stars_only: comment.length === 0,
       photo_url: v.photo_url || null,
       ts: Number(v.ts) || 0,
       likes_count: Number(v.likes_count) || 0,
@@ -3021,6 +3029,11 @@ app.post('/admin/multipart/abort', async (c) => {
   if (body.key && body.uploadId) await r2AbortMultipartUpload(c.env, body.key, body.uploadId);
   return c.json({ ok: true });
 });
+
+// Minimum length of the comment that must accompany a rating. Kept small so a
+// real short opinion («جيد جداً») passes, but an empty or single-letter box does
+// not: the owner asked that a rating is only published with a written review.
+const COMMENT_MIN_LENGTH = 3;
 
 function isValidR2Key(key: string, prefix: string): boolean { return key.startsWith(`${prefix}/`) && !key.includes('..'); }
 

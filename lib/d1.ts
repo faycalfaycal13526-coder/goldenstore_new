@@ -38,7 +38,17 @@ export async function listApps(env: Env, opts: ListAppsOptions = {}): Promise<{ 
   // Developer names are normalised in the page the same way (trim + strip the
   // invisible RTL marks APK metadata often carries), so an exact match works
   // even though the stored strings are not perfectly clean.
-  if (opts.developer) { conditions.push("TRIM(COALESCE(developer,'')) = ?"); params.push(opts.developer); }
+  if (opts.developer) {
+    /* Stored developer names often carry invisible direction marks (U+200E,
+       U+200F, U+061C) picked up from APK metadata — «Rockstar Games‏» is NOT
+       equal to «Rockstar Games». They are stripped from BOTH sides here, in SQL,
+       so the match works against the existing rows without rewriting them.
+       char(8206)=U+200E, char(8207)=U+200F, char(1564)=U+061C. */
+    conditions.push(
+      "REPLACE(REPLACE(REPLACE(TRIM(COALESCE(developer,'')), char(8206), ''), char(8207), ''), char(1564), '') = ?",
+    );
+    params.push(opts.developer);
+  }
   if (opts.starredOnly) conditions.push('stars > 0');
   if (opts.q) {
     const token = opts.q.split(/\s+/).filter((w) => w.length >= 2)[0];

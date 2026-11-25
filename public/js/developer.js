@@ -83,8 +83,22 @@
     title();
 
     try {
-      const res = await S.api(`/api/apps?developer=${encodeURIComponent(developer)}&limit=60`);
-      const apps = (res && res.apps) || [];
+      let apps = [];
+      try {
+        const res = await S.api(`/api/apps?developer=${encodeURIComponent(developer)}&limit=60`);
+        apps = (res && res.apps) || [];
+      } catch (e) { apps = []; }
+
+      /* Fallback: if the server-side filter is not deployed yet (or a stored name
+         carries invisible marks the SQL did not strip), scan the catalogue and
+         match on the normalised name. One extra request, only when needed. */
+      if (!apps.length) {
+        try {
+          const all = await S.api('/api/apps?limit=60');
+          const wanted = developer.toLowerCase();
+          apps = ((all && all.apps) || []).filter((a) => cleanName(a.developer).toLowerCase() === wanted);
+        } catch (e) { apps = []; }
+      }
 
       // The API filters by the stored name. Names in the database sometimes carry
       // invisible marks or inconsistent spacing, so the client also accepts a

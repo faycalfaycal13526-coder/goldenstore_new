@@ -767,6 +767,124 @@ function hideSupportSheet(on) {
 
    Until that method exists, this returns false and the caller keeps the current
    behaviour, so nothing breaks on an older build. */
+/* ---------------------------------------------------------------------------
+   CAPACITOR: WHO OWNS THE TRANSFER
+   ---------------------------------------------------------------------------
+   The app is a Capacitor shell. That matters, because a `fetch` started in the
+   WebView is killed the moment the page is hidden — no web code can keep it
+   alive. Capacitor, however, offers downloads that run in the NATIVE layer, and
+   a native transfer is owned by Android, not by the page, so it keeps going when
+   the user opens another app.
+
+   Order of preference (each one is checked before use):
+     1. GSAndroid.downloadApkDurable  → Android DownloadManager (survives even a
+        process kill, shows a system notification).
+     2. Filesystem.downloadFile       → @capacitor/filesystem native download.
+        Runs outside the WebView, so navigating away no longer stops it. Needs
+        only `npm i @capacitor/filesystem` + `npx cap sync android`.
+     3. GSAndroid.downloadApk         → a custom bridge, if the build has one.
+     4. Browser.open / window.open    → the system browser owns the download.
+     5. the old in-page stream        → last resort only.
+   ------------------------------------------------------------------------- */
+function capPlugin(name) {
+  try {
+    const C = window.Capacitor;
+    if (!C) return null;
+    if (C.Plugins && C.Plugins[name]) return C.Plugins[name];
+    if (C.registerPlugin) {
+      try { const p = C.registerPlugin(name); if (p) return p; } catch (e) {}
+    }
+  } catch (e) {}
+  return null;
+}
+
+function hasCapacitorFilesystem() {
+  const fs = capPlugin('Filesystem');
+  return !!(fs && typeof fs.downloadFile === 'function');
+}
+
+function hasCapacitorBrowser() {
+  const b = capPlugin('Browser');
+  return !!(b && typeof b.open === 'function');
+}
+
+/* Which durable routes exist right now — used by the UI to say something true. */
+function durableRoutes() {
+  return {
+    downloadManager: !!(window.GSAndroid && typeof window.GSAndroid.downloadApkDurable === 'function'),
+    filesystem: hasCapacitorFilesystem(),
+    bridge: !!(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function'),
+    browser: hasCapacitorBrowser() || !!(window.GSAndroid && typeof window.GSAndroid.openExternal === 'function'),
+  };
+}
+
+/* Start a NATIVE (page-independent) download. Resolves to the route used, or ''
+   when nothing durable is available so the caller can fall back. */
+async function startNativeDownload(app, filename, onProgress) {
+  if (!app || !app.slug) return '';
+  const url = downloadableUrl(app);
+  if (!url) return '';
+  const name = filename || `${app.slug}.apk`;
+
+  // 1) Android DownloadManager — survives app switches and process death.
+  if (window.GSAndroid && typeof window.GSAndroid.downloadApkDurable === 'function') {
+    try {
+      window.GSAndroid.downloadApkDurable(url, name, app.slug, app.package_name || '', app.name || '', app.icon_url || '');
+      return 'downloadManager';
+    } catch (e) {}
+  }
+
+  // 2) Capacitor Filesystem — a native download that the page does not own.
+  const fs = capPlugin('Filesystem');
+  if (fs && typeof fs.downloadFile === 'function') {
+    try {
+      const target = `downloads/${name}`;
+      const done = fs.downloadFile({ url, path: target, progress: true });
+      if (onProgress && typeof fs.addListener === 'function') {
+        try {
+          fs.addListener('progress', (ev) => {
+            const total = Number(ev && ev.contentLength) || 0;
+            const moved = Number(ev && ev.bytes) || 0;
+            if (total > 0) onProgress(Math.min(1, moved / total));
+          });
+        } catch (e) {}
+      }
+      // Fire and forget: the native task continues even if this page is gone.
+      Promise.resolve(done).then((res) => {
+        try {
+          window.dispatchEvent(new CustomEvent('gs-native-download-done', {
+            detail: { slug: app.slug, path: (res && res.path) || target, filename: name },
+          }));
+        } catch (e) {}
+      }).catch(() => {
+        try { window.dispatchEvent(new CustomEvent('gs-native-download-failed', { detail: { slug: app.slug } })); } catch (e) {}
+      });
+      return 'filesystem';
+    } catch (e) {}
+  }
+
+  // 3) A custom Capacitor/Android bridge, if the build exposes one.
+  if (window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function') {
+    try {
+      window.GSAndroid.downloadApk(url, name, app.slug, app.package_name || '', app.name || '', app.icon_url || '');
+      return 'bridge';
+    } catch (e) {}
+  }
+
+  // 4) Hand it to the system browser: Chrome uses DownloadManager itself.
+  try {
+    const b = capPlugin('Browser');
+    if (b && typeof b.open === 'function') { await b.open({ url }); return 'browser'; }
+  } catch (e) {}
+  try {
+    if (window.GSAndroid && typeof window.GSAndroid.openExternal === 'function') {
+      window.GSAndroid.openExternal(url);
+      return 'browser';
+    }
+  } catch (e) {}
+  return '';
+}
+
 function downloadableUrl(app) {
   const url = app && typeof app.apk_url === 'string' ? app.apk_url : '';
   return /^https:\/\//.test(url) ? url : '';
@@ -778,6 +896,8 @@ function hasDurableDownloader() {
   } catch (e) { return false; }
 }
 
+/* Kept for older callers: true only when the OS-owned DownloadManager route is
+   actually available. The full multi-route chain is startNativeDownload(). */
 function startDurableDownload(app, filename) {
   if (!app || !app.slug) return false;
   const url = downloadableUrl(app);
@@ -2839,7 +2959,7 @@ window.Store = {
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
   downloadConcurrencyLimit, canStartConcurrentDownload, registerWebDownload, abortWebDownload, unregisterWebDownload,
-  hasDeviceBridge, hasDurableDownloader, startDurableDownload, downloadableUrl, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset, resolveApkUrl,
+  hasDeviceBridge, durableRoutes, startNativeDownload, hasCapacitorFilesystem, hasCapacitorBrowser, hasDurableDownloader, startDurableDownload, downloadableUrl, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset, resolveApkUrl,
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isDeletedApk, markDeletedApk, clearDeletedApk,

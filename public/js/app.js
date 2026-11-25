@@ -2232,9 +2232,23 @@
              the page being destroyed, and even a process kill. Falls back to the
              existing bridge call on builds that do not have it yet. */
           const appForDownload = { ...app, apk_url: startUrl };
-          const durable = (S.startDurableDownload && S.startDurableDownload(appForDownload, dlFilename)) || false;
-          if (!durable) {
+          /* Hand the transfer to the NATIVE layer whenever the Capacitor shell
+             offers a page-independent route (DownloadManager / Filesystem /
+             system browser). That is what makes it continue after the user
+             opens another app — a transfer started by `fetch` inside this page
+             cannot survive the WebView being hidden. */
+          const route = (S.startNativeDownload
+            ? await S.startNativeDownload(appForDownload, dlFilename, (r) => {
+                setProgress(r);
+                S.updateActiveDownloadProgress(app.slug, r);
+              })
+            : '') || '';
+          if (!route && window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function') {
             window.GSAndroid.downloadApk(startUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
+          }
+          if (!route && !(window.GSAndroid && typeof window.GSAndroid.downloadApk === 'function')) {
+            // Nothing native at all: let the system handle it.
+            fallbackDirect(appForDownload);
           }
           toast(t('بدأ التنزيل…'), 'info');
         } catch (e) {

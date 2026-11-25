@@ -2074,6 +2074,12 @@ window.__gsDownloadStatesSnapshot = function (states) {
       const st = states[slug] || {};
       const status = st.status || 'downloading';
       const progress = typeof st.progress === 'number' ? st.progress : -1;
+      /* `progressNorm` was USED here but never declared in this function, which
+         threw a ReferenceError on every snapshot the phone sent. That exception
+         escaped the forEach, so the store never learned the real progress of a
+         download — the entry looked dead, and after a couple of app switches the
+         transfer could no longer be followed and stopped. Declared now. */
+      const progressNorm = normApkProgress(progress);
       if ((status === 'downloaded' || status === 'installing') && isDeletedApk(slug)) return;
       if ((status === 'downloaded' || status === 'installing') && isDeadApkFile(st.filename)) return;
       if (status === 'downloading') {
@@ -2309,14 +2315,23 @@ const recentInstalledAt = Object.create(null);
 function hasInFlightApk(slug) {
   if (!slug) return false;
   const now = Math.floor(Date.now() / 1000);
-  // Stale guard: a forgotten record older than 5 minutes must never block the
-  // device truth (a real install reported by the bridge).
-  const fresh = (ts) => !ts || now - Number(ts) < 300;
+  /* A download is NOT over because the record is old.
+     The 5-minute "stale" guard treated a real multi-GB transfer for dead: part
+     of a big APK takes far longer than five minutes on mobile data, so once the
+     record aged out the heartbeat reported the app as «installed» (the old
+     version still is), which wiped the in-flight entry and destroyed the
+     identifier the phone's downloader is tracked by — after which the transfer
+     could no longer be followed and it stopped. Only a STATUS that is clearly
+     finished counts as finished; age alone never ends a download. */
   const st = getApkState(slug);
-  if (st && (st.status === 'downloading' || st.status === 'installing') && fresh(st.updated_at)) return true;
+  if (st && (st.status === 'downloading' || st.status === 'installing')) return true;
   const dl = getActiveDownloadMap()[slug];
-  return !!(dl && (dl.status === 'downloading' || dl.status === 'installing')
-    && fresh(dl.updated_at || dl.started_at));
+  if (!dl) return false;
+  if (dl.status === 'downloading' || dl.status === 'installing' || dl.status === 'paused') return true;
+  // A 'paused' record is waiting for the user, and a record that was handed to
+  // the platform downloader keeps running outside this page.
+  if (dl.handed_off) return true;
+  return false;
 }
 function applyInstalled(slug, resolvedPkg) {
   if (!slug) return;

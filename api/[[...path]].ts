@@ -1446,11 +1446,14 @@ app.get('/search', async (c) => {
 
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase(), category = (c.req.query('category') || '').trim(), type = (c.req.query('type') || '').trim();
+  // Invisible direction marks travel with developer names from APK metadata and
+  // would break an exact match, so they are stripped before filtering.
+  const developer = sanitizeText(c.req.query('developer') || '', 120).replace(/[\u200e\u200f\u061c]/g, '').trim();
   const sort = (c.req.query('sort') || 'recent').trim(), starredOnly = c.req.query('starred') === '1';
   const limit = Math.min(Number(c.req.query('limit') || '24') || 24, 60), offset = Math.max(Number(c.req.query('offset') || '0') || 0, 0);
 
   try {
-    const result = await listApps(c.env, { q, category, type, sort, starredOnly, limit, offset });
+    const result = await listApps(c.env, { q, category, type, sort, starredOnly, limit, offset, developer });
     const hidden = await hiddenSlugs(c.env);
     const visible = result.apps.filter(a => !hidden.has(String(a.slug)));
     const ordered = sort === 'recent' ? applyConsoleOrder(visible, await consoleOrder(c.env)) : visible;

@@ -552,6 +552,53 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .d-titles { flex: 1; min-width: 0; padding-top: 2px; }
 .d-name { font-size: 24px; font-weight: 700; line-height: 1.2; unicode-bidi: isolate; word-break: break-word; }
 .d-dev { color: var(--nav); font-size: 14px; margin-top: 4px; font-weight: 500; unicode-bidi: isolate; }
+/* The developer name is tappable now: it must LOOK tappable (the owner's blue
+   link) and still be readable inside an RTL line with Latin names. */
+.d-dev-link {
+  display: inline-block;
+  color: var(--nav);
+  text-decoration: none;
+  border-radius: 6px;
+  padding: 1px 2px;
+  transition: opacity .15s ease, background .15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.d-dev-link:hover { text-decoration: underline; }
+.d-dev-link:active { opacity: .65; }
+.d-dev-link:focus-visible { outline: 2px solid var(--nav); outline-offset: 2px; }
+
+/* ---- «صفحة المطوّر» ---- */
+.dev-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 16px 10px;
+}
+.dev-head .icon-btn {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.dev-head .dev-title { min-width: 0; }
+.dev-head h1 {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0;
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
+.dev-head p { margin: 2px 0 0; font-size: 13px; }
+.dev-empty, .empty-state { padding: 40px 16px; text-align: center; color: var(--muted); }
+
 .d-sub { color: var(--text-3); font-size: 12px; margin-top: 4px; }
 
 .d-stats {

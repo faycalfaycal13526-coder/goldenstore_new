@@ -23,6 +23,8 @@ export function rowToApp(row: any): any {
 export interface ListAppsOptions {
   q?: string; category?: string; type?: string; sort?: string;
   starredOnly?: boolean; limit?: number; offset?: number;
+  /** Exact developer name (used by the «same developer» page). */
+  developer?: string;
 }
 
 export async function listApps(env: Env, opts: ListAppsOptions = {}): Promise<{ apps: any[]; total: number }> {
@@ -33,6 +35,10 @@ export async function listApps(env: Env, opts: ListAppsOptions = {}): Promise<{ 
   if (opts.type === 'game') conditions.push("type = 'game'");
   else if (opts.type === 'app') conditions.push("type != 'game'");
   if (opts.category) { conditions.push('category = ?'); params.push(opts.category); }
+  // Developer names are normalised in the page the same way (trim + strip the
+  // invisible RTL marks APK metadata often carries), so an exact match works
+  // even though the stored strings are not perfectly clean.
+  if (opts.developer) { conditions.push("TRIM(COALESCE(developer,'')) = ?"); params.push(opts.developer); }
   if (opts.starredOnly) conditions.push('stars > 0');
   if (opts.q) {
     const token = opts.q.split(/\s+/).filter((w) => w.length >= 2)[0];

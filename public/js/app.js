@@ -760,7 +760,11 @@
       iconBtn,
       el('div', { class: 'd-titles' },
         el('div', { class: 'd-name', 'data-i18n-app': app.name }, S.appName(app)),
-        el('div', { class: 'd-dev', 'data-i18n-dev': String(app.developer || '').replace(/[\u200e\u200f\u061c]/g, '').trim() }, app.developer || S.STORE.name),
+        /* The blue developer name opens a page with everything else by the same
+           developer. It is a real anchor so it can be opened in a new tab and is
+           reachable by keyboard; the name travels in the query string because it
+           contains spaces, Arabic and ™ — a path segment would be fragile. */
+        devLink(app),
         el('div', { class: 'd-sub' }, S.categoryName(app.category) || S.STORE.name),
       ),
     ));
@@ -1017,6 +1021,22 @@
         method: 'POST', body: { reason: v.reason, details: v.details },
       }),
     });
+  }
+
+  /* The developer line under the app name — now tappable. */
+  function devLink(app) {
+    const clean = String(app.developer || '').replace(/[\u200e\u200f\u061c]/g, '').trim();
+    const label = app.developer || S.STORE.name;
+    if (!clean) {
+      // No developer recorded: keep the plain line, nothing to link to.
+      return el('div', { class: 'd-dev' }, label);
+    }
+    return el('a', {
+      class: 'd-dev d-dev-link',
+      href: `/developer?name=${encodeURIComponent(clean)}`,
+      'data-i18n-dev': clean,
+      'aria-label': `${t('تطبيقات المطوّر')}: ${clean}`,
+    }, label);
   }
 
   function saveBlob(blob, filename) {

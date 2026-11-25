@@ -7,6 +7,10 @@
     "trailingSlash": false,
     "rewrites": [
         {
+            "source": "/developer",
+            "destination": "/developer.html"
+        },
+        {
             "source": "/publish",
             "destination": "/publish.html"
         },

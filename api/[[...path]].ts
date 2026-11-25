@@ -379,7 +379,7 @@ async function requireOwner(c: any, next: any) {
   await next();
 }
 
-function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
+function appPublic(d: any, includeInternalKeys = false, env?: any): App & { id: string } {
   const result: any = {
     id: d.id, slug: d.slug, name: d.name, name_lower: d.name_lower, search_terms: d.search_terms || [],
     package_name: d.package_name, short_description: d.short_description, description: d.description,
@@ -389,6 +389,16 @@ function appPublic(d: any, includeInternalKeys = false): App & { id: string } {
     created_at: d.created_at, updated_at: d.updated_at,
   };
   if (includeInternalKeys) { result.apk_key = d.apk_key; result.icon_key = d.icon_key; result.feature_key = d.feature_key; }
+  // A PERMANENT url for the file itself. `/download` answers with a 302 to a
+  // signed R2 link that expires in 5 minutes, which is fine as a click target
+  // but useless for a multi-GB transfer: a downloader that follows the redirect
+  // once and keeps the pre-signed URL loses it mid-transfer. The public R2
+  // domain serves the same object without an expiry and honours Range, so a
+  // download can resume instead of dying when the app is left or the phone
+  // sleeps. Public payloads only — never on the admin surface.
+  if (!includeInternalKeys && d.apk_key) {
+    try { result.apk_url = r2PublicUrl(d.apk_key, env); } catch { /* domain unset: UI falls back to /download */ }
+  }
   return result;
 }
 
@@ -1415,7 +1425,7 @@ app.get('/search', async (c) => {
     const hidden = await hiddenSlugs(c.env);
     const visible = result.apps.filter((a) => !hidden.has(String(a.slug)));
     const apps = visible.map((a) => ({
-      ...appPublic(a),
+      ...appPublic(a, false, c.env),
       icon_url: icon_url(a.icon_key, c.env),
       feature_url: feature_url(a.feature_key, c.env),
     }));
@@ -1448,7 +1458,7 @@ app.get('/apps', async (c) => {
     // deleted comment can never keep contributing to the average in the cards.
     const aggMap = await allVoteAggregates(c.env);
     const apps = ordered.map(a => {
-      const out: any = { ...appPublic(a), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) };
+      const out: any = { ...appPublic(a, false, c.env), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) };
       if (aggMap) {
         const snap = mergeAggregate(aggMap, [String(a.id), String(a.slug || '')]);
         out.rating = snap.rating; out.rating_count = snap.count; out.stars = snap.count;
@@ -1473,7 +1483,7 @@ app.get('/apps/:slug', async (c) => {
   
   const detailAliases = await appAliases(c.env, appData);
   const detailSnap = await ratingSnapshot(c.env, detailAliases);
-  const detailApp: any = { ...appPublic(appData),
+  const detailApp: any = { ...appPublic(appData, false, c.env),
     icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env),
     rating: detailSnap.rating, rating_count: detailSnap.count, stars: detailSnap.count,
     reviews_count: detailSnap.reviews_count };

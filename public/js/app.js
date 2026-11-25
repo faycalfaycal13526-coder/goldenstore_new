@@ -1034,6 +1034,19 @@
     setTimeout(() => a.remove(), 30000);
   }
 
+  /* The browser's own downloader is owned by the OS, not by this document, so
+     it keeps running after the page is left. Prefer the permanent R2 url (no
+     expiry, honours Range) and fall back to the counted redirect. */
+  function fallbackDirect(app) {
+    const href = (app && typeof app.apk_url === 'string' && /^https:\/\//.test(app.apk_url))
+      ? app.apk_url
+      : `/api/apps/${encodeURIComponent(app.slug)}/download`;
+    const a = el('a', { href, download: '', target: '_blank', rel: 'noopener', style: { display: 'none' } });
+    document.body.append(a);
+    a.click();
+    setTimeout(() => a.remove(), 30000);
+  }
+
   function installControl(app) {
     const label = el('span', { class: 'install-label', 'data-noi18n': '' }, t('تثبيت'));
     const fill = el('span', { class: 'install-fill' });
@@ -1066,6 +1079,11 @@
        installer by itself. Without this the button only produced a download
        counter and the user never got the install prompt. */
     let updateIntent = false;
+    /* How much of THIS file actually arrived, so a page leave can be turned
+       into a real resume point instead of a silent restart from zero. */
+    let receivedBytes = 0;
+    let knownTotal = 0;
+    let activeFilename = '';
     let lastLaunchAt = 0;
     let launchInFlight = false;
     function clearNativeLeaveHandler() {
@@ -2155,7 +2173,14 @@
         // Native bridge is keyed by slug too; starting this game/app does not
         // cancel any other in-flight download (unlimited concurrency).
         const apiBase = (S.apiBaseUrl && S.apiBaseUrl()) || '';
-        const dlUrl = `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
+        /* A PERMANENT url beats the /download redirect. `/download` answers 302
+           to a pre-signed R2 link that lives only 5 minutes: a slow 4G transfer
+           of a large APK outlives it, and once the link is dead the download
+           stops the moment the user leaves the page or the phone sleeps. The
+           public R2 url never expires and honours Range, so a downloader can
+           pause and resume. Falls back to /download when the domain is unset. */
+        const directApk = (app && typeof app.apk_url === 'string' && /^https:\/\//.test(app.apk_url)) ? app.apk_url : '';
+        const dlUrl = directApk || `${apiBase}/api/apps/${encodeURIComponent(app.slug)}/download`;
         if (updateIntent) beginUpdateUi();
         setCancelVisible(true);
         btn.classList.add('installing');
@@ -2188,6 +2213,7 @@
           // then — and only then — forget the «deleted» marker: a real
           // download is starting, so native snapshots are trustworthy again.
           const dlFilename = nextDownloadFilename();
+          activeFilename = dlFilename;
           if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
           window.GSAndroid.downloadApk(dlUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
@@ -2224,15 +2250,37 @@
 
       let finished = false;
       let handoffTriggered = false;
+      /* Leaving the page must PAUSE, never kill.
+         `fetch` is cancelled by the browser when the document unloads, so a
+         streamed download died the moment the user opened another app — the
+         exact complaint. Instead of letting that happen silently:
+           1. stop the stream on purpose,
+           2. keep the slug active (never removed, never marked failed),
+           3. remember how many bytes were already fetched, so coming back can
+              resume from that offset (`Range`) instead of starting at 0.
+         On the native bridge the Java downloader owns the transfer, so it
+         simply keeps running and the entry stays active in «مكتبتي». */
       const onHandoff = () => {
         if (finished || handoffTriggered) return;
         handoffTriggered = true;
         finished = true;                    // never let catch cancel/remove it
         cleanupHandoffListeners();
-        // Browser owns the transfer now: keep THIS slug active & indeterminate
-        // so «مكتبتي» shows it alongside all other concurrent downloads.
-        S.markDownloadHandedOff(app.slug);
-        try { fallbackDownload(app.slug); } catch {}
+        try { S.markDownloadHandedOff(app.slug); } catch {}
+        try {
+          S.pauseDownload && S.pauseDownload(app.slug, {
+            received: Number(receivedBytes) || 0,
+            total: Number(knownTotal) || 0,
+            filename: activeFilename || '',
+          });
+        } catch {}
+        if (S.hasDeviceBridge && S.hasDeviceBridge()) {
+          // The platform downloader survives the page: nothing else to do.
+          return;
+        }
+        // Webview/browser: hand the SAME permanent url to the browser's own
+        // downloader, which is owned by the OS and keeps running after the page
+        // is gone. This is what makes leaving the tab harmless.
+        try { fallbackDirect(app); } catch {}
       };
       const cleanupHandoffListeners = () => {
         window.removeEventListener('pagehide', onHandoff);
@@ -2294,7 +2342,13 @@
           toast(t('اكتمل التحميل وحفظ الملف في جهازك'), 'success');
           return;
         }
-        const res = await fetch(`/api/apps/${encodeURIComponent(app.slug)}/download?stream=1`, {
+        /* Take the file straight from the permanent R2 url when we have it: no
+           302, no 5-minute pre-signed link that can die mid-transfer, and Range
+           support for downloaders that resume. `/download` stays as the counted
+           fallback for when the public domain is not configured. */
+        const directApkUrl = (typeof app.apk_url === 'string' && /^https:\/\//.test(app.apk_url)) ? app.apk_url : '';
+        const sourceUrl = directApkUrl || `/api/apps/${encodeURIComponent(app.slug)}/download?stream=1`;
+        const res = await fetch(sourceUrl, {
           credentials: 'include',
           signal: activeDownloadController.signal,
         });
@@ -2334,6 +2388,8 @@
           if (readDone) break;
           chunks.push(value);
           received += value.length;
+          receivedBytes = received;
+          knownTotal = total;
           if (total) {
             noteRealProgress(received / total);
             setProgress(received / total);
@@ -2345,6 +2401,7 @@
           }
         }
         const blob = new Blob(chunks, { type: 'application/vnd.android.package-archive' });
+        try { S.clearPausedDownload(app.slug); } catch (e) {}
         setProgress(1);
         saveBlob(blob, filename);
         finished = true;
@@ -2398,6 +2455,18 @@
         setCancelVisible(true);
         btn.classList.add('installing');
         btn.disabled = true;
+        /* A download that stopped because the page was left is PAUSED, not
+           failed: show where it got to and invite one tap to continue, instead
+           of a dead button or a silent 0 %. */
+        if (inflight && inflight.status === 'paused') {
+          btn.classList.remove('installing');
+          btn.disabled = false;
+          setCancelVisible(false);
+          label.textContent = p > 0
+            ? `${t('التنزيل متوقف')} — ${t('تابع من')} ${p}%`
+            : t('التنزيل متوقف — اضغط للمتابعة');
+          return;
+        }
         if (p >= 0) setProgress(p); else setIndeterminate();
         return;
       }

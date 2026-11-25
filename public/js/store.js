@@ -2540,6 +2540,70 @@ function unregisterWebDownload(slug) {
   WEB_DOWNLOAD_READERS.delete(slug);
 }
 
+/* ---------------------------------------------------------------------------
+   PAUSED DOWNLOADS
+   ---------------------------------------------------------------------------
+   A `fetch` stream is killed by the browser when the document unloads, so a
+   download used to die the moment the user opened another app or game. The
+   stream now records how far it got and keeps the slug ACTIVE (never failed,
+   never removed), so:
+     · «مكتبتي» still shows the download after the page is gone,
+     · coming back resumes from that byte offset with a Range request instead
+       of starting again at 0 %.
+   The record is small and lives next to the other download state.
+   ------------------------------------------------------------------------- */
+const PAUSED_DL_KEY = 'gs_paused_dl';
+
+function getPausedMap() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PAUSED_DL_KEY) || '{}');
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  } catch { return {}; }
+}
+
+/** Remember where a stream stopped. Called on page leave (not on a real cancel). */
+function pauseDownload(slug, info) {
+  if (!slug) return null;
+  const map = getPausedMap();
+  const received = Math.max(0, Number(info && info.received) || 0);
+  const total = Math.max(0, Number(info && info.total) || 0);
+  map[slug] = {
+    received,
+    total,
+    filename: (info && info.filename) || '',
+    pct: total > 0 ? Math.min(99, Math.floor((received / total) * 100)) : 0,
+    paused_at: Math.floor(Date.now() / 1000),
+  };
+  try { localStorage.setItem(PAUSED_DL_KEY, JSON.stringify(map)); } catch {}
+  // The entry stays active: a download that is waiting is not a failed download.
+  const active = getActiveDownloadMap();
+  if (active[slug]) {
+    active[slug] = { ...active[slug], status: 'paused', progress: map[slug].pct, paused: true };
+    writeActiveDownloadMap(active);
+  }
+  return map[slug];
+}
+
+function getPausedDownload(slug) {
+  if (!slug) return null;
+  const rec = getPausedMap()[slug];
+  return rec && Number(rec.received) > 0 ? rec : null;
+}
+
+/** Bytes already on the device for this slug, or 0 when starting fresh. */
+function pausedDownloadOffset(slug) {
+  const rec = getPausedDownload(slug);
+  return rec ? Number(rec.received) || 0 : 0;
+}
+
+function clearPausedDownload(slug) {
+  if (!slug) return;
+  const map = getPausedMap();
+  if (!Object.prototype.hasOwnProperty.call(map, slug)) return;
+  delete map[slug];
+  try { localStorage.setItem(PAUSED_DL_KEY, JSON.stringify(map)); } catch {}
+}
+
 const ACTIVE_DL_KEY = 'gs_active_dl';
 function getActiveDownloadMap() {
   try {
@@ -2685,6 +2749,7 @@ window.Store = {
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
   downloadConcurrencyLimit, canStartConcurrentDownload, registerWebDownload, abortWebDownload, unregisterWebDownload,
+  hasDeviceBridge, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset,
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isDeletedApk, markDeletedApk, clearDeletedApk,

@@ -2224,7 +2224,18 @@
             const fresh = await S.resolveApkUrl(app.slug).catch(() => '');
             if (fresh) startUrl = fresh;
           }
-          window.GSAndroid.downloadApk(startUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
+          /* Prefer an OS-OWNED transfer. A WebView-owned download cannot be kept
+             alive after the page goes away — that is why switching apps could
+             still stop it no matter what the web code did. When the installed
+             app offers `downloadApkDurable` (Android DownloadManager) the
+             transfer belongs to the operating system: it survives app switches,
+             the page being destroyed, and even a process kill. Falls back to the
+             existing bridge call on builds that do not have it yet. */
+          const appForDownload = { ...app, apk_url: startUrl };
+          const durable = (S.startDurableDownload && S.startDurableDownload(appForDownload, dlFilename)) || false;
+          if (!durable) {
+            window.GSAndroid.downloadApk(startUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
+          }
           toast(t('بدأ التنزيل…'), 'info');
         } catch (e) {
           delete apkStateHandlers[app.slug];

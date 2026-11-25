@@ -735,6 +735,67 @@ function supportSheetHidden() {
 function hideSupportSheet(on) {
   try { if (on) localStorage.setItem(SUPPORT_HIDE_KEY, '1'); else localStorage.removeItem(SUPPORT_HIDE_KEY); } catch (e) {}
 }
+/* ---------------------------------------------------------------------------
+   DURABLE DOWNLOAD — the only way a transfer really survives leaving the page
+   ---------------------------------------------------------------------------
+   The APK itself is downloaded by code inside the installed app, which this
+   repository does not contain. Every web-side fix so far (permanent URL, pause
+   record, hand-off bookkeeping) can only make the transfer *resumable* or
+   *visible*; it cannot keep a WebView-owned connection alive after the WebView
+   goes away. A downloader that must survive app switches has to be owned by the
+   operating system.
+
+   `downloadApkDurable` asks the app's bridge for exactly that. The app should
+   implement it with `DownloadManager` (which android owns, survives the page and
+   even a process kill, retries on its own and shows a system notification):
+
+     @JavascriptInterface
+     fun downloadApkDurable(url: String, filename: String, slug: String,
+                            pkg: String, name: String, icon: String) {
+         val req = DownloadManager.Request(Uri.parse(url))
+             .setTitle(name)
+             .setDescription(name)
+             .setNotificationVisibility(
+                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+             .setDestinationInExternalFilesDir(
+                 ctx, Environment.DIRECTORY_DOWNLOADS, filename)
+             .setAllowedOverMetered(true)
+             .setAllowedOverRoaming(true)
+         val id = mgr.enqueue(req)          // OS owns it from here on
+         rememberDownloadId(slug, id)       // for progress polling
+     }
+
+   Until that method exists, this returns false and the caller keeps the current
+   behaviour, so nothing breaks on an older build. */
+function downloadableUrl(app) {
+  const url = app && typeof app.apk_url === 'string' ? app.apk_url : '';
+  return /^https:\/\//.test(url) ? url : '';
+}
+
+function hasDurableDownloader() {
+  try {
+    return !!(window.GSAndroid && typeof window.GSAndroid.downloadApkDurable === 'function');
+  } catch (e) { return false; }
+}
+
+function startDurableDownload(app, filename) {
+  if (!app || !app.slug) return false;
+  const url = downloadableUrl(app);
+  if (!url) return false;
+  if (!hasDurableDownloader()) return false;
+  try {
+    window.GSAndroid.downloadApkDurable(
+      url,
+      filename || `${app.slug}.apk`,
+      app.slug,
+      app.package_name || '',
+      app.name || '',
+      app.icon_url || '',
+    );
+    return true;
+  } catch (e) { return false; }
+}
+
 function openCanonicalSite() {
   const url = `https://${CANONICAL_HOST}/`;
   const bridge = window.GSAndroid;
@@ -2778,7 +2839,7 @@ window.Store = {
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
   downloadConcurrencyLimit, canStartConcurrentDownload, registerWebDownload, abortWebDownload, unregisterWebDownload,
-  hasDeviceBridge, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset, resolveApkUrl,
+  hasDeviceBridge, hasDurableDownloader, startDurableDownload, downloadableUrl, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset, resolveApkUrl,
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isDeletedApk, markDeletedApk, clearDeletedApk,

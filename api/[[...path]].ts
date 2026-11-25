@@ -1501,7 +1501,22 @@ app.get('/apps/:slug/download', async (c) => {
   
   const filename = `${appData.slug}-${appData.version_name || ''}.apk`.replace(/-+/g, '-');
   await recordDownloadEvent(c.env, appData.slug, 'web');
-  const url = await r2PresignGet(c.env, appData.apk_key, 300, `attachment; filename="${filename}"`);
+  // Redirect to the PERMANENT public object, not to a pre-signed link.
+  //
+  // The signed link lives 5 minutes. A phone's own downloader follows the 302
+  // once and then owns that URL: for a multi-GB APK on 4G the link is dead long
+  // before the transfer ends, so the download simply STOPS — and, because the
+  // URL is expired, it can never resume. Handing back the public R2 url (no
+  // expiry, Range support) fixes every client at once, including an older
+  // installed app whose bundled/cached JS still points here.
+  const disposition = `attachment; filename="${filename}"`;
+  try {
+    const direct = r2PublicUrl(appData.apk_key, c.env);
+    return c.redirect(`${direct}?response-content-disposition=${encodeURIComponent(disposition)}`);
+  } catch {
+    // Public domain not configured: keep the signed link as the only option.
+  }
+  const url = await r2PresignGet(c.env, appData.apk_key, 300, disposition);
   return c.redirect(url);
 });
 

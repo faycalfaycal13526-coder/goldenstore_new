@@ -2215,7 +2215,16 @@
           const dlFilename = nextDownloadFilename();
           activeFilename = dlFilename;
           if (S.clearDeletedApk) S.clearDeletedApk(app.slug);
-          window.GSAndroid.downloadApk(dlUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
+          /* The url handed to the phone must be the PERMANENT one. When the app
+             payload has no `apk_url` (an older cached response), ask for it
+             explicitly before starting, so the phone's own downloader never
+             receives a link that expires mid-transfer. */
+          let startUrl = dlUrl;
+          if (!directApk) {
+            const fresh = await S.resolveApkUrl(app.slug).catch(() => '');
+            if (fresh) startUrl = fresh;
+          }
+          window.GSAndroid.downloadApk(startUrl, dlFilename, app.slug || '', app.package_name || '', app.name || '', app.icon_url || '');
           toast(t('بدأ التنزيل…'), 'info');
         } catch (e) {
           delete apkStateHandlers[app.slug];
@@ -2282,12 +2291,20 @@
         // is gone. This is what makes leaving the tab harmless.
         try { fallbackDirect(app); } catch {}
       };
+      /* `pagehide` / `beforeunload` are NOT reliable inside an Android WebView:
+         when the user leaves the page — or switches to another app — the screen
+         is simply hidden and the document stays alive, so the old handler never
+         ran and the stream was silently killed. `visibilitychange` IS reliable
+         there, so the pause/hand-off hangs off both. */
+      const onHidden = () => { if (document.visibilityState === 'hidden') onHandoff(); };
       const cleanupHandoffListeners = () => {
         window.removeEventListener('pagehide', onHandoff);
         window.removeEventListener('beforeunload', onHandoff);
+        document.removeEventListener('visibilitychange', onHidden);
       };
       window.addEventListener('pagehide', onHandoff);
       window.addEventListener('beforeunload', onHandoff);
+      document.addEventListener('visibilitychange', onHidden);
 
       try {
         /* Round 42: if the transfer was primed during the ad, finish it here —

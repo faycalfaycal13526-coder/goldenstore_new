@@ -2468,6 +2468,20 @@ function appHasUpdate(app) {
   return !!storeName;
 }
 
+/* Ask the API for the app's permanent APK url.
+   Used by the native download path when the app payload was served from a
+   cached response that predates `apk_url`: the phone's own downloader must
+   never be handed a pre-signed link that expires in five minutes. */
+async function resolveApkUrl(slug) {
+  if (!slug) return '';
+  try {
+    const res = await api(`/api/apps/${encodeURIComponent(slug)}`);
+    const app = (res && (res.app || res)) || {};
+    const url = typeof app.apk_url === 'string' ? app.apk_url : '';
+    return /^https:\/\//.test(url) ? url : '';
+  } catch { return ''; }
+}
+
 function cancelDownload(slug) {
   try {
     abortWebDownload(slug);
@@ -2749,7 +2763,7 @@ window.Store = {
   getDownloadHistory, addToDownloadHistory, clearDownloadHistory,
   getActiveDownloads, setActiveDownload, updateActiveDownloadProgress, removeActiveDownload, onActiveDownloadsChange,
   downloadConcurrencyLimit, canStartConcurrentDownload, registerWebDownload, abortWebDownload, unregisterWebDownload,
-  hasDeviceBridge, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset,
+  hasDeviceBridge, pauseDownload, getPausedDownload, clearPausedDownload, pausedDownloadOffset, resolveApkUrl,
   markDownloadHandedOff,
   getApkState, getApkStateMap, setApkState, removeApkState, onApkState, syncNativeStates,
   isDeletedApk, markDeletedApk, clearDeletedApk,

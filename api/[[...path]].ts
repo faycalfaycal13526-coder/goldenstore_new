@@ -605,7 +605,13 @@ app.get('/store', (c) => {
   return c.json({ name: c.env.STORE_NAME || 'Goldenstore', domain: c.env.STORE_DOMAIN || 'goldenstore.online' });
 });
 
-const CURRENT_RELEASE = { version_name: '1.18', version_code: 19, apk_url: 'https://cdn.goldenstore.online/apk/goldenstore-app-1791319330825-c2d8f1.apk', notes: 'تحديث' };
+/* No hard-coded APK fallback.
+   This used to point at a build that no longer exists in the bucket, so
+   `/api/app-update` advertised a dead link and `/api/app-update/download`
+   redirected to a 404 — a download that silently fails for every visitor.
+   With an empty bucket the honest answer is «لا يوجد ملف بعد», and the admin
+   Update Center is the only place that can make it exist. */
+const CURRENT_RELEASE = { version_name: '', version_code: 0, apk_url: '', notes: '' };
 
 /* -------------------------------------------------------------------
    Durable download counter. `app_updates` used to be REPLACEd every time

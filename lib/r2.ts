@@ -19,7 +19,7 @@ function clientFor(env: Env): AwsClient {
 }
 
 export function r2Bucket(env: Env): string {
-  return env.R2_BUCKET || 'goldenstore-apks';
+  return env.R2_BUCKET || 'goldenstore';
 }
 
 function objectUrl(env: Env, key: string): URL {

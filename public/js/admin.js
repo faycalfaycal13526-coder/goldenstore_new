@@ -178,6 +178,7 @@
       { key: 'team', icon: 'shield', label: t('المشرفون والصلاحيات') },
       { key: 'backup', icon: 'storage', label: t('النسخ الاحتياطي') },
       { key: 'storage-cleanup', icon: 'cloud', label: t('تنظيف كلاود') },
+      { key: 'cloud', icon: 'cloud', label: t('كلاود R2') },
       { key: 'preview', icon: 'external', label: t('معاينة الأجهزة') },
       { key: 'settings', icon: 'settings', label: 'إعدادات المتجر' },
       { key: 'languages', icon: 'globe', label: t('اللغات') },
@@ -958,6 +959,7 @@
     else if (activeTab === 'team') await renderTeam(body);
     else if (activeTab === 'backup') await renderBackup(body);
     else if (activeTab === 'storage-cleanup') await renderStorageCleanup(body);
+    else if (activeTab === 'cloud') await renderCloudPanel(body);
     else if (activeTab === 'quality') await renderQuality(body);
     else if (activeTab === 'preview') await renderDevicePreview(body);
     else if (activeTab === 'settings') await renderStoreSettings(body);
@@ -3218,6 +3220,187 @@
         rows.length ? el('div', { class: 'table-wrap' }, table)
           : el('div', { class: 'hint' }, t('لا نشاطات بعد'))),
     );
+  }
+
+  /* ===================== كلاود R2 =====================
+     A complete replacement for dash.cloudflare.com for everything the owner
+     needs day to day: see the bucket totals, browse every file with its size
+     and whether the store still uses it, upload to any path, open a file with a
+     signed link, delete a selection, empty the bucket — and «نبدأ من جديد»
+     which clears the catalogue AND the bucket at once.
+     The R2 keys live in the Worker's secrets, so nothing is exposed here. */
+  async function renderCloudPanel(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    const state = { prefix: '', objects: [], overview: null, selected: new Set() };
+    const out = el('div', { style: { fontSize: '13px', lineHeight: '1.7' } });
+    const stats = el('div', { class: 'admin-update-row' });
+
+    const load = async () => {
+      try {
+        state.overview = await api('/api/admin/r2/overview', { timeoutMs: 120000 });
+      } catch (e) { state.overview = null; }
+      renderStats();
+    };
+
+    const renderStats = () => {
+      stats.innerHTML = '';
+      const o = state.overview;
+      if (!o) { stats.textContent = 'تعذّر قراءة الحاوية — تحقق من مفاتيح R2 في أسرار Worker.'; return; }
+      const row = (k, v) => stats.append(el('div', null, el('span', null, k), el('strong', null, v)));
+      row('الحاوية', o.bucket);
+      row('المسار', o.endpoint);
+      row('النطاق العام', o.public_url || '—');
+      row('الملفات', `${formatNum(o.count)} (${formatBytes(o.bytes)})`);
+      row('ملفات يتيمة', `${formatNum(o.orphans)} (${formatBytes(o.orphan_bytes)})`);
+      row('مفاتيح مستخدمة', formatNum(o.referenced));
+      const folders = Object.entries(o.folders || {}).map(([f, v]) => `${f} ${v.count}`).join(' · ');
+      if (folders) stats.append(el('div', { class: 'hint' }, folders));
+    };
+
+    const listBox = el('div');
+    const prefixInput = el('input', { class: 'input', type: 'text', placeholder: 'مجلد: apk/ أو ss/ أو اتركه فارغاً', 'aria-label': t('المجلد') });
+    const browseBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('search'), 'استعراض');
+    const delSelBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', disabled: true }, ico('trash'), 'حذف المحدد');
+
+    const renderList = () => {
+      listBox.innerHTML = '';
+      if (!state.objects.length) { listBox.append(el('div', { class: 'hint' }, 'لا ملفات في هذا المسار.')); return; }
+      const table = el('table', { class: 'table' },
+        el('thead', null, el('tr', null,
+          el('th', null, ''), el('th', null, 'الملف'), el('th', null, 'الحجم'), el('th', null, 'الحالة'), el('th', null, ''))),
+        el('tbody', null, ...state.objects.map((o) => {
+          const cb = el('input', { type: 'checkbox', 'aria-label': o.key });
+          cb.checked = state.selected.has(o.key);
+          cb.addEventListener('change', () => {
+            if (cb.checked) state.selected.add(o.key); else state.selected.delete(o.key);
+            delSelBtn.disabled = !state.selected.size;
+          });
+          return el('tr', null,
+            el('td', null, cb),
+            el('td', { style: { wordBreak: 'break-all', fontSize: '12px' } }, o.key),
+            el('td', null, formatBytes(o.size)),
+            el('td', null, o.referenced
+              ? el('span', { class: 'admin-update-force' }, 'مستخدم')
+              : el('span', { class: 'hint' }, 'يتيم')),
+            el('td', null, el('button', {
+              class: 'btn btn-sm btn-secondary', type: 'button', title: t('فتح'),
+              onclick: async () => {
+                try {
+                  const r2 = await api(`/api/admin/r2/download-url?key=${encodeURIComponent(o.key)}`);
+                  window.open(r2.url, '_blank');
+                } catch { toast('تعذّر فتح الملف', 'error'); }
+              },
+            }, ico('external'))),
+          );
+        })),
+      );
+      listBox.append(table);
+    };
+
+    browseBtn.onclick = async () => {
+      browseBtn.disabled = true;
+      listBox.textContent = 'جارٍ التحميل…';
+      try {
+        state.prefix = prefixInput.value.trim();
+        state.selected.clear();
+        delSelBtn.disabled = true;
+        const res = await api(`/api/admin/r2/objects?prefix=${encodeURIComponent(state.prefix)}`, { timeoutMs: 120000 });
+        state.objects = res.objects || [];
+        if (!state.objects.length) listBox.textContent = '';
+        renderList();
+      } catch (e) { listBox.textContent = 'تعذّر الاستعراض: ' + ((e && e.message) || 'خطأ'); }
+      finally { browseBtn.disabled = false; }
+    };
+
+    delSelBtn.onclick = async () => {
+      if (!state.selected.size) return;
+      if (!confirm(`حذف ${state.selected.size} ملفاً من كلاود؟`)) return;
+      delSelBtn.disabled = true;
+      try {
+        const res = await api('/api/admin/r2/delete', { method: 'POST', body: { keys: [...state.selected] } });
+        toast(`أُزيل ${res.deleted} ملفاً` + (res.failed ? ` — تعذّر ${res.failed}` : ''), 'success');
+        state.selected.clear();
+        browseBtn.click();
+        load();
+      } catch { toast('فشل الحذف', 'error'); delSelBtn.disabled = false; }
+    };
+
+    // upload to any path
+    const upKey = el('input', { class: 'input', type: 'text', placeholder: 'apk/اسم-الملف.apk', 'aria-label': t('مسار الرفع') });
+    const upFile = el('input', { type: 'file' });
+    const upBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, ico('upload'), 'رفع إلى كلاود');
+    upBtn.onclick = async () => {
+      const f = upFile.files && upFile.files[0];
+      if (!f || !upKey.value.trim()) { toast('اختر ملفاً واكتب المسار', 'error'); return; }
+      upBtn.disabled = true;
+      try {
+        const r2 = await api('/api/admin/r2/upload-url', { method: 'POST', body: { key: upKey.value.trim(), content_type: f.type || 'application/octet-stream' } });
+        const put = await fetch(r2.url, { method: 'PUT', body: f, headers: { 'Content-Type': f.type || 'application/octet-stream' } });
+        if (!put.ok) throw new Error('upload_' + put.status);
+        toast('تم الرفع — الرابط العام: ' + r2.public_url, 'success');
+        out.textContent = r2.public_url;
+        load();
+      } catch (e) { toast('فشل الرفع: ' + ((e && e.message) || ''), 'error'); }
+      finally { upBtn.disabled = false; }
+    };
+
+    // full wipe
+    const wipePhrase = el('input', { class: 'input', type: 'text', placeholder: 'DELETE-ALL', 'aria-label': 'DELETE-ALL' });
+    const wipeBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', disabled: true }, ico('trash'), 'مسح كل الملفات');
+    wipePhrase.addEventListener('input', () => { wipeBtn.disabled = wipePhrase.value.trim() !== 'DELETE-ALL'; });
+    wipeBtn.onclick = async () => {
+      if (!confirm('مسح كل ملفات كلاود نهائياً؟')) return;
+      wipeBtn.disabled = true;
+      try {
+        const res = await api('/api/admin/r2/wipe', { method: 'POST', body: { confirm: 'DELETE-ALL' }, timeoutMs: 180000 });
+        toast(`تم المسح: ${res.deleted}/${res.count}`, 'success');
+        state.selected.clear(); browseBtn.click(); load();
+      } catch { toast('فشل المسح', 'error'); wipeBtn.disabled = false; }
+    };
+
+    // reset the whole store
+    const resetPhrase = el('input', { class: 'input', type: 'text', placeholder: 'RESET-STORE', 'aria-label': 'RESET-STORE' });
+    const resetBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', disabled: true }, ico('trash'), 'تصفير المتجر — نبدأ من جديد');
+    resetPhrase.addEventListener('input', () => { resetBtn.disabled = resetPhrase.value.trim() !== 'RESET-STORE'; });
+    resetBtn.onclick = async () => {
+      if (!confirm('سيُحذف كل تطبيق ولعبة وكل ملف في كلاود نهائياً. متابعة؟')) return;
+      resetBtn.disabled = true;
+      out.textContent = 'جارٍ التصفير…';
+      try {
+        const res = await api('/api/admin/store/reset', { method: 'POST', body: { confirm: 'RESET-STORE' }, timeoutMs: 300000 });
+        const tables = Object.entries(res.tables || {}).map(([t, n]) => `${t}: ${n}`).join(' · ');
+        out.textContent = `حُذف ${res.apps_before} عنصراً · ملفات: ${res.files.deleted}/${res.files.count}\n${tables}`;
+        toast('تم التصفير — المتجر فارغ وجاهز للبداية', 'success');
+        load();
+      } catch (e) {
+        out.textContent = 'فشل التصفير: ' + ((e && e.message) || 'خطأ');
+        resetBtn.disabled = false;
+      }
+    };
+
+    body.innerHTML = '';
+    body.append(
+      el('div', { class: 'admin-page-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, 'كلاود R2'),
+          el('p', { class: 'admin-page-sub' }, 'تحكم كامل في حاوية الملفات من هنا: عرض، رفع، فتح، حذف، ومسح كامل — بلا دخول Cloudflare.'))),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('cloud'), 'حالة الحاوية'),
+        stats),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('search'), 'استعراض الملفات'),
+        el('div', { class: 'row-actions' }, prefixInput, browseBtn, delSelBtn),
+        el('div', { class: 'mt-md' }, listBox)),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('upload'), 'رفع ملف'),
+        el('div', { class: 'row-actions' }, upKey, upFile, upBtn),
+        el('div', { class: 'hint mt-md' }, out)),
+      el('div', { class: 'panel', style: { borderColor: 'var(--danger)' } },
+        el('div', { class: 'panel-head', style: { borderColor: 'var(--danger)' } }, ico('trash'), 'منطقة الخطر'),
+        el('div', { class: 'field' }, el('label', null, 'مسح كل ملفات كلاود (اكتب DELETE-ALL)'), el('div', { class: 'row-actions' }, wipePhrase, wipeBtn)),
+        el('div', { class: 'field' }, el('label', null, 'تصفير المتجر: حذف كل التطبيقات والألعاب وملفاتها (اكتب RESET-STORE)'), el('div', { class: 'row-actions' }, resetPhrase, resetBtn))),
+    );
+    await load();
   }
 
   /* ===================== تنظيف كلاود =====================

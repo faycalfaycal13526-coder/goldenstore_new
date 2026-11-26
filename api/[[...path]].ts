@@ -28,7 +28,7 @@ import {
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
-  r2DeleteStrict, r2DeleteMany, r2List,
+  r2DeleteStrict, r2DeleteMany, r2List, r2Bucket,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
   r2AbortMultipartUpload, r2ConfigureCors,
 } from '../lib/r2.js';
@@ -3442,6 +3442,189 @@ app.delete('/admin/apps/:id', async (c) => {
     ok: true, files: keys.length, deleted_files: keys.length - failed.length,
     failed_files: failed.length, leftover: failed.slice(0, 20),
   });
+});
+
+/* =========================================================================
+   R2 CONTROL PANEL — «لوحة تحكم كامل بحسابي في كلاود من غير ما أدخل عليه»
+   -------------------------------------------------------------------------
+   Everything the owner otherwise opens dash.cloudflare.com for, done here with
+   the Worker's own R2 credentials (so the keys never leave the server):
+
+     GET    /admin/r2/overview          bucket, endpoint, public domain, totals
+     GET    /admin/r2/objects?prefix=   every object + whether a DB row uses it
+     POST   /admin/r2/upload-url        presigned PUT to push a file anywhere
+     GET    /admin/r2/download-url      presigned GET to inspect one file
+     POST   /admin/r2/delete            delete the selected keys
+     POST   /admin/r2/wipe              empty the whole bucket (typed confirm)
+     POST   /admin/store/reset          «نبدأ من جديد»: catalogue + files = 0
+   ========================================================================= */
+const R2_KEY_RE = /^[A-Za-z0-9._/-]{1,300}$/;
+function validR2Key(key: unknown): key is string {
+  const k = String(key || '');
+  return R2_KEY_RE.test(k) && !k.includes('..') && !k.startsWith('/');
+}
+
+/** Every key the database still points at — so the panel can label an object
+ *  «مستخدم» or «يتيم» without guessing. */
+async function referencedKeys(env: Env): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const add = (k: unknown) => { if (k && typeof k === 'string') keys.add(k); };
+  const apps: any = await env.DB.prepare('SELECT apk_key, icon_key, feature_key FROM apps').all().catch(() => ({ results: [] }));
+  for (const r of (apps.results || [])) { add(r.apk_key); add(r.icon_key); add(r.feature_key); }
+  const ss: any = await env.DB.prepare('SELECT r2_key FROM screenshots').all().catch(() => ({ results: [] }));
+  for (const r of (ss.results || [])) add(r.r2_key);
+  const vids: any = await env.DB.prepare('SELECT thumb_key FROM app_videos').all().catch(() => ({ results: [] }));
+  for (const r of (vids.results || [])) add(r.thumb_key);
+  const upd: any = await env.DB.prepare("SELECT apk_key, logo_key, screenshots FROM app_updates WHERE id = 'current'").all().catch(() => ({ results: [] }));
+  for (const r of (upd.results || [])) {
+    add(r.apk_key); add(r.logo_key);
+    try { for (const k of JSON.parse(r.screenshots || '[]')) add(k); } catch { /* not JSON */ }
+  }
+  return keys;
+}
+
+app.get('/admin/r2/overview', async (c) => {
+  const prefixes = ['apk/', 'ss/', 'icon/', 'feature/', 'vthumb/', ''];
+  const seen = new Set<string>();
+  const objects: { key: string; size: number; lastModified?: string }[] = [];
+  for (const pfx of prefixes) {
+    for (const o of await r2List(c.env, pfx, 10000)) {
+      if (seen.has(o.key)) continue;
+      seen.add(o.key);
+      objects.push(o);
+    }
+  }
+  const referenced = await referencedKeys(c.env);
+  const folders: Record<string, { count: number; bytes: number }> = {};
+  let orphans = 0, orphanBytes = 0;
+  for (const o of objects) {
+    const folder = o.key.includes('/') ? o.key.slice(0, o.key.indexOf('/') + 1) : '(root)';
+    folders[folder] = folders[folder] || { count: 0, bytes: 0 };
+    folders[folder].count++;
+    folders[folder].bytes += o.size;
+    if (!referenced.has(o.key)) { orphans++; orphanBytes += o.size; }
+  }
+  return c.json({
+    bucket: r2Bucket(c.env),
+    endpoint: `${c.env.R2_ACCOUNT_ID || ''}.r2.cloudflarestorage.com`,
+    public_url: c.env.R2_PUBLIC_URL || null,
+    count: objects.length,
+    bytes: objects.reduce((n, o) => n + o.size, 0),
+    folders, orphans, orphan_bytes: orphanBytes,
+    referenced: referenced.size,
+  });
+});
+
+app.get('/admin/r2/objects', async (c) => {
+  const prefix = String(c.req.query('prefix') || '').trim().slice(0, 120);
+  const objects = await r2List(c.env, prefix, 1000);
+  const referenced = await referencedKeys(c.env);
+  return c.json({
+    prefix,
+    count: objects.length,
+    objects: objects.map((o) => ({
+      key: o.key, size: o.size, last_modified: o.lastModified || null,
+      referenced: referenced.has(o.key),
+    })),
+  });
+});
+
+app.post('/admin/r2/upload-url', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const key = String(body.key || '').trim();
+  if (!validR2Key(key)) return c.json({ error: 'invalid_key' }, 400);
+  const url = await r2PresignPut(c.env, key, String(body.content_type || 'application/octet-stream'), 900);
+  return c.json({ ok: true, key, url, public_url: r2PublicUrl(key, c.env) });
+});
+
+app.get('/admin/r2/download-url', async (c) => {
+  const key = String(c.req.query('key') || '');
+  if (!validR2Key(key)) return c.json({ error: 'invalid_key' }, 400);
+  const head = await r2Head(c.env, key);
+  if (!head) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true, key, size: head.size, type: head.contentType, url: await r2PresignGet(c.env, key, 900) });
+});
+
+app.post('/admin/r2/delete', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const keys = (Array.isArray(body.keys) ? body.keys : []).filter(validR2Key);
+  if (!keys.length) return c.json({ error: 'no_keys' }, 400);
+  const failed = await r2DeleteMany(c.env, keys);
+  await recordActivity(c.env, consoleActor(c), `حذف ${keys.length - failed.length} ملف من كلاود`, 'delete');
+  return c.json({ ok: true, deleted: keys.length - failed.length, failed: failed.length, failed_keys: failed.slice(0, 50) });
+});
+
+app.post('/admin/r2/wipe', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (String(body.confirm || '') !== 'DELETE-ALL') return c.json({ error: 'confirm_required' }, 400);
+  const prefixes = ['apk/', 'ss/', 'icon/', 'feature/', 'vthumb/', ''];
+  const seen = new Set<string>();
+  for (const pfx of prefixes) for (const o of await r2List(c.env, pfx, 10000)) seen.add(o.key);
+  const failed = await r2DeleteMany(c.env, [...seen]);
+  await recordActivity(c.env, consoleActor(c), `مسح كامل لكلاود: ${seen.size - failed.length}/${seen.size}`, 'delete');
+  return c.json({ ok: true, count: seen.size, deleted: seen.size - failed.length, failed: failed.length });
+});
+
+/* ---- «نبدأ من جديد»: المتجر + كل ملفاته ----
+   Empties every table that belongs to the catalogue (apps, screenshots,
+   videos/thumbnails, ratings, publications, order, per-app download stats)
+   and then the bucket. Categories, settings, admin users, notifications and
+   the store's own update row are deliberately kept.
+   Typed confirmation: RESET-STORE. */
+const APP_TABLES = [
+  'screenshots', 'app_videos', 'app_publication', 'app_order',
+  'app_download_stats', 'app_aliases', 'star_votes', 'app_reviews',
+  'app_followers', 'app_update_requests',
+];
+app.post('/admin/store/reset', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (String(body.confirm || '') !== 'RESET-STORE') return c.json({ error: 'confirm_required' }, 400);
+  const report: any = { tables: {}, files: null, dry_run: body.dry_run === true };
+
+  // 1) every app row
+  const before: any = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM apps').first().catch(() => null);
+  report.apps_before = Number(before?.n || 0);
+
+  // 2) related tables (explicit list) + any table that has an `app_id` column
+  const names = new Set<string>(APP_TABLES);
+  try {
+    const tables: any = await c.env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+    for (const t of (tables.results || [])) {
+      const name = String(t.name);
+      if (!name || name.startsWith('sqlite_') || name === 'apps') continue;
+      const cols: any = await c.env.DB.prepare(`PRAGMA table_info(${name})`).all().catch(() => ({ results: [] }));
+      if ((cols.results || []).some((col: any) => String(col.name) === 'app_id')) names.add(name);
+    }
+  } catch { /* keep the explicit list */ }
+
+  if (report.dry_run) {
+    for (const t of names) {
+      const n: any = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t}`).first().catch(() => null);
+      report.tables[t] = Number(n?.n || 0);
+    }
+    return c.json({ ok: true, ...report });
+  }
+
+  await ensureConsoleTables(c.env.DB);
+  for (const t of names) {
+    try {
+      const res: any = await c.env.DB.prepare(`DELETE FROM ${t}`).run();
+      report.tables[t] = Number(res?.meta?.changes ?? 0);
+    } catch { report.tables[t] = 'skipped'; }
+  }
+  try { const res: any = await c.env.DB.prepare('DELETE FROM apps').run(); report.tables.apps = Number(res?.meta?.changes ?? 0); } catch { report.tables.apps = 'failed'; }
+  try { await c.env.DB.prepare("DELETE FROM app_update_releases").run(); } catch { /* optional table */ }
+
+  // 3) the bucket
+  const prefixes = ['apk/', 'ss/', 'icon/', 'feature/', 'vthumb/', ''];
+  const seen = new Set<string>();
+  for (const pfx of prefixes) for (const o of await r2List(c.env, pfx, 10000)) seen.add(o.key);
+  const failed = await r2DeleteMany(c.env, [...seen]);
+  report.files = { count: seen.size, deleted: seen.size - failed.length, failed: failed.length };
+
+  invalidateAppsCache();
+  await recordActivity(c.env, consoleActor(c), `تصفير المتجر: ${report.apps_before} عنصراً و${report.files.deleted} ملف`, 'delete');
+  return c.json({ ok: true, ...report });
 });
 
 /* =========================================================================

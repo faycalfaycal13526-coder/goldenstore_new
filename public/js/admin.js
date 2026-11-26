@@ -4884,11 +4884,49 @@
         const data = Object.fromEntries(new FormData(form).entries());
         if (data.version_code === '') delete data.version_code;
         if (data.min_sdk === '') delete data.min_sdk;
+        /* Owner: «أريد عند التعديل عليها تستبدل المعلومات القديمة ولا تنشر إعلان
+           ولا تأتي منها نسخة ثانية».
+           The answer now says WHICH of those happened, and the page replaces what
+           it shows with the saved values instead of asking the owner to reload:
+             • a rename/re-categorise/description edit → «استُبدلت المعلومات …
+               بلا إشعار ولا نسخة ثانية»,
+             • a real version bump → says so, because that one IS announced,
+             • a clash with another item → nothing is saved and the reason is
+               spelled out (the same title or package already exists). */
+        const submitBtn = form.querySelector('button[type=submit]');
+        if (submitBtn) submitBtn.disabled = true;
         try {
-          await api(`/api/admin/apps/${id}`, { method: 'PATCH', body: data });
-          toast('تم الحفظ', 'success');
+          const res = await api(`/api/admin/apps/${id}`, { method: 'PATCH', body: data });
+          const n = (res && res.changed) ? res.changed.length : 0;
+          if (res && res.notified) {
+            toast(`استُبدلت البيانات (${n} حقلاً) — وأُرسل إشعار إصدار جديد لأن رقم الإصدار ارتفع`, 'info');
+          } else {
+            toast(`استُبدلت البيانات (${n} حقلاً) — بلا إشعار ولا نسخة ثانية`, 'success');
+          }
+          /* Replace what is on screen with the saved values. A reload is what
+             made an edit feel like a re-publish. */
+          if (res && res.app) {
+            const setField = (key, val) => {
+              const input = form.querySelector(`[name="${key}"]`);
+              if (input && val !== undefined) input.value = val ?? '';
+            };
+            setField('name', res.app.name);
+            setField('package_name', res.app.package_name);
+            setField('developer', res.app.developer);
+            setField('version_name', res.app.version_name);
+            const h2 = body.querySelector('.section-title');
+            if (h2 && res.app.name) h2.textContent = res.app.name;
+          }
+          if (res && res.invalidate_device_package && window.Store && Store.clearResolvedPackage) {
+            try { Store.clearResolvedPackage(app.slug); } catch (e2) {}
+          }
+          load();
         } catch (err) {
-          toast('فشل الحفظ', 'error');
+          const msg = (err && err.data && err.data.message) || '';
+          if (err && (err.status === 409 || msg)) toast(msg || 'الاسم أو اسم الحزمة مستخدم بالفعل — لم يُحفظ شيء', 'error');
+          else toast('فشل الحفظ', 'error');
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
         }
       } });
       form.append(

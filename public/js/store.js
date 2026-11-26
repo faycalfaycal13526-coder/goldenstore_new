@@ -2646,6 +2646,18 @@ function rememberResolvedPackage(slug, pkg) {
     sessionStorage.setItem(RESOLVED_PKG_KEY, JSON.stringify(map));
   } catch {}
 }
+/* The device remembers which package it found for a slug. When the owner edits
+ * an item's package name, that memory is the OLD truth and would keep answering
+ * with it (an update would target the wrong package). This drops it. */
+function clearResolvedPackage(slug) {
+  if (!slug) return;
+  try {
+    const map = JSON.parse(sessionStorage.getItem(RESOLVED_PKG_KEY) || '{}');
+    if (map[slug] === undefined) return;
+    delete map[slug];
+    sessionStorage.setItem(RESOLVED_PKG_KEY, JSON.stringify(map));
+  } catch (e) {}
+}
 function resolvedPackageName(slug) {
   if (!slug) return '';
   try {
@@ -2795,7 +2807,11 @@ function versionIsNewer(storeVersion, deviceVersion) {
 function deviceAppInfo(app) {
   const empty = { installed: false, version: '', versionCode: 0 };
   if (!app || !hasDeviceBridge()) return empty;
-  const pkg = app.package_name
+  /* The row is the truth. A remembered package is only a fallback for rows that
+     have none — otherwise editing «اسم الحزمة» in the dashboard changed the store
+     while the installed app kept asking Android about the OLD package and
+     reported the app as not installed. */
+  const pkg = String(app.package_name || '').trim()
     || (typeof resolvedPackageName === 'function' ? resolvedPackageName(app.slug) : '') || '';
   const st = typeof checkAppStatus === 'function' ? checkAppStatus(app.slug, pkg) : null;
   if (st && st.installed) {
@@ -3131,7 +3147,7 @@ window.Store = {
   isDeadApkFile, markDeadApkFile, clearDeadApkFile,
   isInstalledStored, markInstalledStored, unmarkInstalledStored,
   installedVersionOnDevice, versionIsNewer, appHasUpdate, isAppInstalledOnDevice, cancelDownload, isSlugInstalled,
-  checkAppStatus, resolvedPackageName, rememberResolvedPackage, registerInstallWatch, applyInstalled, hasInFlightApk,
+  checkAppStatus, resolvedPackageName, rememberResolvedPackage, clearResolvedPackage, registerInstallWatch, applyInstalled, hasInFlightApk,
   checkAppUpdate, checkForUpdates, showUpdateDialog, showUpdateBanner, shouldShowUpdate, offlineScreen, getCurrentAppVersion,
 };
 

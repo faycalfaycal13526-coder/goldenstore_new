@@ -3511,48 +3511,128 @@ app.post('/admin/apps', async (c) => {
   return c.json({ ok: true, id, slug });
 });
 
+/* ── SAVING «البيانات الأساسية» ──────────────────────────────────────────────
+ *
+ * Owner: «أريد عند التعديل عليها تستبدل المعلومات القديمة ولا تنشر إعلان ولا
+ * تأتي منها نسخة ثانية».
+ *
+ * Three promises, and each one is enforced here rather than assumed:
+ *
+ *  1. IT REPLACES THE OLD VALUES. The row is the single source of truth: every
+ *     field is written from the form, and nothing about the change survives in
+ *     a second place that could later re-appear (a stale list cache, a second
+ *     row, an old URL). Whoever displays the item reads this row.
+ *
+ *  2. IT NEVER BECOMES A SECOND COPY. A second copy is only possible if the
+ *     name or the package name now matches ANOTHER row — so that is refused,
+ *     with a plain answer the panel can show, instead of silently splitting the
+ *     product in two.
+ *
+ *  3. IT NEVER ANNOUNCES ANYTHING. A notification is sent only when a genuinely
+ *     NEWER version is being saved (a higher version code, or — when codes are
+ *     absent — a different non-empty version name). Renaming, re-categorising,
+ *     editing the description/developer/package and fixing a typo are silent.
+ *
+ * The old row is also what the DEVICE caches depend on: a published `package_name`
+ * feeds `gs_resolved_pkgs` inside the installed app, so the change is written
+ * there too before this request answers.
+ */
 app.patch('/admin/apps/:id', async (c) => {
   const id = c.req.param('id'), body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(id).first();
   if (!old) return c.json({ error: 'not_found' }, 404);
 
-  let name = body.name !== undefined ? sanitizeText(body.name, 200) : old.name;
-  let name_lower = body.name !== undefined ? name.toLowerCase() : old.name_lower;
-  let search_terms = body.name || body.developer || body.short_description || body.package_name ? JSON.stringify(searchTerms(name, body.developer||old.developer, body.short_description||old.short_description, body.package_name||old.package_name)) : old.search_terms;
+  const has = (k: string) => body[k] !== undefined && body[k] !== null;
+  const name = has('name') ? sanitizeText(body.name, 200).trim() : old.name;
+  if (has('name') && !name) return c.json({ error: 'name_required' }, 400);
+  const name_lower = has('name') ? name.toLowerCase() : old.name_lower;
+  const package_name = has('package_name') ? sanitizeText(body.package_name, 200).trim() : (old.package_name || '');
+  if (has('package_name') && !package_name) return c.json({ error: 'package_required' }, 400);
+  const developer = has('developer') ? sanitizeText(body.developer, 120).trim() : (old.developer || '');
+  const short_description = has('short_description') ? sanitizeText(body.short_description, 500).trim() : (old.short_description || '');
+  const description = has('description') ? sanitizeText(body.description, 10000) : (old.description || '');
+  const search_terms = JSON.stringify(searchTerms(name, developer, short_description, package_name));
 
-  /* A simple edit must never broadcast anything.
-   *
-   * Round 83 (owner: «وأيضا ينشر إشعار أيضا أنا لا أريد إشعار عند تغيير شئ بسيط»).
-   * This handler fired an «إصدار جديد» notification whenever version_name or
-   * version_code came through differently from the stored row — and the edit form
-   * always submits both fields, so renaming an app could announce a release that
-   * never happened.
-   *
-   * Now a notification is sent only when a REAL, NEWER version is being saved:
-   * the version code increased (or, when codes are absent, the version name
-   * changed to a non-empty different value). Renaming, re-categorising, editing
-   * descriptions and fixing a typo are silent.
-   */
+  /* ── never a second copy ─────────────────────────────────────────────────
+     Two different rows may not carry the same product. The publish screen
+     already refuses a duplicate; an EDIT could still walk into one by typing the
+     other item's title or package name, so the same rule applies here. */
+  const nameKey = normaliseForMatch(name);
+  const others: any = await c.env.DB.prepare('SELECT id, slug, name, package_name FROM apps WHERE id <> ?').bind(id).all().catch(() => ({ results: [] }));
+  const clashPkg = (others.results || []).find((r: any) => String(r.package_name || '').trim().toLowerCase() === package_name.toLowerCase() && package_name);
+  if (clashPkg) {
+    return c.json({
+      error: 'package_taken', id: clashPkg.id, slug: clashPkg.slug,
+      message: `اسم الحزمة مستخدم بالفعل في «${clashPkg.name}» — لم يُحفظ شيء.`,
+    }, 409);
+  }
+  const clashName = (others.results || []).find((r: any) => normaliseForMatch(r.name) === nameKey && nameKey);
+  if (clashName) {
+    return c.json({
+      error: 'name_taken', id: clashName.id, slug: clashName.slug,
+      message: `الاسم مستخدم بالفعل في «${clashName.name}» — لم يُحفظ شيء.`,
+    }, 409);
+  }
+
+  /* ── a real release only ────────────────────────────────────────────────── */
   const oldCode = Number(old.version_code) || 0;
-  const newCode = body.version_code !== undefined ? (safeInt(body.version_code, 0, 999999999) || 0) : oldCode;
-  const newNameVer = body.version_name !== undefined ? sanitizeText(body.version_name, 60) : (old.version_name || '');
+  const newCode = has('version_code') ? (safeInt(body.version_code, 0, 999999999) || 0) : oldCode;
+  const newNameVer = has('version_name') ? sanitizeText(body.version_name, 60).trim() : (old.version_name || '');
   const versionChanged = (newCode > oldCode)
     || (newCode === oldCode && !!newNameVer && String(newNameVer) !== String(old.version_name || ''));
 
-  await c.env.DB.prepare(`UPDATE apps SET name=?, name_lower=?, search_terms=?, package_name=?, short_description=?, description=?, category=?, type=?, developer=?, version_name=?, version_code=?, min_sdk=?, updated_at=? WHERE id=?`)
-    .bind(name, name_lower, search_terms, body.package_name||old.package_name, body.short_description !== undefined ? sanitizeText(body.short_description, 500) : old.short_description, body.description !== undefined ? sanitizeText(body.description, 10000) : old.description, body.category||old.category, body.type ? (body.type==='game'?'game':'app') : old.type, body.developer !== undefined ? sanitizeText(body.developer, 120) : old.developer, body.version_name !== undefined ? sanitizeText(body.version_name, 60) : old.version_name, body.version_code !== undefined ? safeInt(body.version_code,0,999999999) : old.version_code, body.min_sdk !== undefined ? safeInt(body.min_sdk,1,99) : old.min_sdk, nowSec(), id).run();
+  const changedFields = [
+    ['name', old.name, name], ['package_name', old.package_name, package_name],
+    ['developer', old.developer, developer], ['short_description', old.short_description, short_description],
+    ['description', old.description, description],
+    ['category', old.category, has('category') ? String(body.category) : old.category],
+    ['type', old.type, has('type') ? (body.type === 'game' ? 'game' : 'app') : old.type],
+    ['version_name', old.version_name, newNameVer],
+  ].filter(([, a, b]) => String(a ?? '') !== String(b ?? '')).map(([k]) => k);
 
+  await c.env.DB.prepare(`UPDATE apps SET name=?, name_lower=?, search_terms=?, package_name=?, short_description=?, description=?, category=?, type=?, developer=?, version_name=?, version_code=?, min_sdk=?, updated_at=? WHERE id=?`)
+    .bind(
+      name, name_lower, search_terms, package_name,
+      short_description || null, description || null,
+      has('category') ? sanitizeText(body.category, 60) || old.category : old.category,
+      has('type') ? (body.type === 'game' ? 'game' : 'app') : old.type,
+      developer || null,
+      newNameVer || null,
+      has('version_code') ? safeInt(body.version_code, 0, 999999999) : old.version_code,
+      has('min_sdk') ? safeInt(body.min_sdk, 1, 99) : old.min_sdk,
+      nowSec(), id,
+    ).run();
+
+  /* The ONE case that is an announcement: a newer version really arrived. */
   if (versionChanged) await addNotification(c.env, {
     type: 'update', title: name, body: `إصدار ${newNameVer || old.version_name || ''}`.trim(),
     app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
     click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
   });
-  
-  // إبطال الكاش بعد التعديل
+
+  // Every list response is cached per device for a week; an edit must not leave
+  // the OLD values in front of the owner on their next visit.
   invalidateAppsCache();
-  
-  return c.json({ ok: true });
+
+  const key = normaliseForMatch(name) !== normaliseForMatch(old.name) ? slugify(name) : old.slug;
+  await recordActivity(c.env, consoleActor(c),
+    `تعديل «${name}» — ${changedFields.length ? changedFields.join(', ') : 'لا تغيير'}${versionChanged ? ' — إصدار جديد' : ' — بلا إشعار'}`,
+    'edit');
+
+  return c.json({
+    ok: true,
+    replaced: true,
+    notified: versionChanged,
+    changed: changedFields,
+    app: { id, slug: old.slug, name, package_name, developer, version_name: newNameVer, version_code: newCode },
+    /* The device caches a slug→package map inside the installed app; when the
+       package name changes the store page must forget the old one, never keep
+       two answers. */
+    invalidate_device_package: has('package_name') && package_name !== (old.package_name || ''),
+    explicit_key: key,
+  });
 });
+
 
 /* Deleting the previous file on an update.
  *

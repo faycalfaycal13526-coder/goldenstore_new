@@ -464,6 +464,18 @@
   /* «تم الحذف» used to be printed even when cloud files survived. Now the
      message states the file count, and points at the cleanup panel when some
      file could not be removed. */
+  /* Why a delete failed, in plain Arabic — never «فشل الحذف» on its own. */
+  function deleteErrorText(err, name) {
+    const st = Number(err && err.status) || 0;
+    const code = String((err && err.message) || '');
+    if (st === 404) return `«${name}» لم يعد موجوداً — حدّث الصفحة.`;
+    if (st === 401 || st === 403) return 'انتهت جلستك. سجّل الدخول من جديد ثم أعد الحذف.';
+    if (st === 0 || code === 'timeout') return 'لا اتصال بالخادم — لم يُحذف شيء. تحقّق من الشبكة.';
+    if (st >= 500) return 'الخادم لم يستجب للحذف — لم يُحذف شيء، واللعبة ما زالت في المتجر. حدّث الصفحة وحاول مرة أخرى.';
+    if (code === 'delete_failed') return 'قاعدة البيانات رفضت الحذف — لم يتغيّر شيء. أعد المحاولة.';
+    return `تعذّر الحذف (${st || '؟'}). حدّث الصفحة وتأكّد هل بقي العنصر.`;
+  }
+
   function deleteResultText(del) {
     if (!del || typeof del.files !== 'number') return 'تم الحذف';
     if (!del.files) return 'تم الحذف (لا ملفات مرتبطة)';
@@ -1616,7 +1628,16 @@
             const r = await api('/api/admin/migrate-types', { method: 'POST' });
             logAdminAction('تعيين أنواع العناصر القديمة');
             toast(t('تم تحديث أنواع العناصر') + ': ' + r.updated + ' / ' + r.total, 'success');
-          } catch { toast('فشل التحديث', 'error'); }
+          } catch (err) {
+            /* «فشل التحديث» said nothing. This route did not exist on the
+               server at all until round 79, so the honest answer is the status. */
+            const st = Number(err && err.status) || 0;
+            toast(st === 404
+              ? 'هذه الأداة غير منشورة على الخادم بعد (404).'
+              : (st >= 500 || st === 0
+                ? 'الخادم لم يستجب — لم يتغيّر شيء. حاول بعد قليل.'
+                : `تعذّر التحديث (${st || '؟'}).`), 'error');
+          }
           btn.disabled = false;
         } }, ico('check'), 'تعيين النوع للعناصر القديمة')),
         ratingsRepairPanel(stats, body),
@@ -4386,8 +4407,14 @@
                     const del = await api(`/api/admin/apps/${a.id}`, { method: 'DELETE' });
                     logAdminAction(`حذف «${a.name}»`);
                     toast(deleteResultText(del), (del && del.failed_files) ? 'info' : 'success');
-                    renderApp();
-                  } catch { toast('فشل الحذف', 'error'); }
+                    await renderApp();
+                  } catch (err) {
+                    /* «فشل الحذف» alone told the owner nothing and sent them
+                       hunting the wrong problem (round 79: the row was never
+                       deleted because the old order required R2 to succeed
+                       first). Say which step failed. */
+                    toast(deleteErrorText(err, a.name), 'error');
+                  }
                 } }, ico('trash'), 'حذف'),
               )),
             );

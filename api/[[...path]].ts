@@ -2377,6 +2377,32 @@ app.delete('/admin/reviews/:reviewId', async (c) => {
 /* One-click repair of ratings left stale by comments deleted before the
    authoritative engine was deployed. Admin-only; idempotent; only rows that
    actually differ are written. */
+/* «تعيين النوع للعناصر القديمة» — the dashboard button has always called this
+ * route, but it was never implemented on the server: pressing it returned 404
+ * and the UI said only «فشل التحديث». Rows created before the app/game split
+ * have an empty type, and an empty type is filtered out of both /apps and
+ * /games — the item exists but appears nowhere («لا تظهر»).
+ *
+ * Safe and idempotent: only rows with a NULL/empty type are touched, and the
+ * type is derived from the category prefix (game_* → game, otherwise app).
+ */
+app.post('/admin/migrate-types', async (c) => {
+  const all: any = await c.env.DB.prepare(
+    "SELECT id, category FROM apps WHERE type IS NULL OR TRIM(type) = ''",
+  ).all().catch(() => ({ results: [] }));
+  const rows = all.results || [];
+  let updated = 0;
+  for (const r of rows) {
+    const type = String(r.category || '').startsWith('game_') ? 'game' : 'app';
+    const res: any = await c.env.DB.prepare('UPDATE apps SET type = ?, updated_at = ? WHERE id = ?')
+      .bind(type, nowSec(), r.id).run().catch(() => null);
+    if (res) updated++;
+  }
+  if (updated) invalidateAppsCache();
+  await recordActivity(c.env, consoleActor(c), `تعيين النوع لـ${updated} عنصراً قديماً`, 'publish');
+  return c.json({ ok: true, updated, total: rows.length });
+});
+
 app.post('/admin/recompute-ratings', async (c) => {
   try {
     const result = await recomputeAllRatings(c.env);
@@ -3611,15 +3637,27 @@ app.delete('/admin/apps/:id', async (c) => {
   } catch { /* table may not exist yet */ }
   try { for (const k of await listVideoThumbKeys(c.env, id)) push(k); } catch { /* best effort */ }
 
-  // One bulk call for up to 1000 keys — a stuck 4 GB APK used to time the
-  // request out halfway through a chain of single deletes.
-  const failed = keys.length ? await r2DeleteMany(c.env, keys) : [];
-
-  // Row-level deletes AFTER storage: if storage fails, nothing is orphaned
-  // silently — the admin gets the leftover keys and can retry the sweep.
+  /* The row dies FIRST, the files second.
+   *
+   * Owner: «حذفت لعبة بقيت كما هي لم تحذف». The old order required the R2 delete
+   * to succeed before the row was removed, so a storage hiccup (or the outage
+   * that made every R2 call fail) left the app on the site for ever — and the
+   * dashboard said only «فشل الحذف», which pointed at nothing.
+   *
+   * Deleting the row is what the owner asked for and what the site shows; the
+   * files are a cleanup that can be retried from the cloud panel, which lists
+   * them as orphans. So: row first, then files, then the leftover keys are
+   * reported honestly so «تنظيف كلاود» can finish the job.
+   */
   await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(id).run().catch(() => {});
   await deleteAppVideos(c.env, id).catch(() => {});
   await c.env.DB.prepare('DELETE FROM apps WHERE id = ?').bind(id).run();
+  const stillThere: any = await c.env.DB.prepare('SELECT id FROM apps WHERE id = ?').bind(id).first().catch(() => null);
+  if (stillThere) return c.json({ error: 'delete_failed' }, 500);
+
+  // One bulk call for up to 1000 keys — a stuck 4 GB APK used to time the
+  // request out halfway through a chain of single deletes.
+  const failed = keys.length ? await r2DeleteMany(c.env, keys) : [];
 
   /* The console rows keyed by SLUG must die with the item.
      A leftover `app_publication` row is the reason a RE-published item could

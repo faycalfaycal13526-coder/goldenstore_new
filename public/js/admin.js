@@ -3490,6 +3490,58 @@
       finally { upBtn.disabled = false; }
     };
 
+    /* ── Sweep unused files ──────────────────────────────────────────────────
+     * Owner: «حذفت من لوحة التحكم حذف كل شئ … ولكن صورة المصغرة تبع الفيديو لم
+     * تحذف». A thumbnail whose row was lost can only be found by comparing the
+     * bucket with the database — that is what this does, and it names the files
+     * before touching anything.
+     */
+    const orphanOut = el('div', { class: 'hint', style: { marginTop: '8px', lineHeight: '1.7' } });
+    const orphanScan = el('button', { class: 'btn btn-sm', type: 'button' }, ico('search'), 'افحص الملفات غير المستخدمة');
+    const orphanDelete = el('button', { class: 'btn btn-danger btn-sm', type: 'button', disabled: true }, ico('trash'), 'احذف الملفات غير المستخدمة');
+    const orphanBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } },
+      orphanScan, orphanDelete, orphanOut);
+
+    orphanScan.onclick = async () => {
+      orphanScan.disabled = true;
+      orphanOut.textContent = 'أقارن الحاوية بقاعدة البيانات…';
+      try {
+        const r = await api('/api/admin/r2/orphans', { timeoutMs: 120000 });
+        if (!r.orphans) {
+          orphanOut.textContent = `الحاوية نظيفة — ${r.scanned} ملفاً وكلها مستخدمة.`;
+          orphanDelete.disabled = true;
+        } else {
+          const mb = (r.bytes / (1024 * 1024)).toFixed(1);
+          const folders = Object.entries(r.by_folder || {}).map(([k, v]) => `${k}: ${v.count}`).join(' · ');
+          orphanOut.innerHTML = '';
+          orphanOut.append(
+            el('div', null, `${r.orphans} ملفاً غير مستخدم (${mb} م.ب) من ${r.scanned}. ${folders}. لم يُحذف شيء بعد.`),
+            el('pre', { style: { marginTop: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', direction: 'ltr', textAlign: 'left', opacity: '.85' } },
+              (r.keys || []).slice(0, 10).join('\n')),
+          );
+          orphanDelete.disabled = false;
+        }
+      } catch (e) {
+        orphanOut.textContent = (e && e.status >= 500) ? 'الخادم لا يستجيب الآن — لم يتغيّر شيء.' : 'تعذّر الفحص.';
+      } finally { orphanScan.disabled = false; }
+    };
+
+    orphanDelete.onclick = async () => {
+      if (!confirm('حذف الملفات التي لا يستخدمها أي عنصر في المتجر؟ لا يمكن التراجع.')) return;
+      orphanDelete.disabled = true;
+      orphanOut.textContent = 'أحذف…';
+      try {
+        const r = await api('/api/admin/r2/orphans', { method: 'POST', body: { confirm: 'DELETE-ORPHANS' }, timeoutMs: 240000 });
+        orphanOut.textContent = r.failed
+          ? `حُذف ${r.deleted} وبقي ${r.failed} — أعد المحاولة.`
+          : `حُذف ${r.deleted} ملفاً — الحاوية نظيفة الآن.`;
+        toast(`حُذف ${r.deleted} ملفاً`, 'success');
+        state.selected.clear(); browseBtn.click(); load();
+      } catch (e) {
+        orphanOut.textContent = 'تعذّر الحذف: ' + ((e && e.message) || 'حاول لاحقاً');
+      } finally { orphanDelete.disabled = false; }
+    };
+
     /* ── Organise the bucket ──────────────────────────────────────────────────
      * Owner: «رتب التطبيقات والأيقونات وكل شئ داخل جداول التخزين». Uploads were
      * stored as <slug>-<epoch>-<hex>, so nothing in the bucket said what an object
@@ -3592,6 +3644,10 @@
         el('div', { class: 'panel-head' }, ico('search'), 'استعراض الملفات'),
         el('div', { class: 'row-actions' }, prefixInput, browseBtn, delSelBtn),
         el('div', { class: 'mt-md' }, listBox)),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
+        el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
+        orphanBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('grid'), 'ترتيب التخزين'),
         el('div', { class: 'hint' }, 'يعيد تسمية الملفات إلى «مجلد/اسم-التطبيق.امتداد» ويحدّث كل رابط في قاعدة البيانات. الملفات غير المستخدمة لا تُلمس.'),

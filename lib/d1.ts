@@ -923,7 +923,20 @@ export async function deleteAppVideo(env: Env, app_id: string, id: string): Prom
   return true;
 }
 
-export async function deleteAppVideos(env: Env, app_id: string): Promise<void> {
+/* Deletes the video rows AND hands back their thumbnail keys.
+ *
+ * This used to return void, so every caller deleted the rows and silently forgot
+ * the thumbnails. That is why «حذفت من لوحة التحكم حذف كل شئ … ولكن صورة المصغرة
+ * تبع الفيديو لم تحذف»: vthumb/video-….jpg stayed in the bucket for ever, with
+ * no row left to point at it and nothing that remembered its name. Returning the
+ * keys lets the caller put them in the same bulk R2 delete as everything else.
+ */
+export async function deleteAppVideos(env: Env, app_id: string): Promise<string[]> {
   await ensureVideosSchema(env);
+  const rows: any = await env.DB.prepare(
+    'SELECT thumb_key FROM app_videos WHERE app_id = ? AND thumb_key IS NOT NULL',
+  ).bind(app_id).all().catch(() => ({ results: [] }));
+  const keys = (rows.results || []).map((r: any) => String(r.thumb_key || '')).filter(Boolean);
   await env.DB.prepare('DELETE FROM app_videos WHERE app_id = ?').bind(app_id).run();
+  return keys;
 }

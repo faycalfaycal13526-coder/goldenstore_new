@@ -3649,11 +3649,22 @@ app.delete('/admin/apps/:id', async (c) => {
   push(app.apk_key); push(app.icon_key); push(app.feature_key);
   const ss: any = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE app_id = ?').bind(id).all().catch(() => ({ results: [] }));
   for (const row of (ss.results || [])) push(row.r2_key);
+  /* Video thumbnails are the file that kept surviving («صورة المصغرة … لم تحذف»).
+     They are collected here, straight from the table, BEFORE any row is removed —
+     and the rows are only cleared after the keys are in hand. */
   try {
-    const vids: any = await c.env.DB.prepare('SELECT thumb_key FROM app_videos WHERE app_id = ?').bind(id).all();
+    const vids: any = await c.env.DB.prepare(
+      'SELECT thumb_key FROM app_videos WHERE app_id = ? AND thumb_key IS NOT NULL',
+    ).bind(id).all();
     for (const v of (vids.results || [])) push(v.thumb_key);
   } catch { /* table may not exist yet */ }
   try { for (const k of await listVideoThumbKeys(c.env, id)) push(k); } catch { /* best effort */ }
+  // A thumbnail whose row was already lost is still findable by its key shape.
+  try {
+    for (const o of await r2List(c.env, 'vthumb/', 5000)) {
+      if (String(app.slug || '') && o.key.includes(String(app.slug))) push(o.key);
+    }
+  } catch { /* listing is best effort */ }
 
   /* The row dies FIRST, the files second.
    *
@@ -3668,7 +3679,8 @@ app.delete('/admin/apps/:id', async (c) => {
    * reported honestly so «تنظيف كلاود» can finish the job.
    */
   await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(id).run().catch(() => {});
-  await deleteAppVideos(c.env, id).catch(() => {});
+  const thumbKeys = await deleteAppVideos(c.env, id).catch(() => [] as string[]);
+  for (const k of thumbKeys) if (k) push(k);
   await c.env.DB.prepare('DELETE FROM apps WHERE id = ?').bind(id).run();
   const stillThere: any = await c.env.DB.prepare('SELECT id FROM apps WHERE id = ?').bind(id).first().catch(() => null);
   if (stillThere) return c.json({ error: 'delete_failed' }, 500);
@@ -3780,6 +3792,79 @@ app.get('/admin/r2/overview', async (c) => {
     bytes: objects.reduce((n, o) => n + o.size, 0),
     folders, orphans, orphan_bytes: orphanBytes,
     referenced: referenced.size,
+  });
+});
+
+/* ── ORPHAN SWEEP ────────────────────────────────────────────────────────────
+ * Owner: «حذفت من لوحة التحكم حذف كل شئ من كلاود ولكن صورة المصغرة تبع الفيديو لم
+ * تحذف». Video thumbnails were the one file the delete path forgot: the row was
+ * removed and its vthumb/video-…​.jpg stayed in the bucket with nothing pointing
+ * at it.
+ *
+ *   GET  /admin/r2/orphans   dry run: what is unused, and how many bytes
+ *   POST /admin/r2/orphans   delete exactly those objects
+ *
+ * "Unused" means: no apps row, no screenshot, no video thumbnail, no release row
+ * points at the key. The live release APK is protected by key, so it can never
+ * be swept. Files younger than a day are skipped unless force is set, because an
+ * upload may still be in flight.
+ */
+async function listAllObjects(env: Env) {
+  const prefixes = ['apk/', 'ss/', 'icon/', 'feature/', 'vthumb/'];
+  const seen = new Map<string, { key: string; size: number; lastModified?: string }>();
+  for (const pfx of prefixes) {
+    for (const o of await r2List(env, pfx, 5000)) if (!seen.has(o.key)) seen.set(o.key, o);
+  }
+  return [...seen.values()];
+}
+
+app.get('/admin/r2/orphans', async (c) => {
+  const objects = await listAllObjects(c.env);
+  const referenced = await referencedKeys(c.env);
+  const orphans = objects.filter((o) => !referenced.has(o.key));
+  const byFolder: Record<string, { count: number; bytes: number }> = {};
+  for (const o of orphans) {
+    const folder = o.key.includes('/') ? o.key.slice(0, o.key.indexOf('/') + 1) : '(root)';
+    byFolder[folder] = byFolder[folder] || { count: 0, bytes: 0 };
+    byFolder[folder].count++;
+    byFolder[folder].bytes += o.size || 0;
+  }
+  return c.json({
+    dry_run: true,
+    scanned: objects.length,
+    referenced: referenced.size,
+    orphans: orphans.length,
+    bytes: orphans.reduce((n, o) => n + (o.size || 0), 0),
+    by_folder: byFolder,
+    keys: orphans.slice(0, 300).map((o) => o.key),
+    note: orphans.length
+      ? 'لم يُحذف شيء. اضغط «احذف الملفات غير المستخدمة» للتنفيذ.'
+      : 'لا توجد ملفات غير مستخدمة — الحاوية نظيفة.',
+  });
+});
+
+app.post('/admin/r2/orphans', async (c) => {
+  const body = await c.req.json().catch(() => ({}) as any);
+  // Deleting files is destructive: require the same typed confirmation as a wipe.
+  if (String(body.confirm || '') !== 'DELETE-ORPHANS') {
+    return c.json({ error: 'confirm_required', hint: 'أرسل confirm: DELETE-ORPHANS' }, 400);
+  }
+  const objects = await listAllObjects(c.env);
+  const referenced = await referencedKeys(c.env);
+  const minAgeMs = body.force ? 0 : 24 * 3600 * 1000;
+  const fresh = (o: { lastModified?: string }) => {
+    if (!minAgeMs) return false;
+    const t = o.lastModified ? Date.parse(o.lastModified) : 0;
+    return !!t && Date.now() - t < minAgeMs;
+  };
+  const orphans = objects.filter((o) => !referenced.has(o.key) && !fresh(o));
+  const failed = orphans.length ? await r2DeleteMany(c.env, orphans.map((o) => o.key)) : [];
+  const deleted = orphans.length - failed.length;
+  if (deleted) await recordActivity(c.env, consoleActor(c), `حذف ${deleted} ملفاً غير مستخدم من كلاود`, 'delete');
+  return c.json({
+    ok: true, scanned: objects.length, found: orphans.length, deleted,
+    failed: failed.length, failed_keys: failed.slice(0, 50),
+    bytes: orphans.reduce((n, o) => n + (o.size || 0), 0),
   });
 });
 
@@ -4145,7 +4230,8 @@ app.post('/admin/cleanup', async (c) => {
           for (const s2 of (ss.results || [])) if (s2.r2_key) keys.push(String(s2.r2_key));
           if (keys.length) await r2DeleteMany(c.env, keys);
           await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(r.id).run().catch(() => {});
-          await deleteAppVideos(c.env, r.id).catch(() => {});
+          const dupThumbs = await deleteAppVideos(c.env, r.id).catch(() => [] as string[]);
+          if (dupThumbs.length) await r2DeleteMany(c.env, dupThumbs);
           await c.env.DB.prepare('DELETE FROM apps WHERE id = ?').bind(r.id).run().catch(() => {});
           await ensureConsoleTables(c.env.DB);
           for (const sql of ['DELETE FROM app_publication WHERE slug = ?', 'DELETE FROM app_order WHERE slug = ?'])

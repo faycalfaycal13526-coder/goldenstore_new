@@ -101,6 +101,37 @@ export async function r2PresignGet(
  * S3/R2 DELETE is idempotent: deleting a missing key answers 204, so `true`
  * simply means "the object is not there any more".
  */
+/**
+ * Stream one object out of the bucket for the `/media/<key>` route.
+ *
+ * The Worker reads with its own credentials, so the picture never has to be
+ * public: no r2.dev hostname in the HTML, no second origin for the phone to
+ * connect to, and — most importantly — the route can set a Cache-Control the
+ * bucket's public URL does not send at all (verified: an r2.dev object answers
+ * with only ETag + Last-Modified).
+ *
+ * `null` means the object is not there; a 304 (from If-None-Match) is passed
+ * through untouched so the browser keeps its copy.
+ */
+export async function r2GetObject(
+  env: Env,
+  key: string,
+  range?: string,
+  ifNoneMatch?: string,
+): Promise<Response | null> {
+  const headers: Record<string, string> = {};
+  if (range) headers.range = range;
+  if (ifNoneMatch) headers['if-none-match'] = ifNoneMatch;
+  try {
+    const response = await clientFor(env).fetch(objectUrl(env, key), { method: 'GET', headers });
+    if (response.status === 404) return null;
+    if (!response.ok && response.status !== 206 && response.status !== 304) return null;
+    return response;
+  } catch {
+    return null;
+  }
+}
+
 export async function r2DeleteStrict(env: Env, key: string): Promise<boolean> {
   try {
     const response = await clientFor(env).fetch(objectUrl(env, key), { method: 'DELETE' });

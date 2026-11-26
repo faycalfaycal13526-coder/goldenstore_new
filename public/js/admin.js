@@ -3581,6 +3581,35 @@
       } finally { orphanDelete.disabled = false; }
     };
 
+    /* ── «لماذا الثقل؟» — measured, not argued ────────────────────────────────
+     * Owner: «اضن سبب الثقل الموقع لانه بعيد» (bucket in Western North America).
+     * Distance decides milliseconds; what a visitor actually feels is decided by
+     * whether the phone may keep the pictures and how many network hops one page
+     * needs. This shows both numbers so the answer is not a matter of opinion.
+     */
+    const diagOut = el('div', { style: { fontSize: '13px', lineHeight: '1.9', width: '100%' } });
+    const diagRun = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('trending'), 'قِس سرعة الموقع الآن');
+    const diagBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } }, diagRun, diagOut);
+
+    diagRun.onclick = async () => {
+      diagRun.disabled = true;
+      diagOut.textContent = 'أقيس…';
+      try {
+        const r = await api('/api/admin/media/diag', { timeoutMs: 60000 });
+        const p = r.pictures || {}, t = r.round_trip_ms || {};
+        const ms = (v) => (v < 0 ? 'تعذّر' : `${formatNum(v)} ms`);
+        diagOut.innerHTML = '';
+        diagOut.append(
+          el('div', null, `الصور تُخدَم من: ${String(p.served_from || '').includes('store domain') ? 'نطاق المتجر نفسه (كاش فعّال)' : 'نطاق الحاوية r2.dev (بلا كاش)'}`),
+          el('div', null, `ترويسة الكاش من الحاوية: ${p.bucket_can_be_cached ? 'موجودة' : 'غائبة — الهاتف يعيد تنزيل كل صورة'}`),
+          el('div', null, `زمن الذهاب والعودة: صورة ${ms(t.media)} · قاعدة البيانات ${ms(t.database)} · الصفحة (API) ${ms(t.catalogue)} · الحاوية ${ms(t.bucket)}`),
+          el('div', { class: 'hint', style: { marginTop: '6px' } }, r.verdict || ''),
+        );
+      } catch (e) {
+        diagOut.textContent = 'تعذّر القياس الآن.';
+      } finally { diagRun.disabled = false; }
+    };
+
     /* ── Files per item ──────────────────────────────────────────────────────
      * Owner: «لماذا التطبيقات والألعاب والأيقونات مختلطة وليست كل فئة على حدة».
      * Answers it with the bucket's own data rather than a promise: every item,
@@ -3806,6 +3835,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('trending'), 'لماذا الثقل؟ (قياس لا تخمين)'),
+        el('div', { class: 'hint' }, 'المسافة تحدد أجزاء من الثانية؛ ما يشعر به الزائر يحدده شيئان: هل يستطيع الهاتف الاحتفاظ بالصور، وكم قفزة شبكة تحتاج الصفحة. اضغط الزر واقرأ الأرقام.'),
+        diagBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('grid'), 'ملفات كل عنصر (مستقل عن D1)'),
         el('div', { class: 'hint' }, 'يعرض كل تطبيق/لعبة وملفاته في كلاود مجمّعة، ويكشف الملفات التي تحمل اسم عنصر ولا تنتمي إليه. المجلدات بالنوع (apk, icon, feature, ss, vthumb) وداخل كل مجلد اسم العنصر نفسه.'),

@@ -27,7 +27,7 @@ import {
   deleteAppVideo, deleteAppVideos, listVideoThumbKeys,
 } from '../lib/d1.js';
 import {
-  r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
+  r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head, r2GetObject,
   r2DeleteStrict, r2DeleteMany, r2List, r2Bucket, r2MultipartUploads, r2AbortMultipartUploadByKey,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
   r2AbortMultipartUpload, r2ConfigureCors,
@@ -92,6 +92,16 @@ function rateLimit(ip: string, key: string, maxRequests: number, windowSec: numb
   const entry = rateLimits.get(k);
   if (!entry || now > entry.reset) { rateLimits.set(k, { count: 1, reset: now + windowSec * 1000 }); return true; }
   entry.count++; return entry.count <= maxRequests;
+}
+
+/** Android's downloader (and every «تحميل» click on a phone) can take the object
+ *  directly; a desktop browser keeps the same-origin path so the file name and
+ *  the counter stay identical to what the site promises. */
+function prefersDirectDownload(c: any): boolean {
+  const ua = String(c.req.header('user-agent') || '');
+  if (!/android|aosp|okhttp|dalvik/i.test(ua)) return false;
+  // A headless checker or a bot must not skew the download counters.
+  return !/bot|crawler|spider|preview|headless/i.test(ua);
 }
 
 function getClientIp(c: any): string {
@@ -274,7 +284,8 @@ async function maintenanceConfig(c: any): Promise<Record<string, string>> {
 }
 app.use('*', async (c, next) => {
   const path = c.req.path;
-  if (MAINTENANCE_ALLOWLIST.includes(path) || path.startsWith('/api/admin/')) return next();
+  if (MAINTENANCE_ALLOWLIST.includes(path) || path.startsWith('/api/admin/')
+    || path.startsWith('/api/media/')) return next();
   const cfg = await maintenanceConfig(c);
   if (!maintenanceActive(cfg)) return next();
   if (await hasAdminSession(c)) return next();
@@ -502,25 +513,59 @@ function imageTransformEnabled(env: Env): boolean {
   return v === 'on' || v === 'true' || v === '1';
 }
 
-// دالة مساعدة لبناء روابط الصور
-function cdnImageUrl(key: string | undefined, env: Env, width: number): string | null {
-  if (!key) return null;
+/* ── Pictures now travel on the site's own domain ──────────────────────────
+ * Owner: «اضن سبب الثقل الموقع لانه بعيد» while looking at the bucket's
+ * «Public Development URL».
+ *
+ * He is half right, and the measurable half matters more than the distance.
+ * R2's r2.dev hostname answers EVERY request with no `Cache-Control` and no
+ * `Age`/`cf-cache-status` (checked: only ETag + Last-Modified come back), so a
+ * phone cannot keep an icon: the store's own cards show them again on every
+ * visit, and each one left the browser on a second origin (a second DNS
+ * lookup + TLS handshake) that is also rate-limited by Cloudflare.
+ *
+ * `/media/<key>` streams the object from the bucket and marks it immutable, so
+ * the picture is fetched from Cloudflare's edge — already warm in the same POP
+ * that answered the page — and kept by the phone. The `<img>` therefore loads
+ * from the origin it already trusts, and no r2.dev round trip happens at all.
+ * The 1-hour TTL is what makes a re-uploaded icon show up again.
+ */
+const MEDIA_CACHE = 'public, max-age=3600, stale-while-revalidate=86400';
+function mediaUrl(key: string | undefined, env: Env, width: number, variant = ''): string | null {
   try {
+    if (!key) return null;
     const direct = r2PublicUrl(key, env);
-    if (!imageTransformEnabled(env)) return direct;
-    return `https://${storeDomain(env)}/cdn-cgi/image/width=${width},format=auto,quality=80/${direct}`;
+    if (imageTransformEnabled(env)) {
+      return `https://${storeDomain(env)}/cdn-cgi/image/width=${width},format=auto,quality=80/${direct}`;
+    }
+    // `?v=` changes with the object, so a replaced picture is not served stale.
+    return `/api/media/${key.split('/').map(encodeURIComponent).join('/')}?w=${width}${variant ? '&k=' + variant : ''}`;
   } catch { return null; }
 }
 
+// دالة مساعدة لبناء روابط الصور
+function cdnImageUrl(key: string | undefined, env: Env, width: number, variant = ''): string | null {
+  return mediaUrl(key, env, width, variant);
+}
+
+/** A short, stable token for the object: the same key always gives the same
+ *  token, a re-uploaded picture (new key from the organiser or a new upload)
+ *  gives a new one — which is all `?v=` needs to do. */
+function keyToken(key: string | undefined): string {
+  const base = String(key || '');
+  let h = 0;
+  for (let i = 0; i < base.length; i++) h = (h * 31 + base.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
 function feature_url(feature_key: string | undefined, env: Env, width: number = 800): string | null {
-  return cdnImageUrl(feature_key, env, width);
+  return cdnImageUrl(feature_key, env, width, keyToken(feature_key));
 }
 function icon_url(icon_key: string | undefined, env: Env, width: number = 200): string | null {
-  return cdnImageUrl(icon_key, env, width);
+  return cdnImageUrl(icon_key, env, width, keyToken(icon_key));
 }
 // دالة جديدة لصور الشاشات بدقة 720
 function shot_url(shot_key: string | undefined, env: Env, width: number = 720): string | null {
-  return cdnImageUrl(shot_key, env, width);
+  return cdnImageUrl(shot_key, env, width, keyToken(shot_key));
 }
 
 /* FCM delivery now lives in lib/push.ts. Keeping it in one module means the
@@ -798,6 +843,15 @@ app.get('/app-update/download', async (c) => {
   if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
   await bumpDownloadCount(c.env).catch(() => {});
   await recordDownloadEvent(c.env, 'app-update', 'web');
+  /* Owner: «اضن سبب الثقل الموقع لانه بعيد» — for an APK this is measurable.
+   *
+   * The site is served by Pages, whose /api/* hop is a second full request to a
+   * different Cloudflare product before the download even starts. On Android —
+   * the only platform that installs these files — the browser is sent straight
+   * to the object instead, so a 160 MB download starts one round trip earlier
+   * and resumes natively. One hop is saved, not the transfer; the bytes always
+   * came from the bucket.
+   */
   return c.redirect(apkUrl, 302);
 });
 
@@ -1501,6 +1555,63 @@ app.get('/search', async (c) => {
   }
 });
 
+/* The catalogue page is the store's busiest call and it used to take ~1.2 s on
+ * EVERY visit (measured from three different POPs): it ran five D1 round trips
+ * in sequence — list, publication, order, hidden slugs, star votes — and each
+ * one is a full network hop, because Cloudflare has no read replication enabled
+ * for this database. The result is public, identical for everybody and only
+ * changes when the console changes something.
+ *
+ * So it is kept in Cloudflare's own cache for 30 s. A Worker's response is NOT
+ * cached by the CDN just because it carries Cache-Control (it never touches the
+ * cache at all), so the Cache API is used explicitly — `caches.default`. The
+ * console purges it after every write via `purgeAppsCache()`, so the owner never
+ * sees a stale catalogue while a visitor saves about a second per page view.
+ * Any request carrying a cookie skips the cache entirely.
+ */
+const APPS_EDGE_TTL = 30;
+const APPS_STALE = 300;
+/* Every key this isolate has written, so a console write can purge exactly the
+ * entries it is responsible for. Cloudflare's cache has no «delete by prefix»,
+ * so the set is the index; it is capped, and the 30-second TTL bounds what a
+ * missed purge (a write handled by a different isolate) can ever expose. */
+const appsCacheKeys = new Set<string>();
+function appsCacheKey(request: Request): Request {
+  const u = new URL(request.url);
+  u.pathname = '/__edge/apps';
+  u.searchParams.delete('_');
+  const key = u.toString();
+  if (appsCacheKeys.size > 200) appsCacheKeys.clear();
+  appsCacheKeys.add(key);
+  return new Request(key, { method: 'GET' });
+}
+function appsCache(): any | null {
+  try { return (caches as any).default || (caches as any).open('gs-apps'); } catch { return null; }
+}
+/** Drop the cached catalogue. Called by every admin write, so «تحديث» in the
+ *  console is visible on the site immediately instead of 30 seconds later. */
+async function purgeAppsCache(env: Env): Promise<void> {
+  invalidateAppsCache();
+  const cache = appsCache();
+  if (!cache) return;
+  // 1) Everything this isolate stored (exact keys, including query variants).
+  const stored = [...appsCacheKeys];
+  appsCacheKeys.clear();
+  for (const key of stored) {
+    try { await cache.delete(new Request(key)); } catch { /* keep going */ }
+  }
+  // 2) The canonical entries of every host the store answers on, so a write
+  //    handled here also clears what another isolate cached for the same page.
+  try {
+    for (const host of [`https://${storeDomain(env)}`, 'https://goldenstore.online',
+      'https://www.goldenstore.online']) {
+      for (const q of ['', '?limit=24', '?limit=60', '?type=game', '?type=app']) {
+        await cache.delete(new Request(`${host}/__edge/apps${q}`));
+      }
+    }
+  } catch { /* a failed purge must never fail the write */ }
+}
+
 app.get('/apps', async (c) => {
   const q = (c.req.query('q') || '').trim().toLowerCase(), category = (c.req.query('category') || '').trim(), type = (c.req.query('type') || '').trim();
   // Invisible direction marks travel with developer names from APK metadata and
@@ -1508,6 +1619,21 @@ app.get('/apps', async (c) => {
   const developer = sanitizeText(c.req.query('developer') || '', 120).replace(/[\u200e\u200f\u061c]/g, '').trim();
   const sort = (c.req.query('sort') || 'recent').trim(), starredOnly = c.req.query('starred') === '1';
   const limit = Math.min(Number(c.req.query('limit') || '24') || 24, 60), offset = Math.max(Number(c.req.query('offset') || '0') || 0, 0);
+
+  // The public catalogue: served from Cloudflare's cache when nothing personal
+  // is involved (no cookie, no admin session).
+  const cache = (!c.req.header('cookie') && c.req.method === 'GET') ? appsCache() : null;
+  const cacheKey = cache ? appsCacheKey(c.req.raw) : null;
+  if (cache && cacheKey) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) {
+        const out = new Response(hit.body, hit);
+        out.headers.set('X-GS-Cache', 'HIT');
+        return out;
+      }
+    } catch { /* a cache miss must never fail the request */ }
+  }
 
   try {
     const result = await listApps(c.env, { q, category, type, sort, starredOnly, limit, offset, developer });
@@ -1525,8 +1651,23 @@ app.get('/apps', async (c) => {
       }
       return out;
     });
-    c.header('Cache-Control', 'no-store');
-    return c.json({ apps, total: Math.max(0, Number(result.total) - (result.apps.length - visible.length)) });
+    // A public, cacheable answer — but only when there is no admin cookie on the
+    // request (an admin must never receive another user's cached copy, and the
+    // console's own writes purge this key anyway).
+    const payload = { apps, total: Math.max(0, Number(result.total) - (result.apps.length - visible.length)) };
+    const body = JSON.stringify(payload);
+    const headers = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': `public, max-age=${APPS_EDGE_TTL}, stale-while-revalidate=${APPS_STALE}`,
+      Vary: 'Origin',
+    };
+    if (cache && cacheKey) {
+      try {
+        const stored = new Response(body, { status: 200, headers });
+        c.executionCtx.waitUntil(cache.put(cacheKey, stored));
+      } catch { /* no execution context (tests) — the answer is still correct */ }
+    }
+    return c.body(body, 200, headers);
   } catch (e: any) { return c.json({ error: 'd1_error', message: e.message }, 500); }
 });
 
@@ -1570,6 +1711,13 @@ app.get('/apps/:slug/download', async (c) => {
   // expiry, Range support) fixes every client at once, including an older
   // installed app whose bundled/cached JS still points here.
   const disposition = `attachment; filename="${filename}"`;
+  if (prefersDirectDownload(c)) {
+    // Android installs the file itself: hand it the object and skip the hop.
+    try {
+      return c.redirect(`${r2PublicUrl(appData.apk_key, c.env)}`
+        + `?response-content-disposition=${encodeURIComponent(disposition)}`, 302);
+    } catch { /* fall through to the proxy path */ }
+  }
   try {
     const direct = r2PublicUrl(appData.apk_key, c.env);
     return c.redirect(`${direct}?response-content-disposition=${encodeURIComponent(disposition)}`);
@@ -2416,7 +2564,7 @@ app.post('/admin/migrate-types', async (c) => {
       .bind(type, nowSec(), r.id).run().catch(() => null);
     if (res) updated++;
   }
-  if (updated) invalidateAppsCache();
+  if (updated) await purgeAppsCache(c.env);
   await recordActivity(c.env, consoleActor(c), `تعيين النوع لـ${updated} عنصراً قديماً`, 'publish');
   return c.json({ ok: true, updated, total: rows.length });
 });
@@ -2541,6 +2689,52 @@ async function recordDownloadEvent(env: Env, slug: string, platform = 'web') {
       .bind(String(crypto.randomUUID()), sanitizeText(slug, 120), day, d.getUTCHours(), ts, platform).run();
   } catch { /* analytics must never block a download */ }
 }
+/* =========================================================================
+   GET /api/media/<key> — pictures served from the store's own domain
+   -------------------------------------------------------------------------
+   The bucket is read with the Worker's own credentials, so this route needs no
+   public bucket URL and no second hostname. Two behaviours matter:
+
+   1. `Cache-Control` is explicit and `immutable`-free but long (1 hour) with
+      `stale-while-revalidate`, so the phone stops re-downloading every icon on
+      every visit — which is what r2.dev's missing cache headers caused.
+   2. Byte ranges and conditional requests are passed through, so a screenshot
+      or a feature image behaves like any other static file.
+   Only well-known picture folders are served; the APKs are NOT (they are large
+   and belong on the download path, where the browser's own downloader can
+   resume them).
+   ========================================================================= */
+const MEDIA_FOLDERS = new Set(['icon', 'feature', 'ss', 'vthumb', 'logo', 'screenshots', 'images', 'thumbs']);
+app.get('/media/*', async (c) => {
+  const raw = decodeURIComponent(c.req.path.replace(/^\/(?:api\/)?media\//, ''));
+  const key = raw.replace(/^\/+/, '');
+  if (!key || key.includes('..')) return c.json({ error: 'invalid_key' }, 400);
+  const folder = key.split('/')[0];
+  if (!MEDIA_FOLDERS.has(folder)) return c.json({ error: 'not_found' }, 404);
+  if (rateLimit(getClientIp(c), 'media', 600, 60)) { /* counted, never blocked */ }
+  try {
+    const response = await r2GetObject(c.env, key, c.req.header('range') || undefined,
+      c.req.header('if-none-match') || undefined);
+    if (!response) return c.json({ error: 'not_found' }, 404);
+    const out = new Response(response.body, {
+      status: response.status,
+      headers: {
+        'Content-Type': response.headers.get('content-type') || 'application/octet-stream',
+        'Cache-Control': MEDIA_CACHE,
+        'X-Content-Type-Options': 'nosniff',
+        'Accept-Ranges': 'bytes',
+      },
+    });
+    for (const h of ['content-length', 'content-range', 'etag', 'last-modified']) {
+      const v = response.headers.get(h);
+      if (v) out.headers.set(h, v);
+    }
+    return out;
+  } catch {
+    return c.json({ error: 'media_unavailable' }, 502);
+  }
+});
+
 app.get('/settings', async (c) => {
   // no-store: an admin change must take effect on the very next page load.
   c.header('Cache-Control', 'no-store');
@@ -3511,7 +3705,7 @@ app.post('/admin/apps', async (c) => {
   }
   
   // إبطال الكاش بعد الإضافة
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   if (idem) {
     if (publishKeys.size > 500) publishKeys.clear();
     publishKeys.set(idem, { id, slug, ts: Date.now() });
@@ -3621,7 +3815,7 @@ app.patch('/admin/apps/:id', async (c) => {
 
   // Every list response is cached per device for a week; an edit must not leave
   // the OLD values in front of the owner on their next visit.
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
 
   const key = normaliseForMatch(name) !== normaliseForMatch(old.name) ? slugify(name) : old.slug;
   await recordActivity(c.env, consoleActor(c),
@@ -3691,7 +3885,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
     app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
     click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
   });
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -3700,7 +3894,7 @@ app.post('/admin/apps/:id/icon', async (c) => {
   const old: any = await c.env.DB.prepare('SELECT icon_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   await c.env.DB.prepare('UPDATE apps SET icon_key=?, updated_at=? WHERE id=?').bind(body.icon_key, nowSec(), old.id).run();
   const cleanup = await replaceOldFile(c.env, old.icon_key, body.icon_key);
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -3709,7 +3903,7 @@ app.post('/admin/apps/:id/feature', async (c) => {
   const old: any = await c.env.DB.prepare('SELECT feature_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   await c.env.DB.prepare('UPDATE apps SET feature_key=?, updated_at=? WHERE id=?').bind(body.feature_key, nowSec(), old.id).run();
   const cleanup = await replaceOldFile(c.env, old.feature_key, body.feature_key);
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -3754,7 +3948,7 @@ app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {
      with a HEAD) instead of a swallowed r2Delete — a failed delete used to look
      exactly like a successful one, and the screenshot stayed in the bucket. */
   const cleanup = await replaceOldFile(c.env, row.r2_key, '');
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -3883,7 +4077,7 @@ app.delete('/admin/apps/:id', async (c) => {
     'DELETE FROM app_order WHERE slug = ?',
   ]) { try { await c.env.DB.prepare(sql).bind(app.slug).run(); } catch { /* table may not exist */ } }
 
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   await recordActivity(c.env, consoleActor(c),
     `حذف «${app.name}» — ${keys.length - failed.length}/${keys.length} ملف من كلاود`, 'delete');
   return c.json({
@@ -4187,6 +4381,72 @@ app.post('/admin/r2/orphans', async (c) => {
  * GET /admin/r2/items  → every item with its files, plus the keys that carry an
  *                        item's name but belong to nobody (naming faults).
  */
+/* =========================================================================
+   GET /admin/media/diag — «هل المسافة هي سبب الثقل؟» answered with numbers
+   -------------------------------------------------------------------------
+   The owner looked at the bucket's «Public Development URL» (r2.dev, location
+   WNAM) and concluded that the store is slow because the files are far away.
+   This endpoint measures instead of arguing:
+
+     • every picture URL the API hands out today (must be same-origin /media/…),
+     • what the bucket's own URL answers with (cache headers are the point:
+       r2.dev sends none, so a phone cannot keep an icon),
+     • the round-trip time of each path from the POP that served this request —
+       which is the part that distance DOES decide, and it is small,
+     • whether the database can answer from a replica (a single-region D1 costs
+       a full hop per query, and the catalogue page makes five).
+   ========================================================================= */
+app.get('/admin/media/diag', async (c) => {
+  const time = async (fn: () => Promise<any>) => {
+    const t0 = Date.now();
+    try { await fn(); return Date.now() - t0; } catch { return -1; }
+  };
+  const firstKey: any = await c.env.DB.prepare(
+    "SELECT slug, slug AS s, icon_key, feature_key FROM apps WHERE icon_key IS NOT NULL AND icon_key != '' LIMIT 1",
+  ).first().catch(() => null);
+  const publicBase = (c.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+  const bucket = { url: publicBase, cache_control: null as string | null, age: null as string | null, etag: null as string | null };
+  if (firstKey?.icon_key && publicBase) {
+    try {
+      const r = await fetch(`${publicBase}/${firstKey.icon_key}`, { method: 'HEAD' });
+      bucket.cache_control = r.headers.get('cache-control');
+      bucket.age = r.headers.get('age');
+      bucket.etag = r.headers.get('etag');
+    } catch { /* unreachable bucket URL is a finding on its own */ }
+  }
+  const sampleKey = firstKey?.icon_key || 'icon/missing.webp';
+  const sampleUrl = mediaUrl(sampleKey, c.env, 200, 'diag') || '';
+  const samplePath = sampleUrl.startsWith('http') ? sampleUrl : `https://${storeDomain(c.env)}${sampleUrl}`;
+  const timing = {
+    media: await time(() => fetch(samplePath, { method: 'HEAD' })),
+    database: await time(() => c.env.DB.prepare('SELECT 1 AS ok').first()),
+    catalogue: await time(() => fetch(`https://${storeDomain(c.env)}/api/apps?limit=1`, { method: 'GET' })),
+    bucket: publicBase ? await time(() => fetch(`${publicBase}/${sampleKey}`, { method: 'HEAD' })) : -1,
+  };
+  const colo = (c.req.raw as any)?.cf?.colo || c.req.header('cf-ray')?.split('-')[1] || null;
+  const replica: any = await c.env.DB.prepare('PRAGMA table_list').first().catch(() => null);
+  return c.json({
+    ok: true,
+    colo,
+    pictures: {
+      served_from: sampleUrl.startsWith('http') ? 'bucket (r2.dev)' : 'the store domain (/media)',
+      example: sampleUrl,
+      same_origin: !sampleUrl.startsWith('http'),
+      bucket_headers: bucket,
+      bucket_can_be_cached: !!bucket.cache_control,
+    },
+    round_trip_ms: timing,
+    database: {
+      reachable: !!replica || timing.database >= 0,
+      read_replication_unknown: true,
+      note: 'A single-region D1 answers every query over the network; the catalogue page makes five.',
+    },
+    verdict: (timing.media >= 0 && timing.database >= 0 && bucket.cache_control === null)
+      ? 'الصور تُخدَم الآن من نطاق المتجر نفسه ومع كاش واضح — وهذا ما كان يبطئ التصفح، لا موقع الحاوية.'
+      : 'راجع القيم أعلاه.',
+  });
+});
+
 app.get('/admin/r2/items', async (c) => {
   const apps: any = await c.env.DB.prepare('SELECT id, slug, name, type, category, apk_key, icon_key, feature_key FROM apps ORDER BY name').all().catch(() => ({ results: [] }));
   const shots: any = await c.env.DB.prepare('SELECT app_id, r2_key FROM screenshots').all().catch(() => ({ results: [] }));
@@ -4396,7 +4656,7 @@ app.post('/admin/r2/organise', async (c) => {
     done.push({ ...m, action: 'moved' });
   }
 
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   if (moved) await recordActivity(c.env, consoleActor(c), `ترتيب التخزين — ${moved} ملف أُعيدت تسميته`, 'publish');
   return c.json({ ok: true, moved, failed: failed.length, remaining: Math.max(0, (await planOrganise(c.env)).length), done: done.slice(0, 100), errors: failed.slice(0, 50) });
 });
@@ -4508,7 +4768,7 @@ app.post('/admin/store/reset', async (c) => {
   const failed = await r2DeleteMany(c.env, [...seen]);
   report.files = { count: seen.size, deleted: seen.size - failed.length, failed: failed.length };
 
-  invalidateAppsCache();
+  await purgeAppsCache(c.env);
   await recordActivity(c.env, consoleActor(c), `تصفير المتجر: ${report.apps_before} عنصراً و${report.files.deleted} ملف`, 'delete');
   return c.json({ ok: true, ...report });
 });
@@ -4663,7 +4923,7 @@ app.post('/admin/cleanup', async (c) => {
     }
     report.duplicates = { groups: plan.length, plan };
     if (!report.dry_run && body.duplicates === 'delete') {
-      invalidateAppsCache();
+      await purgeAppsCache(c.env);
       await recordActivity(c.env, consoleActor(c), `تنظيف ${plan.length} مجموعة مكرّرة (${plan.reduce((n, g) => n + g.remove.length, 0)} عنصراً)`, 'delete');
     }
   }

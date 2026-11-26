@@ -27,6 +27,53 @@ var messaging = firebase.messaging();
 
 // Resolve targets against the SW's own origin so previews (pages.dev /
 // vercel.app) behave the same as production (goldenstore.online).
+/* ── IMAGE CACHE — «الصور فيها تقليتش» ───────────────────────────────────────
+ * Owner, on the phone: the app icons and screenshots flicker and re-appear
+ * grey while scrolling, and on a bad 4G line they often never arrive at all.
+ * The site itself now sends `Cache-Control: public, max-age=604800` for its own
+ * CSS/JS, but images that come from the storage bucket are cross-origin and a
+ * service worker cannot cache an opaque response body it never sees — so those
+ * are fetched with CORS and kept here by the browser, not by the page.
+ *
+ * Two rules, nothing else:
+ *   • a picture is cache-first (it never changes under the same name),
+ *   • everything else stays out of the way — this worker must never break a page.
+ */
+const IMG_HOSTS = ['pub-19788071c0444841a00871f67e620d63.r2.dev'];
+const IMG_EXT = /\.(?:png|jpe?g|webp|gif|avif|svg)(?:\?|$)/i;
+
+function isCacheableImage(url) {
+  try {
+    const u = new URL(url);
+    if (u.origin === self.location.origin && IMG_EXT.test(u.pathname)) return true;
+    return IMG_HOSTS.includes(u.hostname) && IMG_EXT.test(u.pathname);
+  } catch (e) { return false; }
+}
+
+self.addEventListener('fetch', function (event) {
+  var req = event.request;
+  if (req.method !== 'GET') return;
+  if (!isCacheableImage(req.url)) return;
+  event.respondWith((async function () {
+    var cache = await caches.open('gs-images-v1');
+    var hit = await cache.match(req);
+    if (hit) {
+      // Refresh in the background; the painted picture never blocks on it.
+      event.waitUntil(fetch(req, { mode: 'cors' }).then(function (r) {
+        if (r && r.ok) return cache.put(req, r.clone());
+      }).catch(function () {}));
+      return hit;
+    }
+    try {
+      var res = await fetch(req, { mode: 'cors' });
+      if (res && res.ok) event.waitUntil(cache.put(req, res.clone()));
+      return res;
+    } catch (e) {
+      return new Response('', { status: 504 });
+    }
+  })());
+});
+
 var SITE_ORIGIN = self.location.origin;
 var SITE_HOME = SITE_ORIGIN + '/';
 var FALLBACK_ICON = SITE_ORIGIN + '/images/logo.png';

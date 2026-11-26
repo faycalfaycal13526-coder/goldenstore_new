@@ -125,6 +125,56 @@ function fullApiUrl(path) {
   const base = apiBaseUrl();
   return base && path.startsWith('/') ? base + path : path;
 }
+
+/* ── Last known good catalogue ───────────────────────────────────────────────
+ * Owner: «التطبيقات والألعاب تنزل بشكل ثقيل والصور فيها تقليتش» on a 4G phone.
+ * Every list was re-fetched and re-drawn from nothing on each visit: if the
+ * network was slow, the store looked empty or half-drawn for seconds, and every
+ * icon started again from zero bytes.
+ *
+ * The answer to slow is not only a smaller payload — it is showing the screen
+ * IMMEDIATELY and refreshing behind it. The last successful list is kept in
+ * localStorage (a few KB), painted straight away, then replaced by fresh data
+ * when it arrives; if the request fails, the cached list simply stays. Images
+ * never start from zero twice because they are cached by the browser now.
+ */
+const LIST_CACHE_PREFIX = 'gs_list_v1:';
+function readListCache(key) {
+  try {
+    const raw = localStorage.getItem(LIST_CACHE_PREFIX + key);
+    if (!raw) return null;
+    const box = JSON.parse(raw);
+    if (!box || !Array.isArray(box.apps) || !box.apps.length) return null;
+    return box;
+  } catch (e) { return null; }
+}
+function writeListCache(key, data) {
+  try {
+    const apps = Array.isArray(data) ? data : (data && data.apps);
+    if (!Array.isArray(apps) || !apps.length) return;
+    const slim = apps.slice(0, 60).map((a) => ({
+      id: a.id, slug: a.slug, name: a.name, developer: a.developer, category: a.category,
+      type: a.type, name_lower: a.name_lower, version_name: a.version_name,
+      size_bytes: a.size_bytes, rating: a.rating, rating_count: a.rating_count,
+      stars: a.stars, downloads: a.downloads, icon_url: a.icon_url, feature_url: a.feature_url,
+    }));
+    localStorage.setItem(LIST_CACHE_PREFIX + key, JSON.stringify({ at: Date.now(), apps: slim }));
+  } catch (e) { /* quota or private mode */ }
+}
+// Keeps a list usable while the fresh copy loads, and survives a dead link.
+async function apiList(path, opts = {}) {
+  const cacheKey = opts.cacheKey || path;
+  try {
+    const data = await api(path, opts);
+    writeListCache(cacheKey, data);
+    return data;
+  } catch (err) {
+    const cached = readListCache(cacheKey);
+    if (!cached) throw err;
+    console.warn('[store] الشبكة تعثّرت — نعرض القائمة المحفوظة:', (err && err.message) || err);
+    return { ...cached, stale: true };
+  }
+}
 async function apiNativeCap(path, opts, timeoutMs) {
   const capHttp = window.Capacitor.Plugins.CapacitorHttp;
   const isJsonBody = opts.body && typeof opts.body !== 'string' && !(opts.body instanceof FormData);
@@ -325,7 +375,7 @@ function toast(msg, type = 'info', ms = 3000) {
 function posterCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'poster' },
-    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy', decoding: 'async', width: '96', height: '96' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
     rt
       ? el('div', { class: 'rt' }, el('span', null, rt), ico('star', 'icon fill'))
@@ -337,7 +387,7 @@ function listRow(a, opts = {}) {
   const cat = categoryName(a.category);
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'approw' },
-    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+    el('div', { class: 'art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy', decoding: 'async', width: '96', height: '96' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'info' },
       el('div', { class: 'nm' }, el('bdi', appNameAttrs(a), appName(a))),
       el('div', { class: 'sub' }, el('bdi', devAttrs(a.developer), a.developer || cat || STORE.name)),
@@ -357,7 +407,7 @@ function listRow(a, opts = {}) {
 function gridCard(a) {
   const rt = ratingOf(a);
   return el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'grid-card' },
-    el('div', { class: 'grid-art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy' }) : ico('package', 'icon icon-lg')),
+    el('div', { class: 'grid-art' }, a.icon_url ? el('img', { src: a.icon_url, alt: appName(a), loading: 'lazy', decoding: 'async', width: '96', height: '96' }) : ico('package', 'icon icon-lg')),
     el('div', { class: 'grid-info' },
       el('div', { class: 'grid-name' }, el('bdi', appNameAttrs(a), appName(a))),
       el('div', { class: 'grid-meta' }, `${a.version_name ? 'v' + a.version_name : ''}${a.version_name ? ' • ' : ''}${formatBytes(a.size_bytes || 0)}`),
@@ -373,7 +423,7 @@ function featureSlide(a) {
   const slide = el('a', { href: `/app?slug=${encodeURIComponent(a.slug)}`, class: 'fc-slide' });
   const media = el('div', { class: 'fc-media' });
   if (a.feature_url) {
-    media.append(el('img', { src: a.feature_url, alt: appName(a), loading: 'lazy', class: 'fc-media-img' }));
+    media.append(el('img', { src: a.feature_url, alt: appName(a), loading: 'lazy', decoding: 'async', class: 'fc-media-img' }));
   } else {
     media.classList.add('fc-media-fallback');
     media.append(a.icon_url
@@ -3060,7 +3110,7 @@ function onActiveDownloadsChange(fn) {
 })();
 
 window.Store = {
-  STORE, api, authedApi, el, ico, t,
+  STORE, api, apiList, authedApi, el, ico, t,
   formatBytes, formatCount, formatNum, formatDate, ratingOf, ratingValue, ratingCountOf, getQuery, toast,
   publicOrigin,
   publicSiteOrigin,

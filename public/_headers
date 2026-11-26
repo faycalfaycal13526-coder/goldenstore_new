@@ -11,17 +11,28 @@
   Pragma: no-cache
   Expires: 0
 
+# ESSENTIAL FIX — the site was re-downloading itself on every single visit.
+# These two blocks said "no-store, no-cache, must-revalidate" (and the block
+# above says it too), so nothing was ever kept: every page load pulled play.css
+# (44 KB), lang.js (190 KB), store.js (42 KB) and content-i18n.js (56 KB) again —
+# 350 KB before the first app icon on a 4G phone, on every tap between pages.
+# That is "الموقع أصبح ثقيل". Every asset is loaded with a version token (?v=…)
+# that is bumped on each release, so a cached copy can never be stale.
 /css/*
-  Cache-Control: no-store, no-cache, must-revalidate
-  Pragma: no-cache
-  Expires: 0
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+  Pragma: public
+  Expires: 604800
 
 /js/*
-  Cache-Control: no-store, no-cache, must-revalidate
-  Pragma: no-cache
-  Expires: 0
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+  Pragma: public
+  Expires: 604800
 
 /images/*
   Cache-Control: public, max-age=31536000, immutable
 /images/support-heart-hand.png
   Cache-Control: public, max-age=31536000, immutable
+
+# Fonts and the manifest never change under the same name.
+/manifest.webmanifest
+  Cache-Control: public, max-age=86400

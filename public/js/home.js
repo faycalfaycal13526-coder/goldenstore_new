@@ -2,6 +2,10 @@
 (function () {
   const S = window.Store;
   const { el, ico, api, getQuery, t } = S;
+  /* The cached-list wrapper, when this build has it. The installed APK ships its
+     own copies of these files, so a bundle where home.js is newer than store.js
+     must not die on a missing helper — it simply fetches directly. */
+  const apiList = typeof S.apiList === 'function' ? S.apiList : S.api;
   const root = document.getElementById('root');
 
   S.bottomNav('apps');
@@ -99,9 +103,9 @@
 
     async function renderForYou() {
       const [recent, popular, top] = await Promise.all([
-        api(q('sort=recent&limit=60')).catch(() => ({ apps: [] })),
-        api(q('sort=popular&limit=30')).catch(() => ({ apps: [] })),
-        api(q('sort=rating&limit=30')).catch(() => ({ apps: [] })),
+        apiList(q('sort=recent&limit=60')).catch(() => ({ apps: [] })),
+        apiList(q('sort=popular&limit=30')).catch(() => ({ apps: [] })),
+        apiList(q('sort=rating&limit=30')).catch(() => ({ apps: [] })),
       ]);
       content.innerHTML = '';
 
@@ -149,7 +153,7 @@
     }
 
     async function renderTop() {
-      const res = await api(q('sort=popular&limit=60'));
+      const res = await apiList(q('sort=popular&limit=60'));
       const apps = filt(res.apps).slice(0, 50);
       content.innerHTML = '';
       if (!apps.length) { content.append(S.emptyState(t('لا توجد تطبيقات بعد'))); return; }
@@ -164,7 +168,7 @@
     }
 
     async function renderTopRated() {
-      const res = await api(q('sort=rating&limit=60'));
+      const res = await apiList(q('sort=rating&limit=60'));
       const apps = filt(res.apps).filter((a) => S.ratingCountOf(a) > 0).slice(0, 50);
       content.innerHTML = '';
       if (!apps.length) { content.append(S.emptyState(t('لا توجد تطبيقات مقيّمة بعد'), t('قيّم التطبيقات لتظهر هنا الأعلى تقييماً.'))); return; }
@@ -181,7 +185,7 @@
     // "الجديد والمحدّث" — placed right before the Categories tab. Shows the
     // newest arrivals plus apps whose updated_at is newer than created_at.
     async function renderNewUpdated() {
-      const res = await api(q('sort=recent&limit=60'));
+      const res = await apiList(q('sort=recent&limit=60'));
       const apps = filt(res.apps).slice(0, 24);
       content.innerHTML = '';
       if (!apps.length) {

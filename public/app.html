@@ -10,8 +10,66 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/play.css?v=20261129kk">
+<link rel="preconnect" href="https://pub-19788071c0444841a00871f67e620d63.r2.dev" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/play.css?v=20261129ll">
+<script id="gs-net-guard">
+/* WHY THIS EXISTS — a real screenshot from the owner's phone:
+ *
+ *     صفحة الويب غير متاحة
+ *     تعذّر تحميل صفحة الويب على https://goldenstore.online
+ *     net::ERR_NAME_NOT_RESOLVED
+ *
+ * That is the phone failing to resolve the domain (no internet, a captive
+ * portal, mobile data off, or airplane mode) — not a broken site. The default
+ * Android page explains nothing and leaves a blank white screen, which reads as
+ * «الموقع تعطّل». This turns it into one calm screen that says which of the two
+ * situations it is, retries by itself when the connection returns, and offers
+ * the saved copy of the store instead of nothing.
+ *
+ * It is inline and dependency-free on purpose: it has to work in the one moment
+ * when nothing else can load.
+ */
+(function () {
+  var t = null;
+  function show() {
+    if (document.getElementById('gs-netguard')) return;
+    var w = document.createElement('div');
+    w.id = 'gs-netguard';
+    w.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;background:#0d0d0f;color:#f2f2f4;'
+      + 'font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;display:flex;align-items:center;'
+      + 'justify-content:center;padding:24px;text-align:center;direction:rtl');
+    w.innerHTML = '<div style="max-width:420px">'
+      + '<div style="width:64px;height:64px;margin:0 auto 18px;border-radius:20px;background:#1c1c22;'
+      + 'display:flex;align-items:center;justify-content:center;font-size:30px">📶</div>'
+      + '<h1 style="font-size:20px;margin:0 0 10px">لا يوجد اتصال بالإنترنت</h1>'
+      + '<p style="font-size:14px;line-height:1.8;color:#a8a8b3;margin:0 0 18px">'
+      + 'الهاتف لا يستطيع الوصول إلى المتجر الآن — الواي فاي أو بيانات الهاتف متوقفة، أو الشبكة ضعيفة. '
+      + 'هذه ليست مشكلة في المتجر. سيعمل من تلقاء نفسه عند عودة الاتصال.</p>'
+      + '<button id="gs-netguard-retry" style="border:0;border-radius:12px;padding:12px 22px;background:#3d7bfd;'
+      + 'color:#fff;font-size:15px;font-weight:700;margin-inline-end:8px">إعادة المحاولة</button>'
+      + '<button id="gs-netguard-again" style="border:1px solid #33333c;border-radius:12px;padding:12px 22px;'
+      + 'background:transparent;color:#f2f2f4;font-size:15px">حاول الآن</button>'
+      + '</div>';
+    document.body.appendChild(w);
+    document.getElementById('gs-netguard-retry').onclick = function () { location.reload(); };
+    document.getElementById('gs-netguard-again').onclick = function () { location.href = location.href; };
+  }
+  function hide() {
+    var w = document.getElementById('gs-netguard');
+    if (w) w.remove();
+  }
+  window.addEventListener('online', function () { if (t) { clearTimeout(t); t = null; } location.reload(); });
+  window.addEventListener('offline', show);
+  if (navigator.onLine === false) show();
+  /* A page that never finished loading is as unhelpful as an error page: if the
+     document is still not interactive after 12 s, say so in plain words. */
+  t = setTimeout(function () {
+    if (document.readyState !== 'complete' && !document.querySelector('.shell .topbar')) show();
+  }, 12000);
+  window.addEventListener('load', function () { if (t) { clearTimeout(t); t = null; } hide(); });
+})();
+</script>
 <script id="gs-apk-self-heal">
 (function(){
   try {
@@ -46,15 +104,15 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
-  <script src="/js/icons.js?v=20261129kk"></script>
-  <script src="/js/store-settings.js?v=20261129kk"></script>
-  <script src="/js/content-i18n.js?v=20261129kk"></script>
-  <script src="/js/lang.js?v=20261129kk"></script>
-  <script src="/js/firebase-auth.js?v=20261129kk"></script>
-  <script src="/js/notifications.js?v=20261129kk"></script>
-  <script src="/js/store.js?v=20261129kk"></script>
-  <script src="/js/share-sheet.js?v=20261129kk"></script>
-  <script src="/js/app.js?v=20261129kk"></script>
-  <script src="/js/notification-hub.js?v=20261129kk"></script>
+  <script src="/js/icons.js?v=20261129ll"></script>
+  <script src="/js/store-settings.js?v=20261129ll"></script>
+  <script src="/js/content-i18n.js?v=20261129ll"></script>
+  <script src="/js/lang.js?v=20261129ll"></script>
+  <script src="/js/firebase-auth.js?v=20261129ll"></script>
+  <script src="/js/notifications.js?v=20261129ll"></script>
+  <script src="/js/store.js?v=20261129ll"></script>
+  <script src="/js/share-sheet.js?v=20261129ll"></script>
+  <script src="/js/app.js?v=20261129ll"></script>
+  <script src="/js/notification-hub.js?v=20261129ll"></script>
 </body>
 </html>

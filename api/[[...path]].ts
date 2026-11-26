@@ -3363,14 +3363,36 @@ app.post('/admin/apps', async (c) => {
 
   const head = await r2Head(c.env, body.apk_key); if (!head) return c.json({ error: 'apk_not_found' }, 400);
 
-  // The same package + the same APK bytes can never be two products.
+  /* The same product can never become two rows.
+   *
+   * Round 83 (owner: «ثم أعدل على شئ بسيط مثل الاسم ينشر مرة أخرى ويظهر كأنه
+   * تطبيقات … يصبح نسخة لا أحتاجها»). Publishing again from the publish screen
+   * while only the NAME had changed created a second row: the duplicate guard
+   * compared the package name alone, and any difference in it — a stray space, a
+   * different case, a typo — slipped past and produced a copy.
+   *
+   * Two independent identities are checked now:
+   *   • the package name (normalised: case, spaces, invisible bidi marks), or
+   *   • the name itself (same normalisation).
+   * Either match means «this product already exists», and the owner is sent to
+   * the existing row instead of being handed a duplicate.
+   */
   const pkg = sanitizeText(body.package_name, 200).trim();
   const nameKey = normaliseForMatch(body.name);
   const dup: any = await c.env.DB.prepare(
-    `SELECT id, slug, name, apk_key FROM apps
+    `SELECT id, slug, name, package_name, apk_key FROM apps
       WHERE LOWER(TRIM(package_name)) = LOWER(?) LIMIT 5`,
   ).bind(pkg).first().catch(() => null);
-  const dupe = dup ? { id: dup.id, slug: dup.slug, name: dup.name, apk_key: dup.apk_key } : null;
+  let dupe = dup ? { id: dup.id, slug: dup.slug, name: dup.name, apk_key: dup.apk_key } : null;
+
+  if (!dupe && nameKey) {
+    // No package match — but the same title is already in the catalogue.
+    const byName: any = await c.env.DB.prepare(
+      'SELECT id, slug, name, package_name, apk_key, name_lower FROM apps',
+    ).all().catch(() => ({ results: [] }));
+    const hit = (byName.results || []).find((r: any) => normaliseForMatch(r.name) === nameKey);
+    if (hit) dupe = { id: hit.id, slug: hit.slug, name: hit.name, apk_key: hit.apk_key };
+  }
   if (dupe) {
     // Never leave the second copy's upload behind: the APK we just received is
     // byte-identical in purpose to the existing row's file, so it is deleted.
@@ -3469,13 +3491,30 @@ app.patch('/admin/apps/:id', async (c) => {
   let name_lower = body.name !== undefined ? name.toLowerCase() : old.name_lower;
   let search_terms = body.name || body.developer || body.short_description || body.package_name ? JSON.stringify(searchTerms(name, body.developer||old.developer, body.short_description||old.short_description, body.package_name||old.package_name)) : old.search_terms;
 
-  const versionChanged = (body.version_name && body.version_name !== old.version_name) || (body.version_code && body.version_code !== old.version_code);
-  
+  /* A simple edit must never broadcast anything.
+   *
+   * Round 83 (owner: «وأيضا ينشر إشعار أيضا أنا لا أريد إشعار عند تغيير شئ بسيط»).
+   * This handler fired an «إصدار جديد» notification whenever version_name or
+   * version_code came through differently from the stored row — and the edit form
+   * always submits both fields, so renaming an app could announce a release that
+   * never happened.
+   *
+   * Now a notification is sent only when a REAL, NEWER version is being saved:
+   * the version code increased (or, when codes are absent, the version name
+   * changed to a non-empty different value). Renaming, re-categorising, editing
+   * descriptions and fixing a typo are silent.
+   */
+  const oldCode = Number(old.version_code) || 0;
+  const newCode = body.version_code !== undefined ? (safeInt(body.version_code, 0, 999999999) || 0) : oldCode;
+  const newNameVer = body.version_name !== undefined ? sanitizeText(body.version_name, 60) : (old.version_name || '');
+  const versionChanged = (newCode > oldCode)
+    || (newCode === oldCode && !!newNameVer && String(newNameVer) !== String(old.version_name || ''));
+
   await c.env.DB.prepare(`UPDATE apps SET name=?, name_lower=?, search_terms=?, package_name=?, short_description=?, description=?, category=?, type=?, developer=?, version_name=?, version_code=?, min_sdk=?, updated_at=? WHERE id=?`)
     .bind(name, name_lower, search_terms, body.package_name||old.package_name, body.short_description !== undefined ? sanitizeText(body.short_description, 500) : old.short_description, body.description !== undefined ? sanitizeText(body.description, 10000) : old.description, body.category||old.category, body.type ? (body.type==='game'?'game':'app') : old.type, body.developer !== undefined ? sanitizeText(body.developer, 120) : old.developer, body.version_name !== undefined ? sanitizeText(body.version_name, 60) : old.version_name, body.version_code !== undefined ? safeInt(body.version_code,0,999999999) : old.version_code, body.min_sdk !== undefined ? safeInt(body.min_sdk,1,99) : old.min_sdk, nowSec(), id).run();
 
   if (versionChanged) await addNotification(c.env, {
-    type: 'update', title: name, body: `إصدار ${body.version_name||old.version_name}`,
+    type: 'update', title: name, body: `إصدار ${newNameVer || old.version_name || ''}`.trim(),
     app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
     click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
   });
@@ -3485,6 +3524,32 @@ app.patch('/admin/apps/:id', async (c) => {
   
   return c.json({ ok: true });
 });
+
+/* Deleting the previous file on an update.
+ *
+ * Round 83 (owner: «عند تحديث التطبيق أو اللعبة القديمة لا يحذفون من r2 … أريد عند
+ * التحديث يحذف القديم»). The old key was removed inside `waitUntil`, which is
+ * fire-and-forget: if the isolate is recycled, the R2 call errors, or the request
+ * is retried, the file is never deleted and nothing reports it. The bucket then
+ * collects one dead APK per update — the 42 MB of leftovers the owner kept
+ * finding.
+ *
+ * replaceOldFile() deletes in the request path, verifies the object is really
+ * gone, and returns the truth so the caller can say it. If the delete fails the
+ * key is still referenced nowhere (the row now points at the new file) and the
+ * orphan sweep will list it — but the owner is told immediately instead of
+ * discovering it weeks later in the Cloudflare console.
+ */
+async function replaceOldFile(env: Env, oldKey: unknown, newKey: unknown): Promise<{ cleaned: boolean; key?: string; error?: string }> {
+  const key = String(oldKey || '').trim();
+  if (!key || key === String(newKey || '').trim()) return { cleaned: true };
+  const gone = await r2DeleteStrict(env, key).catch(() => false);
+  if (!gone) return { cleaned: false, key, error: 'delete_failed' };
+  // A delete that reports success can still leave the object in very rare cases.
+  const still = await r2Head(env, key).catch(() => null);
+  if (still) return { cleaned: false, key, error: 'still_present' };
+  return { cleaned: true, key };
+}
 
 app.post('/admin/apps/:id/apk', async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -3499,58 +3564,35 @@ app.post('/admin/apps/:id/apk', async (c) => {
   await c.env.DB.prepare('UPDATE apps SET apk_key=?, size_bytes=?, version_name=?, version_code=?, updated_at=? WHERE id=?')
     .bind(body.apk_key, head.size, body.version_name||old.version_name, body.version_code!==undefined?body.version_code:old.version_code, nowSec(), old.id).run();
 
-  // The OLD file is deleted in the BACKGROUND and reported honestly.
-  //
-  // Awaiting it made the request wait on a multi-hundred-megabyte DELETE, so
-  // the browser timed out and retried the whole replace — which is why one
-  // «simple edit» looked like it published again. The row is already updated,
-  // so a failed cleanup is only a leftover file, never a wrong catalogue.
-  let cleaned = true;
-  if (old.apk_key && old.apk_key !== body.apk_key) {
-    const key = String(old.apk_key);
-    try {
-      c.executionCtx.waitUntil(r2DeleteStrict(c.env, key).then((ok) => {
-        if (!ok) console.error('[r2] could not delete replaced apk', key);
-      }));
-    } catch {
-      cleaned = await r2DeleteStrict(c.env, key);
-    }
-  }
+  /* The previous APK is deleted NOW and the result is reported.
+     The row is already updated first, so a failed cleanup is only a leftover
+     file — never a wrong catalogue. But it is no longer silent. */
+  const cleanup = await replaceOldFile(c.env, old.apk_key, body.apk_key);
   await addNotification(c.env, {
     type: 'update', title: old.name, body: `إصدار ${body.version_name||old.version_name}`,
     app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
     click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
   });
   invalidateAppsCache();
-  return c.json({ ok: true, cleaned });
+  return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
 app.post('/admin/apps/:id/icon', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT icon_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   await c.env.DB.prepare('UPDATE apps SET icon_key=?, updated_at=? WHERE id=?').bind(body.icon_key, nowSec(), old.id).run();
-  // Old icon is removed in the background: a slow DELETE must never make the
-  // browser time out and retry the whole edit («أي تعديل بسيط ينشر مرة أخرى»).
-  let cleaned = true;
-  if (old.icon_key && old.icon_key !== body.icon_key) {
-    const key = String(old.icon_key);
-    try { c.executionCtx.waitUntil(r2DeleteStrict(c.env, key)); } catch { cleaned = await r2DeleteStrict(c.env, key); }
-  }
+  const cleanup = await replaceOldFile(c.env, old.icon_key, body.icon_key);
   invalidateAppsCache();
-  return c.json({ ok: true, cleaned });
+  return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
 app.post('/admin/apps/:id/feature', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT feature_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   await c.env.DB.prepare('UPDATE apps SET feature_key=?, updated_at=? WHERE id=?').bind(body.feature_key, nowSec(), old.id).run();
-  let cleaned = true;
-  if (old.feature_key && old.feature_key !== body.feature_key) {
-    const key = String(old.feature_key);
-    try { c.executionCtx.waitUntil(r2DeleteStrict(c.env, key)); } catch { cleaned = await r2DeleteStrict(c.env, key); }
-  }
+  const cleanup = await replaceOldFile(c.env, old.feature_key, body.feature_key);
   invalidateAppsCache();
-  return c.json({ ok: true, cleaned });
+  return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
 app.post('/admin/apps/:id/screenshots', async (c) => {

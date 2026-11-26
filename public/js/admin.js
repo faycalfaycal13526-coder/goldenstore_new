@@ -4686,8 +4686,8 @@
         // look like two.
         if (res && res.existing) {
           toast(res.duplicate
-            ? 'هذا التطبيق منشور بالفعل بنفس اسم الحزمة — فتحنا نسخته الأصلية ولم ننشئ نسخة ثانية'
-            : 'تم النشر بالفعل — فتحنا النسخة الموجودة', 'info');
+            ? 'هذا العنصر منشور بالفعل — فتحنا نسخته الأصلية ولم ننشئ نسخة ثانية'
+            : 'الاسم مستخدم بالفعل لعنصر آخر — فتحناه ولم ننشئ نسخة ثانية. غيّر الاسم أو عدّل العنصر الموجود', 'info');
         } else {
             toast('تم رفع التطبيق بنجاح', 'success');
         }
@@ -4841,11 +4841,15 @@
         const vc = apkForm.querySelector('[name=version_code]').value;
         try {
           const apk_key = await r2Upload(files[0], 'apk', app.slug, (r) => apkDz.setProgress(0, r));
-          await api(`/api/admin/apps/${id}/apk`, {
+          const rep = await api(`/api/admin/apps/${id}/apk`, {
             method: 'POST',
             body: { apk_key, version_name: vn || undefined, version_code: vc ? Number(vc) : undefined },
           });
-          toast('تم تحديث APK', 'success');
+          /* «أريد عند التحديث يحذف القديم». The server now deletes it in the
+             request and tells us whether that worked — never claim success. */
+          toast(rep && rep.cleaned === false
+            ? 'حُدّث الإصدار، لكن الملف القديم بقي في كلاود — احذفه من «ملفات غير مستخدمة»'
+            : 'تم تحديث APK وحُذف الملف القديم', rep && rep.cleaned === false ? 'info' : 'success');
           renderEditApp(body, id);
         } catch (err) { toast('فشل التحديث', 'error'); }
       } });
@@ -4871,8 +4875,10 @@
         if (!files.length) { toast('اختر صورة', 'error'); return; }
         try {
           const icon_key = await r2Upload(files[0], 'icon', app.slug, (r) => iconDz.setProgress(0, r));
-          await api(`/api/admin/apps/${id}/icon`, { method: 'POST', body: { icon_key } });
-          toast('تم تحديث الأيقونة', 'success');
+          const rep = await api(`/api/admin/apps/${id}/icon`, { method: 'POST', body: { icon_key } });
+          toast(rep && rep.cleaned === false
+            ? 'حُدّثت الأيقونة، لكن القديمة بقيت في كلاود — احذفها من «ملفات غير مستخدمة»'
+            : 'تم تحديث الأيقونة وحُذفت القديمة', rep && rep.cleaned === false ? 'info' : 'success');
           renderEditApp(body, id);
         } catch (err) { toast('فشل التحديث', 'error'); }
       } });
@@ -4891,8 +4897,10 @@
         if (!files.length) { toast('اختر صورة', 'error'); return; }
         try {
           const feature_key = await r2Upload(files[0], 'feature', app.slug, (r) => featDz.setProgress(0, r));
-          await api(`/api/admin/apps/${id}/feature`, { method: 'POST', body: { feature_key } });
-          toast('تم تحديث الصورة العرضية', 'success');
+          const rep = await api(`/api/admin/apps/${id}/feature`, { method: 'POST', body: { feature_key } });
+          toast(rep && rep.cleaned === false
+            ? 'حُدّثت الصورة، لكن القديمة بقيت في كلاود — احذفها من «ملفات غير مستخدمة»'
+            : 'تم تحديث الصورة وحُذفت القديمة', rep && rep.cleaned === false ? 'info' : 'success');
           renderEditApp(body, id);
         } catch (err) { toast('فشل التحديث', 'error'); }
       } });

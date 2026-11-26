@@ -15,7 +15,11 @@ function r2Credentials(env: Env) {
 
 function clientFor(env: Env): AwsClient {
   const { accessKeyId, secretAccessKey } = r2Credentials(env);
-  return new AwsClient({ accessKeyId, secretAccessKey, service: 's3', region: 'auto' });
+  // aws4fetch retries a 5xx/429 ten times by default with exponential backoff,
+  // which turns one failed delete into eleven requests and a false "still there"
+  // verdict long after the admin request should have answered. Two retries is
+  // enough for a transient blip; the caller reports the truth either way.
+  return new AwsClient({ accessKeyId, secretAccessKey, service: 's3', region: 'auto', retries: 2, initRetryMs: 150 });
 }
 
 export function r2Bucket(env: Env): string {

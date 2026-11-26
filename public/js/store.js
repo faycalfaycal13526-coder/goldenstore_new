@@ -1673,6 +1673,33 @@ function hideAuthGate() {
   document.body.style.overflow = '';
 }
 
+/* Round 75 (owner: «نشرت لعبة … ولم تظهر في المتجر»).
+ *
+ * THE WHOLE STORE USED TO WAIT FOR FIREBASE, FOREVER.
+ * Every page registers its renderer through ready(), and ready() callbacks only
+ * run from onAuthed() — which only runs from GAuth.onAuthChange. If that
+ * callback never arrived, nothing rendered at all: the page sat on its skeleton
+ * permanently, with the footer as its only content. The store looked empty even
+ * though /api/apps returned the game and its images were live 200s.
+ *
+ * That callback does not always arrive. Firebase's SDK is loaded from
+ * gstatic.com; when that host is slow, blocked by a DNS filter or by an
+ * ad-blocker — common on mobile networks here — onAuthStateChanged may never
+ * fire, and even calling onAuthChange can throw. Nothing in the old code had a
+ * timeout or a fallback, so the failure was silent and total.
+ *
+ * What we do now:
+ *   1. the auth SDK gets AUTH_GRACE_MS to answer;
+ *   2. if it does not, the page renders as a GUEST (browsing never needed an
+ *      account) instead of staying blank;
+ *   3. subscribing is wrapped, so a throwing SDK also degrades to guest;
+ *   4. if the real answer arrives later, onAuthed() still upgrades the session
+ *      and emitAuthChanged() refreshes gated blocks — no reload needed.
+ * Browsing, opening and downloading never required an account; rating,
+ * commenting and liking still do, exactly as before.
+ */
+const AUTH_GRACE_MS = 2000;
+
 async function initAuth() {
   if (isLocalhost() && getQuery('devskip') === '1') { onAuthed(devUser()); return; }
   // Settings are loaded once for every page; wait so require_login is honoured.
@@ -1686,20 +1713,46 @@ async function initAuth() {
     return;
   }
 
+  let answered = false;
+  let timer = null;
+  const answeredNow = () => {
+    answered = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+  };
+
   try { window.GAuth.init(); } catch (e) { console.error('GAuth.init failed', e); }
-  window.GAuth.onAuthChange((user) => {
-    if (user) {
-      cacheUser(user);
-      onAuthed(user);
-      hideAuthGate();
-    } else {
-      cacheUser(null);
-      _user = null;
-      hideGate();
-      if (allowGuest) onAuthed(null);       // settings: browse without signing in
-      else showAuthGate();
-    }
-  });
+
+  try {
+    window.GAuth.onAuthChange((user) => {
+      answeredNow();
+      if (user) {
+        cacheUser(user);
+        onAuthed(user);
+        hideAuthGate();
+      } else {
+        cacheUser(null);
+        _user = null;
+        hideGate();
+        if (allowGuest) onAuthed(null);     // settings: browse without signing in
+        else showAuthGate();
+      }
+    });
+  } catch (e) {
+    console.error('GAuth.onAuthChange failed — continuing as guest', e);
+    answeredNow();
+    if (allowGuest) { onAuthed(null); hideAuthGate(); return; }
+    showAuthGate();
+    return;
+  }
+
+  // Do not let a silent auth SDK hold the store hostage.
+  timer = setTimeout(() => {
+    if (answered) return;
+    timer = null;
+    console.warn('[store] auth did not answer within ' + AUTH_GRACE_MS + 'ms — rendering as guest');
+    if (allowGuest) { onAuthed(null); hideAuthGate(); }
+    else showAuthGate();
+  }, AUTH_GRACE_MS);
 }
 
 async function signOut() {

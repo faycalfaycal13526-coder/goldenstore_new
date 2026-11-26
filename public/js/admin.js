@@ -419,7 +419,7 @@
     await retryXhrPut(url, file, contentType, (loaded, total) => {
       if (onProgress) onProgress(loaded / total);
     }, 2, 30 * 60 * 1000);  // 30-min timeout for single PUT (large APKs)
-    return key;
+    return trackUploaded(key);
   }
 
   // Turn a publish failure into a plain, actionable sentence in the UI
@@ -483,6 +483,36 @@
       return `تم الحذف من الموقع، لكن ${del.failed_files} ملف بقي في كلاود — شغّل «تنظيف كلاود» لإزالته`;
     }
     return `تم الحذف نهائياً — أُزيل ${del.deleted_files} ملف من كلاود`;
+  }
+
+  /* ── Keys uploaded by the current publish attempt ────────────────────────────
+   * Owner: «ماذا الذي لا يحذف من اين اتى». This is where it came from.
+   *
+   * The publish flow uploads the APK, icon, feature image and screenshots to R2
+   * BEFORE asking the server to create the row. When a later step fails — a slow
+   * 4 GB upload, a 522, a validation error — the row is never created and the
+   * files already in the bucket belonged to nobody. The delete path then had no
+   * row to find them from, so they stayed for ever: exactly the two leftovers
+   * (apk/getting-over-it-…​.apk and vthumb/video-…​.jpg) the owner kept seeing.
+   *
+   * Every key is now recorded here, and a failed publish removes them again. A
+   * successful publish clears the list (the row now owns those keys).
+   */
+  const uploadSession = { keys: [] };
+  function trackUploaded(key) {
+    if (key && typeof key === 'string') uploadSession.keys.push(key);
+    return key;
+  }
+  async function discardUploadedKeys(keys) {
+    const list = [...new Set((keys || []).filter(Boolean))];
+    if (!list.length) return { deleted: 0, failed: 0 };
+    try {
+      const res = await api('/api/admin/r2/delete', { method: 'POST', body: { keys: list }, timeoutMs: 60000 });
+      return { deleted: Number(res && res.deleted) || 0, failed: Number(res && res.failed) || 0 };
+    } catch {
+      // The sweep in «ملفات غير مستخدمة» is the safety net.
+      return { deleted: 0, failed: list.length };
+    }
   }
 
   function makePublishKey(payload) {
@@ -600,7 +630,7 @@
         }
       }
 
-      return key;
+      return trackUploaded(key);
     } catch (err) {
       // Abort multipart upload on failure (cleanup)
       api('/api/admin/multipart/abort', {
@@ -4659,12 +4689,22 @@
             ? 'هذا التطبيق منشور بالفعل بنفس اسم الحزمة — فتحنا نسخته الأصلية ولم ننشئ نسخة ثانية'
             : 'تم النشر بالفعل — فتحنا النسخة الموجودة', 'info');
         } else {
-          toast('تم رفع التطبيق بنجاح', 'success');
+            toast('تم رفع التطبيق بنجاح', 'success');
         }
+        // The row exists now, so it owns every file this attempt uploaded.
+        uploadSession.keys.length = 0;
         activeTab = `edit:${res.id}`;
         renderApp();
       } catch (err) {
-        toast(publishErrorText(err, step, data.name), 'error');
+        /* The publish failed, so nothing in the store points at the files that
+           were already uploaded. Leaving them is how the bucket accumulated
+           leftovers nobody could trace («ماذا الذي لا يحذف من اين اتى»). */
+        const swept = await discardUploadedKeys(uploadSession.keys);
+        uploadSession.keys.length = 0;
+        const base = publishErrorText(err, step, data.name);
+        toast(swept.deleted
+          ? `${base} — وأُزيلت ${swept.deleted} ملفات رُفعت ثم لم تُستخدم.`
+          : base, 'error');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '';
         submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));

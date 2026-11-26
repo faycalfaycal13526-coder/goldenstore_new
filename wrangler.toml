@@ -3,19 +3,27 @@ main = "api/[[...path]].ts"
 compatibility_date = "2026-10-05"
 compatibility_flags = ["nodejs_compat"]
 
-# Process scheduled pushes every 5 minutes (Advanced Push System).
-[triggers]
-crons = ["*/5 * * * *"]
+# Routes and workers_dev belong at the TOP LEVEL — never under [triggers].
+# When they sit inside [triggers], wrangler prints
+# «Unexpected fields found in triggers field: "workers_dev","routes"»,
+# silently DROPS them, and the deploy still exits 0. The Worker then serves on
+# workers.dev only while every route is dead — which is exactly what produced
+# the 522 outage: api.goldenstore.online stayed on Cloudflare's 100::
+# placeholder (no Worker bound), so the Pages proxy in functions/api/[...path].ts
+# got a connection timeout forwarding to it.
 workers_dev = true
 
-# The website routes keep same-origin /api/* calls working on the custom domain.
-# api.goldenstore.online is a Worker Custom Domain used by the Pages/Vercel proxies.
-# The goldenstore.online zone must be active in this Cloudflare account.
+# Same-origin /api/* on the site, plus the hostname the Pages Function proxy
+# forwards to. goldenstore.online must be an active zone in this account.
 routes = [
   { pattern = "goldenstore.online/api/*", zone_name = "goldenstore.online" },
   { pattern = "www.goldenstore.online/api/*", zone_name = "goldenstore.online" },
   { pattern = "api.goldenstore.online", custom_domain = true }
 ]
+
+# Process scheduled pushes every 5 minutes (Advanced Push System).
+[triggers]
+crons = ["*/5 * * * *"]
 
 [vars]
 ADMIN_USERNAME = "admin"

@@ -3318,8 +3318,77 @@
       return wrap;
     });
 
+    /* ---- مسح كامل للحاوية ----
+       Some owners reach a point where the bucket is a mix of everything
+       (dozens of APKs per item, files of products that no longer exist) and the
+       only sane move is to start from zero. This card counts first, shows the
+       per-folder breakdown and how many products lose their file, and demands a
+       typed confirmation — never a single stray tap. */
+    const wipeOut = el('div', { style: { fontSize: '13px', lineHeight: '1.7', whiteSpace: 'pre-wrap' } });
+    const countBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' },
+      ico('search'), 'عدّ كل الملفات');
+    const wipeInput = el('input', { class: 'input', type: 'text', placeholder: 'اكتب DELETE-ALL للتأكيد', 'aria-label': 'DELETE-ALL' });
+    const wipeBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', disabled: true },
+      ico('trash'), 'احذف كل الملفات من كلاود');
+    let counted = null;
+
+    const renderWipe = (w) => {
+      const rows = Object.entries(w.by_folder || {}).map(([f, v]) =>
+        `${f} — ${formatNum(v.count)} ملف (${formatBytes(v.bytes)})`);
+      return [
+        `إجمالي الملفات في كلاود: ${formatNum(w.count || 0)} · الحجم: ${formatBytes(w.bytes || 0)}`,
+        ...rows,
+        w.apps_with_apk ? `تنبيه: ${formatNum(w.apps_with_apk)} عنصر في المتجر ملفه داخل كلاود — بعد المسح يجب رفع ملفاته من جديد.` : '',
+      ].filter(Boolean).join('\n');
+    };
+
+    countBtn.onclick = async () => {
+      countBtn.disabled = true;
+      wipeOut.textContent = 'جارٍ العدّ…';
+      try {
+        const res = await api('/api/admin/cleanup', { method: 'POST', body: { dry_run: true, mode: 'all' }, timeoutMs: 180000 });
+        counted = res.wipe || null;
+        wipeOut.textContent = renderWipe(counted || {});
+        wipeBtn.disabled = !(counted && counted.count);
+      } catch (e) {
+        wipeOut.textContent = 'تعذّر العدّ: ' + ((e && e.message) || 'خطأ');
+      } finally { countBtn.disabled = false; }
+    };
+
+    wipeInput.addEventListener('input', () => {
+      wipeBtn.disabled = wipeInput.value.trim() !== 'DELETE-ALL' || !(counted && counted.count);
+    });
+
+    wipeBtn.onclick = async () => {
+      if (wipeInput.value.trim() !== 'DELETE-ALL') return;
+      if (!confirm(`حذف ${formatNum(counted.count)} ملفاً من كلاود نهائياً؟ لا يمكن الرجوع.`)) return;
+      wipeBtn.disabled = true;
+      wipeOut.textContent = 'جارٍ المسح… قد يستغرق دقيقة.';
+      try {
+        const res = await api('/api/admin/cleanup', {
+          method: 'POST',
+          body: { dry_run: false, mode: 'all', confirm: 'DELETE-ALL', force: true },
+          timeoutMs: 180000,
+        });
+        const w = res.wipe || {};
+        wipeOut.textContent = `تم المسح: ${formatNum(w.deleted || 0)} / ${formatNum(w.count || 0)} ملف`
+          + (w.failed ? `\nتعذّر حذف ${formatNum(w.failed)}: ${(w.failed_keys || []).join(', ')}` : '')
+          + '\n\nالخطوة التالية: افتح كل عنصر وأعد رفع ملف APK + الأيقونة + الصور، أو احذف العناصر التي لا تريدها ثم أعد نشرها.';
+        toast(`تم حذف ${formatNum(w.deleted || 0)} ملف من كلاود`, 'success');
+      } catch (e) {
+        wipeOut.textContent = 'فشل المسح: ' + ((e && e.message) || 'خطأ');
+        wipeBtn.disabled = false;
+      }
+    };
+
     body.innerHTML = '';
     body.append(
+      el('div', { class: 'panel', style: { borderColor: 'var(--danger)' } },
+        el('div', { class: 'panel-head', style: { borderColor: 'var(--danger)' } }, ico('trash'), 'مسح كامل لكلاود'),
+        el('p', { class: 'muted', style: { fontSize: '13px' } },
+          'يحذف كل ملف في الحاوية (APK وأيقونات وصور ومصغّرات) ويعيدها فارغة. عدّ أولاً، ثم اكتب DELETE-ALL.'),
+        countBtn, wipeInput, wipeBtn,
+        el('div', { class: 'mt-md' }, wipeOut)),
       el('div', { class: 'admin-page-head' },
         el('div', null,
           el('h1', { class: 'admin-page-title' }, 'تنظيف كلاود'),

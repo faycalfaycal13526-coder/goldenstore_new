@@ -3594,6 +3594,54 @@ app.post('/admin/cleanup', async (c) => {
     }
   }
 
+  // ---- 3.5) full wipe: «احذف كل الملفات التي في كلاود» ----
+  //  The owner asked for an empty bucket because the files had become mixed up
+  //  (dozens of APKs per item, leftovers from deleted products). This is
+  //  destructive by design, so it needs THREE things before it runs:
+  //    • dry_run:false          — an explicit, non-default flag;
+  //    • confirm: 'DELETE-ALL'  — a typed phrase, never a stray button press;
+  //    • a fresh dry run first  — the UI always shows the count and the size.
+  //  It reports what it removed PER FOLDER, so the owner sees exactly what the
+  //  catalogue lost (an apk/ file = a product that must be re-uploaded).
+  if (body.mode === 'all' || body.mode === 'wipe') {
+    const prefixes = ['apk/', 'ss/', 'icon/', 'feature/', 'vthumb/', ''];
+    const seen = new Set<string>();
+    const all: { key: string; size: number }[] = [];
+    for (const pfx of prefixes) {
+      for (const o of await r2List(c.env, pfx, 10000)) {
+        if (seen.has(o.key)) continue;
+        seen.add(o.key);
+        all.push({ key: o.key, size: Number(o.size || 0) });
+      }
+    }
+    const byFolder: Record<string, { count: number; bytes: number }> = {};
+    for (const o of all) {
+      const folder = o.key.includes('/') ? o.key.slice(0, o.key.indexOf('/') + 1) : '(root)';
+      byFolder[folder] = byFolder[folder] || { count: 0, bytes: 0 };
+      byFolder[folder].count++;
+      byFolder[folder].bytes += o.size;
+    }
+    report.wipe = {
+      count: all.length,
+      bytes: all.reduce((n, o) => n + o.size, 0),
+      by_folder: byFolder,
+      // What the catalogue is about to lose: items whose APK lives in the bucket.
+      apps_with_apk: Number(((await c.env.DB.prepare('SELECT COUNT(*) AS n FROM apps WHERE apk_key IS NOT NULL AND apk_key != \'\'').first().catch(() => null)) as any)?.n || 0),
+      keys: all.slice(0, 300).map((o) => o.key),
+    };
+    if (!report.dry_run) {
+      if (String(body.confirm || '') !== 'DELETE-ALL') {
+        return c.json({ error: 'confirm_required', hint: 'أرسل confirm: DELETE-ALL', ...report }, 400);
+      }
+      const failed = await r2DeleteMany(c.env, all.map((o) => o.key));
+      report.wipe.deleted = all.length - failed.length;
+      report.wipe.failed = failed.length;
+      report.wipe.failed_keys = failed.slice(0, 50);
+      await recordActivity(c.env, consoleActor(c),
+        `مسح كامل لكلاود: ${report.wipe.deleted}/${all.length} ملف`, 'delete');
+    }
+  }
+
   // ---- 4) rows whose file is gone (a 404 download waiting to happen) ----
   if (body.missing) {
     const rows: any = await c.env.DB.prepare('SELECT id, slug, apk_key, size_bytes FROM apps').all().catch(() => ({ results: [] }));

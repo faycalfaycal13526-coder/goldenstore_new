@@ -385,11 +385,11 @@
     throw lastErr;
   }
 
-  async function r2Upload(file, kind, slugHint, onProgress) {
+  async function r2Upload(file, kind, slugHint, onProgress, opts) {
     const contentType = file.type || 'application/octet-stream';
 
     if (file.size > MULTIPART_THRESHOLD) {
-      return await r2MultipartUpload(file, kind, slugHint, contentType, onProgress);
+      return await r2MultipartUpload(file, kind, slugHint, contentType, onProgress, opts);
     }
 
     // Small file: single presigned PUT (with retry). The presign request
@@ -406,6 +406,8 @@
             filename: file.name,
             content_type: contentType,
             slug_hint: slugHint || file.name,
+            ...(opts && opts.app_id ? { app_id: opts.app_id } : {}),
+            ...(opts && opts.slot ? { slot: opts.slot } : {}),
           },
         });
         break;
@@ -530,7 +532,7 @@
     return hit ? { id: hit.id, slug: hit.slug } : null;
   }
 
-  async function r2MultipartUpload(file, kind, slugHint, contentType, onProgress) {
+  async function r2MultipartUpload(file, kind, slugHint, contentType, onProgress, opts) {
     // 1. Create multipart upload and get presigned part URLs
     const mp = await api('/api/admin/multipart/create', {
       method: 'POST',
@@ -541,6 +543,8 @@
         content_type: contentType,
         slug_hint: slugHint || file.name,
         file_size: file.size,
+        ...(opts && opts.app_id ? { app_id: opts.app_id } : {}),
+        ...(opts && opts.slot ? { slot: opts.slot } : {}),
       },
     });
 
@@ -3612,9 +3616,15 @@
           accountOut.append(el('div', { class: 'hint', style: { marginTop: '8px' } },
             'لا يوجد رفع منقطع — كل ما في الحاوية ملفات معروفة.'));
         }
+        const kinds = r.orphan_kinds || {};
         if (r.orphans) {
-          accountOut.append(el('div', { class: 'hint', style: { marginTop: '8px' } },
-            'الملفات غير المستخدمة تُحذف من بطاقة «ملفات غير مستخدمة» أعلاه.'));
+          const line = [];
+          if (kinds.leftovers_of_items?.count) line.push(`بقايا نشر/تعديل بأسماء العناصر: ${formatNum(kinds.leftovers_of_items.count)} (${formatBytes(kinds.leftovers_of_items.bytes)})`);
+          if (kinds.old_timestamped_names?.count) line.push(`أسماء قديمة بطابع زمني: ${formatNum(kinds.old_timestamped_names.count)} (${formatBytes(kinds.old_timestamped_names.bytes)})`);
+          if (kinds.unknown?.count) line.push(`أخرى: ${formatNum(kinds.unknown.count)} (${formatBytes(kinds.unknown.bytes)})`);
+          if (line.length) accountOut.append(el('div', { style: { marginTop: '8px' } }, line.join(' · ')));
+          accountOut.append(el('div', { class: 'hint', style: { marginTop: '6px' } },
+            'تُحذف كلها من بطاقة «ملفات غير مستخدمة» أعلاه — أو بقايا كل عنصر على حدة من صفحة تعديله.'));
         }
         accountOut.append(el('div', { class: 'hint', style: { marginTop: '6px' } },
           'ملاحظة: رقم «Bucket Size» في كلاود متوسط على الفترة، ويبقى مرتفعاً ساعات بعد الحذف — الرقم أعلاه هو الحقيقي.'));
@@ -4912,7 +4922,7 @@
         const vn = apkForm.querySelector('[name=version_name]').value;
         const vc = apkForm.querySelector('[name=version_code]').value;
         try {
-          const apk_key = await r2Upload(files[0], 'apk', app.slug, (r) => apkDz.setProgress(0, r));
+          const apk_key = await r2Upload(files[0], 'apk', app.slug, (r) => apkDz.setProgress(0, r), { app_id: app.id });
           const rep = await api(`/api/admin/apps/${id}/apk`, {
             method: 'POST',
             body: { apk_key, version_name: vn || undefined, version_code: vc ? Number(vc) : undefined },
@@ -4946,7 +4956,7 @@
         const files = iconDz.getFiles();
         if (!files.length) { toast('اختر صورة', 'error'); return; }
         try {
-          const icon_key = await r2Upload(files[0], 'icon', app.slug, (r) => iconDz.setProgress(0, r));
+          const icon_key = await r2Upload(files[0], 'icon', app.slug, (r) => iconDz.setProgress(0, r), { app_id: app.id });
           const rep = await api(`/api/admin/apps/${id}/icon`, { method: 'POST', body: { icon_key } });
           toast(rep && rep.cleaned === false
             ? 'حُدّثت الأيقونة، لكن القديمة بقيت في كلاود — احذفها من «ملفات غير مستخدمة»'
@@ -4968,7 +4978,7 @@
         const files = featDz.getFiles();
         if (!files.length) { toast('اختر صورة', 'error'); return; }
         try {
-          const feature_key = await r2Upload(files[0], 'feature', app.slug, (r) => featDz.setProgress(0, r));
+          const feature_key = await r2Upload(files[0], 'feature', app.slug, (r) => featDz.setProgress(0, r), { app_id: app.id });
           const rep = await api(`/api/admin/apps/${id}/feature`, { method: 'POST', body: { feature_key } });
           toast(rep && rep.cleaned === false
             ? 'حُدّثت الصورة، لكن القديمة بقيت في كلاود — احذفها من «ملفات غير مستخدمة»'
@@ -4992,7 +5002,7 @@
         try {
           const screenshot_keys = [];
           for (let i = 0; i < files.length; i++) {
-            const k = await r2Upload(files[i], 'screenshot', app.slug, (r) => ssDz.setProgress(i, r));
+            const k = await r2Upload(files[i], 'screenshot', app.slug, (r) => ssDz.setProgress(i, r), { app_id: app.id, slot: screenshots.length + i + 1 });
             screenshot_keys.push(k);
           }
           await api(`/api/admin/apps/${id}/screenshots`, { method: 'POST', body: { screenshot_keys } });
@@ -5013,8 +5023,12 @@
               onclick: async () => {
                 if (!confirm('حذف هذه اللقطة؟')) return;
                 try {
-                  await api(`/api/admin/apps/${id}/screenshots/${ss.id}`, { method: 'DELETE' });
-                  toast('تم الحذف', 'success');
+                  const r = await api(`/api/admin/apps/${id}/screenshots/${ss.id}`, { method: 'DELETE' });
+                  /* The row is gone either way, but the FILE may still be in the
+                     bucket — say which of the two happened instead of «تم الحذف». */
+                  toast(r && r.cleaned === false
+                    ? 'حُذفت اللقطة، لكن ملفها بقي في كلاود — احذفه من «ملفات غير مستخدمة»'
+                    : 'حُذفت اللقطة وملفها', r && r.cleaned === false ? 'info' : 'success');
                   renderEditApp(body, id);
                 } catch { toast('فشل الحذف', 'error'); }
               } }, ico('trash')),
@@ -5025,6 +5039,60 @@
       }
       ssPanel.append(el('div', { class: 'mt-md' }, ssForm));
       body.append(ssPanel);
+
+      /* ── بقايا هذا العنصر ──────────────────────────────────────────────────
+       * Owner: «قمت بتعديل صغير وأعدت النشر» then saw extra files in Cloudflare
+       * («apk/getting-over-it.apk» beside the row that was just edited) and the
+       * bug was real: a re-publish used to write a NEW object and the previous
+       * one stayed. The upload naming is fixed now, and this card removes what
+       * earlier rounds left behind — files that carry this item's own name and
+       * that no row points at. Nothing in use can ever appear here. */
+      const leftoverOut = el('div', { style: { fontSize: '13px', lineHeight: '1.7', whiteSpace: 'pre-wrap', width: '100%' } });
+      const leftoverScan = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('search'), 'افحص بقايا هذا العنصر');
+      const leftoverDel = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, ico('trash'), 'احذف البقايا من كلاود');
+      leftoverDel.disabled = true;
+      leftoverScan.onclick = async () => {
+        leftoverScan.disabled = true;
+        leftoverOut.textContent = 'أقارن ملفات هذا العنصر بما يشير إليه المتجر…';
+        try {
+          const r = await api(`/api/admin/apps/${id}/leftovers`, { timeoutMs: 120000 });
+          leftoverOut.innerHTML = '';
+          if (!r.count) {
+            leftoverOut.append(el('div', { class: 'hint' }, 'لا بقايا — كل ملفات هذا العنصر مستخدمة.'));
+            leftoverDel.disabled = true;
+          } else {
+            leftoverOut.append(el('div', null,
+              `${formatNum(r.count)} ملفاً باسم هذا العنصر لا يشير إليه المتجر (${formatBytes(r.bytes)}). لم يُحذف شيء بعد.`));
+            leftoverOut.append(el('pre', { style: { marginTop: '6px', fontSize: '11px', whiteSpace: 'pre-wrap', direction: 'ltr', textAlign: 'left', opacity: '.85' } },
+              (r.keys || []).slice(0, 20).join('\n')));
+            leftoverDel.disabled = false;
+          }
+        } catch (e) {
+          leftoverOut.textContent = (e && e.status >= 500) ? 'الخادم لا يستجيب الآن — لم يتغيّر شيء.' : 'تعذّر الفحص.';
+        } finally { leftoverScan.disabled = false; }
+      };
+      leftoverDel.onclick = async () => {
+        if (!confirm('حذف ملفات هذا العنصر التي لا يستخدمها المتجر؟ لا يمكن التراجع.')) return;
+        leftoverDel.disabled = true;
+        leftoverOut.textContent = 'أحذف…';
+        try {
+          const r = await api(`/api/admin/apps/${id}/leftovers/clean`, { method: 'POST', body: { confirm: 'CLEAN-LEFTOVERS' }, timeoutMs: 240000 });
+          leftoverOut.textContent = r.failed
+            ? `حُذف ${r.deleted} وبقي ${r.failed} — أعد المحاولة.`
+            : `حُذف ${r.deleted} ملفاً — لا بقايا لهذا العنصر الآن.`;
+          toast(`حُذف ${r.deleted} ملفاً قديماً`, 'success');
+          leftoverDel.disabled = true;
+          load();
+        } catch (e) {
+          leftoverOut.textContent = 'تعذّر الحذف: ' + ((e && e.message) || 'حاول لاحقاً');
+          leftoverDel.disabled = false;
+        }
+      };
+      body.append(el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('trash'), 'بقايا هذا العنصر في كلاود'),
+        el('div', { class: 'hint' }, 'ملفات تحمل اسم هذا العنصر ولا يشير إليها المتجر — بقايا نشر سابق أو رفع لم يكتمل. لا يظهر هنا أي ملف مستخدم.'),
+        el('div', { class: 'row-actions', style: { marginTop: '8px' } }, leftoverScan, leftoverDel),
+        leftoverOut));
 
       // YouTube videos / Shorts
       const ve = videoEditor({

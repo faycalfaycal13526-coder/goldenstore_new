@@ -3217,9 +3217,35 @@ async function uploadKeyFor(
   ext: string,
   slugHint: string,
   taken: Set<string>,
+  opts: { appId?: string; slot?: number } = {},
 ): Promise<string> {
   const folder = kind === 'apk' ? 'apk' : kind === 'icon' ? 'icon' : kind === 'feature' ? 'feature' : kind === 'video-thumb' ? 'vthumb' : 'ss';
-  const slug = slugify(String(slugHint || 'app')).slice(0, 60) || 'app';
+  let slug = slugify(String(slugHint || 'app')).slice(0, 60) || 'app';
+
+  /* ── Uploading for an item that ALREADY EXISTS: one name per item, per kind.
+   *
+   * This is the case that produced the growing file list in the Cloudflare
+   * console: you edit something small and publish again, the uploader asks for
+   * `apk/<slug>.apk`, that name is taken (by the previous version of the very
+   * same file), so it used to answer `<slug>-2.apk` — a brand-new object, and
+   * the old one stayed behind. Now the new bytes REPLACE the item's own object:
+   * the row is updated in the same request and every route that changes
+   * apk_key/icon_key/feature_key deletes the superseded key, so nothing can be
+   * orphaned, and the bucket keeps exactly one file per item and kind.
+   *
+   * It is only safe because the key belongs to that one row: the slug is read
+   * from the row itself (never from the request), and a screenshot gets its
+   * position in the name so six screenshots are six files, not one.
+   */
+  if (opts.appId) {
+    const row: any = await env.DB.prepare('SELECT slug FROM apps WHERE id = ?').bind(opts.appId).first().catch(() => null);
+    if (row && row.slug) slug = slugify(String(row.slug)).slice(0, 60) || slug;
+    const name = kind === 'screenshot' ? `${slug}-${Math.max(1, Math.floor(Number(opts.slot) || 1))}` : slug;
+    return `${folder}/${name}${ext ? '.' + ext : ''}`;
+  }
+
+  /* ── A brand-new item: the tidy name if it is free, a numbered one if not.
+     A new item must never overwrite a file another row still points at. */
   const base = `${folder}/${slug}`;
   const extPart = ext ? `.${ext}` : '';
   const exists = async (key: string) => {
@@ -3233,22 +3259,20 @@ async function uploadKeyFor(
     candidate = `${base}-${n}${extPart}`;
     if (!(await exists(candidate))) return candidate;
   }
-  // Deterministic names are exhausted: fall back to a unique suffix rather than
-  // silently replacing a file another row may still point at.
   return `${base}-${Date.now()}-${randomId().slice(0, 6)}${extPart}`;
 }
 
 app.post('/admin/upload-url', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
-  const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set());
+  const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set(), { appId: body.app_id ? String(body.app_id) : undefined, slot: body.slot });
   return c.json({ url: await r2PresignPut(c.env, key, String(body.content_type || 'application/octet-stream'), 7200), key });
 });
 
 app.post('/admin/multipart/create', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
-  const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set());
+  const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set(), { appId: body.app_id ? String(body.app_id) : undefined, slot: body.slot });
   const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
   const parts = [];
   for (let i = 1; i <= Math.ceil(Number(body.file_size) / (10 * 1024 * 1024)); i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });
@@ -3427,9 +3451,14 @@ app.post('/admin/apps', async (c) => {
 
   if (Array.isArray(body.screenshot_keys)) {
     for (let j = 0; j < body.screenshot_keys.length; j++) {
-      if (isValidR2Key(body.screenshot_keys[j], 'ss')) {
-        await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, body.screenshot_keys[j], j, now).run();
-      }
+      const raw = body.screenshot_keys[j];
+      if (!isValidR2Key(raw, 'ss')) continue;
+      /* Same rule as the screenshot endpoint: <ss>/<slug>-<n>.<ext>, moved to
+         that name now so the bucket never keeps a second copy of the file. */
+      const wanted = organiseKey(String(raw), `${slug}-${j + 1}`);
+      let finalKey = raw;
+      if (wanted !== raw) { const mv = await r2Move(c.env, String(raw), wanted); if (mv.ok) finalKey = mv.key; }
+      await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, finalKey, j, now).run();
     }
   }
   
@@ -3599,22 +3628,45 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (!Array.isArray(body.screenshot_keys) || !body.screenshot_keys.length) return c.json({ error: 'no_screenshots' }, 400);
   const id = c.req.param('id');
+  /* Screenshots also get one name per item: <ss>/<slug>-<n>.<ext>.
+   *
+   * They used to be plain <ss>/<slug>.<ext> too, so uploading a SECOND
+   * screenshot overwrote the first one's object while both rows still pointed
+   * at it — six screenshots, one file. Ordering is what makes them distinct, so
+   * the position is part of the name: «ss/subway-surfers-2.jpg».
+   */
+  const baseRow: any = await c.env.DB.prepare('SELECT slug FROM apps WHERE id = ?').bind(id).first().catch(() => null);
+  const slugForSs = slugify(String(baseRow?.slug || 'app')).slice(0, 60) || 'app';
+  const ssKeyFor = (raw: string, position: number) =>
+    organiseKey(String(raw), `${slugForSs}-${position + 1}`);
   const max: any = await c.env.DB.prepare('SELECT MAX(position) as max_pos FROM screenshots WHERE app_id = ?').bind(id).first();
   let pos = (max?.max_pos || 0) + 1;
   
+  const moved: string[] = [], failed: string[] = [];
   for (const k of body.screenshot_keys) {
-    if (isValidR2Key(k, 'ss')) await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, k, pos++, nowSec()).run();
+    if (!isValidR2Key(k, 'ss')) continue;
+    const wanted = ssKeyFor(k, pos);
+    let finalKey = k;
+    if (wanted !== k) {
+      const mv = await r2Move(c.env, k, wanted);
+      if (mv.ok) finalKey = mv.key; else failed.push(k);
+    }
+    await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, finalKey, pos++, nowSec()).run();
+    if (finalKey !== k) moved.push(finalKey);
   }
-  return c.json({ ok: true });
+  return c.json({ ok: true, moved, failed });
 });
 
 app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {
   const row: any = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE id = ? AND app_id = ?').bind(c.req.param('sid'), c.req.param('id')).first();
-  if (row) {
-    await c.env.DB.prepare('DELETE FROM screenshots WHERE id = ?').bind(c.req.param('sid')).run();
-    if (row.r2_key) await r2Delete(c.env, row.r2_key).catch(()=>{});
-  }
-  return c.json({ ok: true });
+  if (!row) return c.json({ ok: true, cleaned: true });
+  await c.env.DB.prepare('DELETE FROM screenshots WHERE id = ?').bind(c.req.param('sid')).run();
+  /* The file is deleted through replaceOldFile (in the request path, verified
+     with a HEAD) instead of a swallowed r2Delete — a failed delete used to look
+     exactly like a successful one, and the screenshot stayed in the bucket. */
+  const cleanup = await replaceOldFile(c.env, row.r2_key, '');
+  invalidateAppsCache();
+  return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
 app.post('/admin/apps/:id/videos', async (c) => {
@@ -3890,9 +3942,26 @@ app.get('/admin/r2/audit', async (c) => {
     folders[folder].count++;
     folders[folder].bytes += o.size || 0;
   }
+  /* Split the unused bytes by why they exist / what they look like, so the
+     number stops being a mystery: an item-named file is a leftover of a publish
+     or an edit, a timestamped one is from the old naming, and a bare 'video-N'
+     thumbnail is a video row that was deleted. */
+  const stampShaped = /-(?:1[6-9]\d{11}|20\d{11})(?:-[0-9a-f]{4,8})?\.[A-Za-z0-9]{1,8}$/;
+  const kinds = {
+    leftovers_of_items: { count: 0, bytes: 0 },
+    old_timestamped_names: { count: 0, bytes: 0 },
+    unknown: { count: 0, bytes: 0 },
+  };
+  for (const o of orphans) {
+    const bucket = stampShaped.test(o.key) ? kinds.old_timestamped_names
+      : folders[o.key.slice(0, o.key.indexOf('/') + 1)] ? kinds.leftovers_of_items
+      : kinds.unknown;
+    bucket.count++; bucket.bytes += o.size || 0;
+  }
   return c.json({
     scanned_objects: objects.length,
     bytes_stored: sum(objects),
+    orphan_kinds: kinds,
     bytes_in_use: sum(inUse),
     bytes_orphan: sum(orphans),
     in_use: inUse.length,
@@ -3927,6 +3996,35 @@ app.post('/admin/r2/audit/abort', async (c) => {
   if (aborted) await recordActivity(c.env, consoleActor(c), `إلغاء ${aborted} رفع غير مكتمل من كلاود`, 'delete');
   return c.json({ ok: true, found: uploads.length, aborted, failed: failed.length, failed_keys: failed.slice(0, 50) });
 });
+
+/**
+ * An object that belongs to ONE item by its name, but that the item does not use.
+ *
+ * Uploads are named `<folder>/<slug>.<ext>`, and a rejected or retried publish
+ * picks a NEW name (`<slug>-2.<ext>`, or the old timestamped shape), so a file
+ * can sit in the bucket under an item's own name while the row points at a
+ * different one. It is unreferenced (so the big sweep would eventually get it)
+ * but it looks like an in-use file, which is exactly what the owner saw in the
+ * Cloudflare console: «apk/getting-over-it.apk» next to a row that had been
+ * edited a moment before.
+ *
+ * A key only counts as an item's leftover when NOTHING references it, so a file
+ * that another row legitimately uses can never be reported here.
+ */
+function belongsToSlug(key: string, slug: string): boolean {
+  const base = String(key || '').split('/').pop() || '';
+  const stem = base.replace(/\.[A-Za-z0-9]{1,8}$/, '').toLowerCase();
+  const want = String(slug || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!stem || !want) return false;
+  return stem === want || stem.startsWith(want + '-');
+}
+
+/** Every object in the bucket that this item owns by name and does not use. */
+async function itemLeftovers(env: Env, app: { id: string; slug: string }) {
+  const referenced = await referencedKeys(env);
+  const objects = await listAllObjects(env);
+  return objects.filter((o) => !referenced.has(o.key) && belongsToSlug(o.key, app.slug));
+}
 
 app.get('/admin/r2/orphans', async (c) => {
   const objects = await listAllObjects(c.env);
@@ -3975,6 +4073,47 @@ app.post('/admin/r2/orphans', async (c) => {
     ok: true, scanned: objects.length, found: orphans.length, deleted,
     failed: failed.length, failed_keys: failed.slice(0, 50),
     bytes: orphans.reduce((n, o) => n + (o.size || 0), 0),
+  });
+});
+
+/**
+ * ONE ITEM'S LEFTOVER FILES — the list the owner can act on right after editing.
+ *
+ *   GET  /admin/apps/:id/leftovers         what this item left behind, by name
+ *   POST /admin/apps/:id/leftovers/clean   delete exactly those objects
+ *
+ * Nothing referenced by any row is ever included (see belongsToSlug), so this is
+ * safe to run on a live catalogue.
+ */
+app.get('/admin/apps/:id/leftovers', async (c) => {
+  const app: any = await c.env.DB.prepare('SELECT id, slug, name, apk_key, icon_key, feature_key FROM apps WHERE id = ?').bind(c.req.param('id')).first();
+  if (!app) return c.json({ error: 'not_found' }, 404);
+  const left = await itemLeftovers(c.env, app);
+  return c.json({
+    ok: true, slug: app.slug, count: left.length,
+    bytes: left.reduce((n, o) => n + (o.size || 0), 0),
+    keys: left.slice(0, 200).map((o) => o.key),
+    note: left.length
+      ? 'ملفات باسم هذا العنصر لا يشير إليها أي تطبيق — بقايا نشر سابق أو رفع مرفوض.'
+      : 'لا توجد بقايا لهذا العنصر.',
+  });
+});
+
+app.post('/admin/apps/:id/leftovers/clean', async (c) => {
+  const body = await c.req.json().catch(() => ({}) as any);
+  if (String(body.confirm || '') !== 'CLEAN-LEFTOVERS') {
+    return c.json({ error: 'confirm_required', hint: 'أرسل confirm: CLEAN-LEFTOVERS' }, 400);
+  }
+  const app: any = await c.env.DB.prepare('SELECT id, slug FROM apps WHERE id = ?').bind(c.req.param('id')).first();
+  if (!app) return c.json({ error: 'not_found' }, 404);
+  const left = await itemLeftovers(c.env, app);
+  const failed = left.length ? await r2DeleteMany(c.env, left.map((o) => o.key)) : [];
+  const deleted = left.length - failed.length;
+  if (deleted) await recordActivity(c.env, consoleActor(c), `حذف ${deleted} ملفاً قديماً للعنصر «${app.slug}»`, 'delete');
+  return c.json({
+    ok: true, found: left.length, deleted, failed: failed.length,
+    failed_keys: failed.slice(0, 50),
+    bytes: left.reduce((n, o) => n + (o.size || 0), 0),
   });
 });
 

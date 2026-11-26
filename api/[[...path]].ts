@@ -307,6 +307,10 @@ function isValidSlug(s: string): boolean {
   if (!s || s.length > 200 || /[\/\\<>\x00-\x1f]/.test(s) || s.includes('..')) return false;
   return true;
 }
+/* The sitemap belongs at the SITE root (/sitemap.xml), but this Worker is mounted
+ * under /api. Both spellings are therefore served: /api/sitemap.xml from here,
+ * and /sitemap.xml through the Pages site's rewrite.
+ */
 app.use('/apps/:slug/*', async (c, next) => {
   if (!isValidSlug(c.req.param('slug'))) return c.json({ error: 'invalid_slug' }, 400);
   await next();
@@ -748,11 +752,15 @@ async function bumpDownloadCount(env: Env): Promise<number> {
     const lr: any = await env.DB.prepare("SELECT downloads FROM app_updates WHERE id = 'current'").first();
     legacy = Number(lr?.downloads) || 0;
   } catch {}
-  const sr: any = await env.DB.prepare("SELECT downloads FROM app_download_stats WHERE id = 'current'").first();
-  const durable = Number(sr?.downloads) || 0;
-  const total = Math.max(legacy, durable) + 1;
-  await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads, restored) VALUES ('current', ?, 1)
-    ON CONFLICT(id) DO UPDATE SET downloads = excluded.downloads, restored = 1`).bind(total).run();
+  /* One write, not three. This runs on the download path, where the visitor is
+   * waiting for a redirect: reading the durable row and then writing it back
+   * cost two extra network hops (and could drift under concurrency). A single
+   * atomic UPSERT increments in place; the legacy column is then set from the
+   * value D1 itself reports, in the same round trip budget as before. */
+  const res: any = await env.DB.prepare(`INSERT INTO app_download_stats (id, downloads, restored) VALUES ('current', ?, 1)
+    ON CONFLICT(id) DO UPDATE SET downloads = downloads + 1, restored = 1
+    RETURNING downloads`).bind(Math.max(legacy, 0) + 1).first().catch(() => null);
+  const total = Number(res?.downloads) || Math.max(legacy, 0) + 1;
   await env.DB.prepare("UPDATE app_updates SET downloads = ? WHERE id = 'current'").bind(total).run().catch(() => {});
   return total;
 }
@@ -2603,6 +2611,17 @@ const INSIGHTS_SCHEMA = [
   `ALTER TABLE user_demographics ADD COLUMN phone TEXT`,
   `ALTER TABLE user_demographics ADD COLUMN age INTEGER`,
 ];
+const analyticsReady = new WeakSet<object>();
+/** The same one-time schema pass, but memoised on the DATABASE object.
+ *
+ *  `env.DB` is a D1 binding proxy: `env.DB === env.DB` is false, so a WeakSet
+ *  keyed on it never remembers anything, and every download re-issued the whole
+ *  table-creation batch. The binding is stable per request, hence `c.env.DB`
+ *  is reused for the guard and the writes. */
+async function ensureAnalyticsTables(env: Env) {
+  const db: any = (env as any).DB;
+  await ensureInsightsTables(db);
+}
 const insightsReady = new WeakSet<object>();
 async function ensureInsightsTables(db: any) {
   if (!db || insightsReady.has(db)) return;
@@ -2680,12 +2699,16 @@ async function publicSettings(env: Env): Promise<Record<string, string>> {
   return out;
 }
 async function recordDownloadEvent(env: Env, slug: string, platform = 'web') {
-  await ensureInsightsTables(env.DB);
+  // Bound to a local so the WeakSet guard actually does its job: `env.DB` is a
+  // fresh proxy object on every access, so memoising on it never hit and one
+  // download walked ten CREATE TABLE statements before its INSERT.
+  const db: any = (env as any).DB;
+  await ensureAnalyticsTables(env);
   const ts = nowSec();
   const d = new Date(ts * 1000);
   const day = d.toISOString().slice(0, 10);
   try {
-    await env.DB.prepare('INSERT INTO download_events (id, slug, day, hour, ts, platform) VALUES (?, ?, ?, ?, ?, ?)')
+    await db.prepare('INSERT INTO download_events (id, slug, day, hour, ts, platform) VALUES (?, ?, ?, ?, ?, ?)')
       .bind(String(crypto.randomUUID()), sanitizeText(slug, 120), day, d.getUTCHours(), ts, platform).run();
   } catch { /* analytics must never block a download */ }
 }
@@ -2733,6 +2756,46 @@ app.get('/media/*', async (c) => {
   } catch {
     return c.json({ error: 'media_unavailable' }, 502);
   }
+});
+
+/* =========================================================================
+   GET /sitemap.xml — it was a 404
+   -------------------------------------------------------------------------
+   The store had no sitemap at all (checked: /sitemap.xml → 404), so search
+   engines had to guess which pages exist and never learned that a published
+   app is a page. This renders the static pages plus every visible item, with
+   the item's real updated_at, and is cached at the edge for an hour.
+   ========================================================================= */
+app.get('/sitemap.xml', async (c) => {
+  const base = `https://${storeDomain(c.env)}`;
+  let items: any[] = [];
+  try {
+    const hidden = await hiddenSlugs(c.env);
+    const rows: any = await c.env.DB.prepare(
+      'SELECT slug, updated_at FROM apps ORDER BY updated_at DESC LIMIT 2000',
+    ).all();
+    items = (rows.results || []).filter((r: any) => r.slug && !hidden.has(String(r.slug)));
+  } catch { /* a sitemap must never 500 */ }
+  const page = (loc: string, lastmod: string | null, priority: string) =>
+    `<url><loc>${base}${loc}</loc>${lastmod ? `<lastmod>${lastmod}</lastmod>` : ''}`
+    + `<changefreq>daily</changefreq><priority>${priority}</priority></url>`;
+  const iso = (ts: any) => {
+    const n = Number(ts) || 0;
+    if (!n) return null;
+    return new Date(n > 1e12 ? n : n * 1000).toISOString().slice(0, 10);
+  };
+  const body = '<?xml version="1.0" encoding="UTF-8"?>'
+    + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    + page('/', null, '1.0') + page('/apps', null, '0.9') + page('/games', null, '0.9')
+    + page('/featured', null, '0.7') + page('/search', null, '0.6')
+    + page('/download', null, '0.8') + page('/support', null, '0.5')
+    + page('/about', null, '0.4') + page('/privacy', null, '0.3') + page('/terms', null, '0.3')
+    + items.map((r: any) => page(`/app?slug=${encodeURIComponent(r.slug)}`, iso(r.updated_at), '0.8')).join('')
+    + '</urlset>';
+  return c.body(body, 200, {
+    'Content-Type': 'application/xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
 });
 
 app.get('/settings', async (c) => {
@@ -4396,6 +4459,98 @@ app.post('/admin/r2/orphans', async (c) => {
      • whether the database can answer from a replica (a single-region D1 costs
        a full hop per query, and the catalogue page makes five).
    ========================================================================= */
+/* =========================================================================
+   GET /admin/storage/check — «هل الروابط والملفات في الحاوية الجديدة سليمة؟»
+   -------------------------------------------------------------------------
+   The owner replaced the bucket with a new one. A replaced bucket fails in a way
+   nothing else reports: the website keeps answering 200, the row keeps its key,
+   and only the picture is missing — so this walks what D1 points at and asks the
+   bucket itself whether each file is really there.
+
+   It checks: every apk/icon/feature key, every screenshot, every video
+   thumbnail, and (reported separately) the objects that no row mentions. The
+   answer is per item, so a single missing icon is named instead of summarised.
+   ========================================================================= */
+app.get('/admin/storage/check', async (c) => {
+  const cols = (r: any) => ({
+    id: String(r.id || ''), slug: String(r.slug || ''), name: String(r.name || ''),
+    apk_key: r.apk_key || null, icon_key: r.icon_key || null, feature_key: r.feature_key || null,
+  });
+  const rows: any = await c.env.DB.prepare(
+    'SELECT id, slug, name, apk_key, icon_key, feature_key FROM apps',
+  ).all().catch(() => ({ results: [] }));
+  const apps = (rows.results || []).map(cols);
+  const shots: any = await c.env.DB.prepare('SELECT id, app_id, r2_key FROM screenshots')
+    .all().catch(() => ({ results: [] }));
+  const vids: any = await c.env.DB.prepare('SELECT id, app_id, thumb_key FROM app_videos')
+    .all().catch(() => ({ results: [] }));
+  const release: any = await c.env.DB.prepare("SELECT apk_url, logo_key FROM app_updates WHERE id = 'current'")
+    .first().catch(() => null);
+
+  const wanted = new Map<string, string[]>();   // key -> who needs it
+  const need = (key: string, who: string) => {
+    if (!key) return;
+    const list = wanted.get(key) || [];
+    list.push(who);
+    wanted.set(key, list);
+  };
+  for (const a of apps) {
+    need(a.apk_key, `${a.slug} (apk)`);
+    need(a.icon_key, `${a.slug} (icon)`);
+    need(a.feature_key, `${a.slug} (feature)`);
+  }
+  for (const s of shots.results || []) need(s.r2_key, `screenshot ${s.id}`);
+  for (const v of vids.results || []) need(v.thumb_key, `video ${v.id}`);
+
+  // Ask the bucket about each key. r2Head is one request per object; the list is
+  // bounded so the console can answer inside the Worker's time budget.
+  const keys = [...wanted.keys()].slice(0, 400);
+  const missing: { key: string; used_by: string[] }[] = [];
+  const sizes: Record<string, number> = {};
+  await Promise.all(keys.map(async (key) => {
+    const head = await r2Head(c.env, key).catch(() => null);
+    if (!head) missing.push({ key, used_by: wanted.get(key) || [] });
+    else sizes[key] = head.size;
+  }));
+
+  // What is in the bucket that nothing points at (the leftover pile).
+  const objects = await r2List(c.env, '', 5000).catch(() => []);
+  const known = new Set(wanted.keys());
+  const strays = objects.filter((o) => !known.has(o.key));
+
+  const releaseKey = (() => {
+    const url = String(release?.apk_url || '');
+    if (!url) return null;
+    const base = String(c.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+    return base && url.startsWith(base + '/') ? decodeURIComponent(url.slice(base.length + 1)) : null;
+  })();
+  let releaseOk: boolean | null = null;
+  if (releaseKey) releaseOk = !!(await r2Head(c.env, releaseKey).catch(() => null));
+
+  const total = keys.length + (releaseKey ? 1 : 0);
+  const missingTotal = missing.length + (releaseOk === false ? 1 : 0);
+  return c.json({
+    ok: missingTotal === 0,
+    bucket: {
+      name: r2Bucket(c.env),
+      account: c.env.R2_ACCOUNT_ID || null,
+      public_url: c.env.R2_PUBLIC_URL || null,
+      objects_listed: objects.length,
+      note: 'الملفات تُخدَم الآن عبر نطاق المتجر (/api/media) — لا يوجد رابط عام مكشوف للصور.',
+    },
+    checked: { apps: apps.length, screenshots: (shots.results || []).length,
+      videos: (vids.results || []).length, files: total },
+    missing_files: missing,
+    missing_total: missingTotal,
+    release: releaseKey ? { key: releaseKey, present: releaseOk } : null,
+    strays: { count: strays.length, bytes: strays.reduce((n, o) => n + (o.size || 0), 0),
+      samples: strays.slice(0, 50).map((o) => o.key) },
+    verdict: missingTotal === 0
+      ? 'كل ملف يشير إليه الموقع موجود فعلاً في الحاوية — لا رابط ميت.'
+      : `${missingTotal} ملفاً مفقوداً — الروابط أدناه ميتة وتحتاج إعادة رفع أو تصحيح المسار.`,
+  });
+});
+
 app.get('/admin/media/diag', async (c) => {
   const time = async (fn: () => Promise<any>) => {
     const t0 = Date.now();

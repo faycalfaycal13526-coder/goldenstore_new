@@ -3581,6 +3581,46 @@
       } finally { orphanDelete.disabled = false; }
     };
 
+    /* ── الحاوية الجديدة: هل كل ملف موجود فعلاً؟ ─────────────────────────────
+     * The owner replaced the bucket. A replaced bucket is silent: the site keeps
+     * answering 200, the row keeps its key, and only the picture is missing. This
+     * asks the bucket about every key the store points at, and names each miss.
+     */
+    const checkOut = el('div', { style: { fontSize: '13px', lineHeight: '1.8', width: '100%' } });
+    const checkRun = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('check'), 'افحص الحاوية الجديدة');
+    const checkBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } }, checkRun, checkOut);
+
+    checkRun.onclick = async () => {
+      checkRun.disabled = true;
+      checkOut.textContent = 'أفحص كل ملف…';
+      try {
+        const r = await api('/api/admin/storage/check', { timeoutMs: 120000 });
+        checkOut.innerHTML = '';
+        const c1 = r.checked || {}, b = r.bucket || {};
+        checkOut.append(
+          el('div', null, `الحاوية: ${b.name || '—'} · الملفات المفحوصة: ${formatNum(c1.files || 0)} من ${formatNum(c1.apps || 0)} عنصراً`),
+          el('div', { style: { color: r.ok ? 'var(--success)' : 'var(--danger)' } }, r.verdict || ''),
+        );
+        if ((r.missing_files || []).length) {
+          const t = el('table', { class: 'table admin-table', style: { marginTop: '8px' } },
+            el('thead', null, el('tr', null, el('th', null, 'الملف المفقود'), el('th', null, 'يستخدمه'))));
+          const tb = el('tbody');
+          (r.missing_files || []).forEach((m) => tb.append(el('tr', null,
+            el('td', null, m.key), el('td', null, (m.used_by || []).join(' · ')))));
+          t.append(tb); checkOut.append(t);
+        }
+        if (r.release) {
+          checkOut.append(el('div', null, `ملف تنزيل المتجر: ${r.release.present ? 'موجود' : 'مفقود'} (${r.release.key})`));
+        }
+        if ((r.strays || {}).count) {
+          checkOut.append(el('div', { class: 'hint', style: { marginTop: '6px' } },
+            `ملفات لا يشير إليها أي عنصر: ${formatNum(r.strays.count)} (${formatBytes(r.strays.bytes || 0)}) — زر «رتّب التخزين» يحذفها.`));
+        }
+      } catch (e) {
+        checkOut.textContent = (e && e.status === 401) ? 'انتهت الجلسة، أعد الدخول.' : 'تعذّر الفحص الآن.';
+      } finally { checkRun.disabled = false; }
+    };
+
     /* ── «لماذا الثقل؟» — measured, not argued ────────────────────────────────
      * Owner: «اضن سبب الثقل الموقع لانه بعيد» (bucket in Western North America).
      * Distance decides milliseconds; what a visitor actually feels is decided by
@@ -3835,6 +3875,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('check'), 'الحاوية الجديدة — هل كل ملف موجود؟'),
+        el('div', { class: 'hint' }, 'يفحص كل ملف يشير إليه الموقع (APK، أيقونة، صورة عرضية، لقطات، أغلفة فيديو) ويسأل الحاوية نفسها: هل الملف موجود؟ أي رابط ميت يُذكر بالاسم.'),
+        checkBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('trending'), 'لماذا الثقل؟ (قياس لا تخمين)'),
         el('div', { class: 'hint' }, 'المسافة تحدد أجزاء من الثانية؛ ما يشعر به الزائر يحدده شيئان: هل يستطيع الهاتف الاحتفاظ بالصور، وكم قفزة شبكة تحتاج الصفحة. اضغط الزر واقرأ الأرقام.'),

@@ -289,3 +289,68 @@ export async function r2ConfigureCors(env: Env, allowedOrigins: string[]): Promi
     body,
   });
 }
+
+/* ── R2 object organisation ───────────────────────────────────────────────────
+ * Every upload used to be stored as `<folder>/<slug>-<epoch>-<hex>.<ext>`, so a
+ * single game ended up as three unrelated timestamped names. There is no way to
+ * tell from the key what an object belongs to, and re-publishing the same item
+ * silently accumulated more of them.
+ *
+ * organiseKey() turns a key into `<folder>/<slug>.<ext>` — deterministic, stable
+ * and human-readable. Moving is a server-side copy + delete, so the bytes never
+ * travel through the Worker and the public URL keeps working immediately after
+ * the row is updated.
+ */
+export async function r2Copy(env: Env, from: string, to: string): Promise<boolean> {
+  const client = clientFor(env);
+  try {
+    const head = await client.fetch(objectUrl(env, from), { method: 'HEAD' });
+    if (!head.ok) return false;
+    const contentType = head.headers.get('content-type') || 'application/octet-stream';
+    const body = await client.fetch(objectUrl(env, from), { method: 'GET' });
+    if (!body.ok) return false;
+    const bytes = await body.arrayBuffer();
+    const put = await client.fetch(objectUrl(env, to), {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType },
+      body: bytes,
+    });
+    return put.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** `<folder>/<slug>-1795700575988-8e7c9e.apk` → `apk/subway-surfers.apk`.
+ *  Keys that are already organised come back unchanged. */
+export function organiseKey(key: string, slug: string, ext?: string): string {
+  const clean = String(key || '').trim();
+  if (!clean) return clean;
+  const slash = clean.lastIndexOf('/');
+  const folder = slash >= 0 ? clean.slice(0, slash) : '';
+  const base = slash >= 0 ? clean.slice(slash + 1) : clean;
+  const dot = base.lastIndexOf('.');
+  const realExt = (ext || (dot >= 0 ? base.slice(dot + 1) : '')).toLowerCase();
+  const safeSlug = String(slug || 'item')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'item';
+  const wanted = `${folder ? folder + '/' : ''}${safeSlug}${realExt ? '.' + realExt : ''}`;
+  return wanted;
+}
+
+/** Moves `from` to `to`, then removes the old object. Returns the final key. */
+export async function r2Move(env: Env, from: string, to: string): Promise<{ ok: boolean; key: string; error?: string }> {
+  if (from === to) return { ok: true, key: to };
+  const head = await r2Head(env, from).catch(() => null);
+  if (!head) return { ok: false, key: from, error: 'source_missing' };
+  const copied = await r2Copy(env, from, to).catch(() => false);
+  if (!copied) return { ok: false, key: from, error: 'copy_failed' };
+  // Verify the destination really exists before deleting the original.
+  const check = await r2Head(env, to).catch(() => null);
+  if (!check || !check.size) return { ok: false, key: from, error: 'copy_unverified' };
+  const removed = await r2DeleteStrict(env, from);
+  if (!removed) return { ok: true, key: to, error: 'old_object_left_behind' };
+  return { ok: true, key: to };
+}

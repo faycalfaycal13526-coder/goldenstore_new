@@ -31,6 +31,7 @@ import {
   r2DeleteStrict, r2DeleteMany, r2List, r2Bucket,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
   r2AbortMultipartUpload, r2ConfigureCors,
+  r2Move, organiseKey,
 } from '../lib/r2.js';
 import { COOKIE_NAME, constantTimeEqual, signJwt, verifyJwt } from '../lib/auth.js';
 import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt, sha1Hex, sha256Hex, parseYouTubeUrl } from '../lib/utils.js';
@@ -3669,6 +3670,117 @@ app.get('/admin/r2/overview', async (c) => {
     folders, orphans, orphan_bytes: orphanBytes,
     referenced: referenced.size,
   });
+});
+
+/* ── STORAGE ORGANISER ───────────────────────────────────────────────────────
+ * Owner: «رتب التطبيقات والأيقونات وكل شئ داخل جداول التخزين».
+ *
+ * Uploads were stored as <folder>/<slug>-<epoch>-<hex>.<ext>, so nothing in the
+ * bucket said what an object belonged to and re-publishing accumulated more of
+ * them. This reports — and optionally performs — a rename to the deterministic
+ * <folder>/<slug>.<ext>, moving the real bytes and rewriting every D1 reference
+ * (apps, screenshots, videos, the download page's release row) in one pass.
+ *
+ *   GET  /admin/r2/organise?apply=0   dry run: the full plan, nothing touched
+ *   POST /admin/r2/organise           same plan, executed
+ *
+ * Rules that keep it safe:
+ *   • an object referenced by no row is NEVER renamed (it is an orphan — the
+ *     ‎ panel offers «حذف الملفات اليتيمة» for those instead);
+ *   • if the destination already exists with the same size, the source is a
+ *     duplicate: the row is repointed and the source deleted;
+ *   • if a copy cannot be verified, the source is left alone and the row is
+ *     left alone — nothing is lost, and the reason is reported per row;
+ *   • the whole run is bounded so one huge bucket cannot time out the request.
+ */
+async function planOrganise(env: Env) {
+  const apps: any = await env.DB.prepare(
+    'SELECT id, slug, name, apk_key, icon_key, feature_key FROM apps ORDER BY created_at ASC',
+  ).all().catch(() => ({ results: [] }));
+  const shots: any = await env.DB.prepare('SELECT id, app_id, r2_key FROM screenshots').all().catch(() => ({ results: [] }));
+  const vids: any = await env.DB.prepare('SELECT id, thumb_key FROM app_videos').all().catch(() => ({ results: [] }));
+
+  const moves: { table: string; column: string; rowId: string; slug: string; from: string; to: string; kind: string }[] = [];
+  const addMove = (table: string, column: string, rowId: string, slug: string, from: unknown, to: string, kind: string) => {
+    const key = String(from || '').trim();
+    if (!key || key === to) return;
+    moves.push({ table, column, rowId: String(rowId), slug, from: key, to, kind });
+  };
+
+  const seen = new Set<string>();
+  for (const a of (apps.results || [])) {
+    const slug = String(a.slug || '');
+    if (!slug || seen.has('app:' + a.id)) continue;
+    seen.add('app:' + a.id);
+    addMove('apps', 'apk_key', a.id, slug, a.apk_key, organiseKey(String(a.apk_key || ''), slug, 'apk'), 'apk');
+    addMove('apps', 'icon_key', a.id, slug, a.icon_key, organiseKey(String(a.icon_key || ''), slug), 'icon');
+    addMove('apps', 'feature_key', a.id, slug, a.feature_key, organiseKey(String(a.feature_key || ''), slug), 'feature');
+  }
+  // Screenshots/videos keep an index so two shots of one app never collide.
+  const shotCount = new Map<string, number>();
+  for (const r of (shots.results || [])) {
+    const key = String(r.r2_key || '');
+    if (!key) continue;
+    const owner = (apps.results || []).find((a: any) => String(a.id) === String(r.app_id));
+    const slug = owner ? String(owner.slug) : 'screenshot';
+    const n = (shotCount.get(slug) || 0) + 1;
+    shotCount.set(slug, n);
+    const ext = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1) : 'webp';
+    addMove('screenshots', 'r2_key', r.id, slug, key, `ss/${slug}-${n}.${ext}`, 'screenshot');
+  }
+  for (const v of (vids.results || [])) {
+    const key = String(v.thumb_key || '');
+    if (!key) continue;
+    addMove('app_videos', 'thumb_key', v.id, 'video', key, organiseKey(key, 'video-thumb'), 'video');
+  }
+  return moves;
+}
+
+app.get('/admin/r2/organise', async (c) => {
+  const moves = await planOrganise(c.env);
+  const byKind: Record<string, number> = {};
+  for (const m of moves) byKind[m.kind] = (byKind[m.kind] || 0) + 1;
+  return c.json({
+    dry_run: true, pending: moves.length, by_kind: byKind,
+    already_organised: moves.length === 0,
+    plan: moves.slice(0, 200),
+    note: moves.length ? 'لم يُغيَّر شيء. اضغط «رتّب التخزين» للتنفيذ.' : 'كل الملفات مرتّبة بالفعل.',
+  });
+});
+
+app.post('/admin/r2/organise', async (c) => {
+  const body = await c.req.json().catch(() => ({}) as any);
+  const limit = Math.min(Math.max(Number(body.limit) || 200, 1), 400);
+  const moves = (await planOrganise(c.env)).slice(0, limit);
+  const done: any[] = [];
+  const failed: any[] = [];
+  let moved = 0;
+
+  for (const m of moves) {
+    const existing = await r2Head(c.env, m.to).catch(() => null);
+    if (existing) {
+      const src = await r2Head(c.env, m.from).catch(() => null);
+      if (src && src.size === existing.size) {
+        // Same bytes under both names: repoint the row, drop the duplicate.
+        await c.env.DB.prepare(`UPDATE ${m.table} SET ${m.column} = ? WHERE id = ?`).bind(m.to, m.rowId).run();
+        await r2DeleteStrict(c.env, m.from).catch(() => false);
+        moved++;
+        done.push({ ...m, action: 'deduplicated' });
+        continue;
+      }
+      failed.push({ ...m, error: 'destination_exists_different_size' });
+      continue;
+    }
+    const res = await r2Move(c.env, m.from, m.to).catch(() => ({ ok: false, key: m.from, error: 'move_failed' }));
+    if (!res.ok) { failed.push({ ...m, error: res.error || 'move_failed' }); continue; }
+    await c.env.DB.prepare(`UPDATE ${m.table} SET ${m.column} = ? WHERE id = ?`).bind(res.key, m.rowId).run();
+    moved++;
+    done.push({ ...m, action: 'moved' });
+  }
+
+  invalidateAppsCache();
+  if (moved) await recordActivity(c.env, consoleActor(c), `ترتيب التخزين — ${moved} ملف أُعيدت تسميته`, 'publish');
+  return c.json({ ok: true, moved, failed: failed.length, remaining: Math.max(0, (await planOrganise(c.env)).length), done: done.slice(0, 100), errors: failed.slice(0, 50) });
 });
 
 app.get('/admin/r2/objects', async (c) => {

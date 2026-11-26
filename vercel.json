@@ -80,7 +80,7 @@
         },
         {
             "source": "/api/:path*",
-            "destination": "https://api.goldenstore.online/api/:path*"
+            "destination": "https://goldenstore-api.faycalfaycal13526.workers.dev/api/:path*"
         },
         {
             "source": "/points",

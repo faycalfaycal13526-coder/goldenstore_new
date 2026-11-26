@@ -3469,6 +3469,61 @@
       finally { upBtn.disabled = false; }
     };
 
+    /* ── Organise the bucket ──────────────────────────────────────────────────
+     * Owner: «رتب التطبيقات والأيقونات وكل شئ داخل جداول التخزين». Uploads were
+     * stored as <slug>-<epoch>-<hex>, so nothing in the bucket said what an object
+     * belonged to. This shows the exact plan first (dry run), then performs it:
+     * bytes are moved, every D1 reference is rewritten, duplicates collapse, and
+     * unreferenced objects are never touched.
+     */
+    const organiseOut = el('div', { class: 'hint', style: { marginTop: '8px', lineHeight: '1.7' } });
+    const organisePreview = el('button', { class: 'btn btn-sm', type: 'button' }, ico('grid'), 'اعرض خطة الترتيب');
+    const organiseApply = el('button', { class: 'btn btn-primary btn-sm', type: 'button', disabled: true }, ico('check'), 'رتّب التخزين');
+    const organiseBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } },
+      organisePreview, organiseApply, organiseOut);
+
+    organisePreview.onclick = async () => {
+      organisePreview.disabled = true;
+      organiseOut.textContent = 'أقرأ محتويات الحاوية…';
+      try {
+        const plan = await api('/api/admin/r2/organise', { timeoutMs: 120000 });
+        if (!plan.pending) {
+          organiseOut.textContent = 'كل الملفات مرتّبة بالفعل — لا شيء يحتاج تغييراً.';
+          organiseApply.disabled = true;
+        } else {
+          const kinds = Object.entries(plan.by_kind || {}).map(([k, n]) => `${k}: ${n}`).join(' · ');
+          const lines = (plan.plan || []).slice(0, 12).map((m) => `• ${m.from}  →  ${m.to}`).join('\n');
+          organiseOut.innerHTML = '';
+          organiseOut.append(
+            el('div', null, `${plan.pending} ملف يحتاج ترتيباً (${kinds}). لم يُغيَّر شيء بعد.`),
+            el('pre', { style: { marginTop: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', direction: 'ltr', textAlign: 'left', opacity: '.85' } }, lines),
+          );
+          organiseApply.disabled = false;
+        }
+      } catch (e) {
+        organiseOut.textContent = (e && e.status >= 500)
+          ? 'الخادم لا يستجيب الآن — لم يتغيّر شيء.'
+          : 'تعذّر قراءة الخطة: ' + ((e && e.message) || '');
+      } finally { organisePreview.disabled = false; }
+    };
+
+    organiseApply.onclick = async () => {
+      if (!confirm('إعادة تسمية الملفات وترتيبها؟ الروابط في قاعدة البيانات ستُحدَّث معها، والملفات اليتيمة لن تُلمس.')) return;
+      organiseApply.disabled = true;
+      organisePreview.disabled = true;
+      organiseOut.textContent = 'أرتّب… قد يأخذ دقيقة.';
+      try {
+        const res = await api('/api/admin/r2/organise', { method: 'POST', body: { limit: 400 }, timeoutMs: 240000 });
+        organiseOut.textContent = res.failed
+          ? `تم ترتيب ${res.moved} ملفاً، وتعذّر ${res.failed} (بقي ${res.remaining}).`
+          : `تم ترتيب ${res.moved} ملفاً بالكامل — بقي ${res.remaining}.`;
+        toast(`تم ترتيب ${res.moved} ملفاً`, 'success');
+        state.selected.clear(); browseBtn.click(); load();
+      } catch (e) {
+        organiseOut.textContent = 'تعذّر الترتيب: ' + ((e && e.message) || 'حاول لاحقاً');
+      } finally { organiseApply.disabled = false; organisePreview.disabled = false; }
+    };
+
     // full wipe
     const wipePhrase = el('input', { class: 'input', type: 'text', placeholder: 'DELETE-ALL', 'aria-label': 'DELETE-ALL' });
     const wipeBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', disabled: true }, ico('trash'), 'مسح كل الملفات');
@@ -3516,6 +3571,10 @@
         el('div', { class: 'panel-head' }, ico('search'), 'استعراض الملفات'),
         el('div', { class: 'row-actions' }, prefixInput, browseBtn, delSelBtn),
         el('div', { class: 'mt-md' }, listBox)),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('grid'), 'ترتيب التخزين'),
+        el('div', { class: 'hint' }, 'يعيد تسمية الملفات إلى «مجلد/اسم-التطبيق.امتداد» ويحدّث كل رابط في قاعدة البيانات. الملفات غير المستخدمة لا تُلمس.'),
+        organiseBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('upload'), 'رفع ملف'),
         el('div', { class: 'row-actions' }, upKey, upFile, upBtn),

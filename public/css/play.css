@@ -552,8 +552,9 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
 .d-titles { flex: 1; min-width: 0; padding-top: 2px; }
 .d-name { font-size: 24px; font-weight: 700; line-height: 1.2; unicode-bidi: isolate; word-break: break-word; }
 .d-dev { color: var(--nav); font-size: 14px; margin-top: 4px; font-weight: 500; unicode-bidi: isolate; }
-/* The developer name is tappable now: it must LOOK tappable (the owner's blue
-   link) and still be readable inside an RTL line with Latin names. */
+/* The developer name is tappable, and the owner wants NO underline — it should
+   look exactly like the blue text it always was. Readable inside an RTL line
+   with Latin names. */
 .d-dev-link {
   display: inline-block;
   color: var(--nav);
@@ -563,7 +564,18 @@ html[dir="ltr"] .more-bar > .icon-btn .icon { transform: scaleX(-1); }
   transition: opacity .15s ease, background .15s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.d-dev-link:hover { text-decoration: underline; }
+/* No underline, ever — not on hover and not on tap. The owner asked for the
+   name to simply look like the blue text it always was; the tap feedback is the
+   brief dimming below, which needs no line through the name. */
+.d-dev-link,
+.d-dev-link:hover,
+.d-dev-link:active,
+.d-dev-link:focus,
+.d-dev-link:visited {
+  text-decoration: none;
+  -webkit-text-decoration: none;
+  border-bottom: 0;
+}
 .d-dev-link:active { opacity: .65; }
 .d-dev-link:focus-visible { outline: 2px solid var(--nav); outline-offset: 2px; }
 

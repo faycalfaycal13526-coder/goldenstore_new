@@ -177,6 +177,7 @@
       { key: 'activity', icon: 'clock', label: t('سجل النشاطات') },
       { key: 'team', icon: 'shield', label: t('المشرفون والصلاحيات') },
       { key: 'backup', icon: 'storage', label: t('النسخ الاحتياطي') },
+      { key: 'storage-cleanup', icon: 'cloud', label: t('تنظيف كلاود') },
       { key: 'preview', icon: 'external', label: t('معاينة الأجهزة') },
       { key: 'settings', icon: 'settings', label: 'إعدادات المتجر' },
       { key: 'languages', icon: 'globe', label: t('اللغات') },
@@ -456,6 +457,25 @@
 
   // After a client-side timeout, decide whether the publish actually happened.
   // Prevents the old "Internet error" that showed up while the app was created.
+  /* A stable key for one publish attempt: the same item + the same device for
+     the same minute must never become two rows. */
+  /* «تم الحذف» used to be printed even when cloud files survived. Now the
+     message states the file count, and points at the cleanup panel when some
+     file could not be removed. */
+  function deleteResultText(del) {
+    if (!del || typeof del.files !== 'number') return 'تم الحذف';
+    if (!del.files) return 'تم الحذف (لا ملفات مرتبطة)';
+    if (del.failed_files) {
+      return `تم الحذف من الموقع، لكن ${del.failed_files} ملف بقي في كلاود — شغّل «تنظيف كلاود» لإزالته`;
+    }
+    return `تم الحذف نهائياً — أُزيل ${del.deleted_files} ملف من كلاود`;
+  }
+
+  function makePublishKey(payload) {
+    const stamp = (window.__gsPublishStamp || (window.__gsPublishStamp = Date.now()));
+    return `${payload.package_name || payload.name || 'app'}|${payload.apk_key || ''}|${stamp}`;
+  }
+
   async function findCreatedApp(name) {
     if (!name) return null;
     const want = String(name).trim().toLowerCase();
@@ -937,6 +957,7 @@
     else if (activeTab === 'activity') await renderActivity(body);
     else if (activeTab === 'team') await renderTeam(body);
     else if (activeTab === 'backup') await renderBackup(body);
+    else if (activeTab === 'storage-cleanup') await renderStorageCleanup(body);
     else if (activeTab === 'quality') await renderQuality(body);
     else if (activeTab === 'preview') await renderDevicePreview(body);
     else if (activeTab === 'settings') await renderStoreSettings(body);
@@ -3199,6 +3220,116 @@
     );
   }
 
+  /* ===================== تنظيف كلاود =====================
+     The owner could see files in the Cloudflare console that no longer existed
+     in the dashboard. This panel compares the bucket with the database and
+     removes what is left: orphan files, duplicate rows for the same package,
+     and reports rows whose file is missing (a broken download).
+     Every action starts as a DRY RUN and lists exactly what it would remove. */
+  async function renderStorageCleanup(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    const panel = (title, icon) => el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, ico(icon, 'icon'), title));
+    const out = el('div', { style: { fontSize: '13px', lineHeight: '1.7', whiteSpace: 'pre-wrap' } });
+
+    const auditBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' },
+      ico('search'), 'فحص كلاود (بدون حذف)');
+    const dupBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' },
+      ico('copy'), 'التكرارات (بدون حذف)');
+    const missingBtn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' },
+      ico('eye'), 'ملفات مفقودة');
+
+    const run = async (btn, payload, render) => {
+      btn.disabled = true;
+      out.textContent = 'جارٍ الفحص…';
+      try {
+        const res = await api('/api/admin/cleanup', { method: 'POST', body: { dry_run: true, ...payload }, timeoutMs: 120000 });
+        out.textContent = '';
+        out.append(render(res));
+      } catch (e) {
+        out.textContent = 'تعذّر الفحص: ' + ((e && e.message) || 'خطأ');
+      } finally { btn.disabled = false; }
+    };
+
+    auditBtn.onclick = () => run(auditBtn, { orphans: true }, (res) => {
+      const o = res.orphans || {};
+      const wrap = el('div', null);
+      wrap.append(el('div', null, `الملفات في كلاود: ${formatNum(o.scanned || 0)} · لا تشير إليها أي قاعدة بيانات: ${formatNum(o.count || 0)} · الحجم: ${formatBytes(o.bytes || 0)}`));
+      if (o.count) {
+        wrap.append(el('div', { class: 'hint', style: { marginTop: '8px' } }, (o.keys || []).join('\n')));
+        const del = el('button', { class: 'btn btn-danger btn-sm mt-md', type: 'button' }, ico('trash'), 'حذف هذه الملفات من كلاود');
+        del.onclick = async () => {
+          if (!confirm(`حذف ${o.count} ملفاً من كلاود نهائياً؟`)) return;
+          del.disabled = true;
+          try {
+            const r2 = await api('/api/admin/cleanup', { method: 'POST', body: { dry_run: false, orphans: true }, timeoutMs: 120000 });
+            toast(`أُزيل ${r2.orphans.deleted || 0} ملفاً` + ((r2.orphans.failed) ? ` — تعذّر ${r2.orphans.failed}` : ''), 'success');
+            renderStorageCleanup(body);
+          } catch (e) { toast('فشل الحذف', 'error'); del.disabled = false; }
+        };
+        wrap.append(del);
+      } else {
+        wrap.append(el('div', { class: 'hint' }, 'كلاود نظيف — لا ملفات يتيمة.'));
+      }
+      return wrap;
+    });
+
+    dupBtn.onclick = async () => {
+      dupBtn.disabled = true; out.textContent = 'جارٍ الفحص…';
+      try {
+        const res = await api('/api/admin/duplicates', { timeoutMs: 60000 });
+        out.textContent = '';
+        const wrap = el('div', null,
+          el('div', null, `مجموعات مكرّرة: ${formatNum(res.groups || 0)} · مساحة مهدورة: ${formatBytes(res.wasted_bytes || 0)}`));
+        if (!res.groups) {
+          wrap.append(el('div', { class: 'hint' }, 'لا تكرارات — كل اسم حزمة يظهر مرة واحدة.'));
+        } else {
+          const keepSel = el('select', { class: 'input', 'aria-label': t('نسخة يجب الإبقاء عليها') },
+            el('option', { value: 'oldest' }, 'أبقِ الأقدم (الأصلي)'),
+            el('option', { value: 'newest' }, 'أبقِ الأحدث'),
+            el('option', { value: 'downloads' }, 'أبقِ الأكثر تنزيلاً'));
+          (res.duplicates || []).forEach((g) => {
+            wrap.append(el('div', { class: 'mt-md' },
+              el('strong', null, g.package_name || '—'), ` — ${g.count} نسخة، يُقترح الإبقاء على «${g.keep_suggestion}»`,
+              el('div', { class: 'hint' }, g.items.map((i) => `${i.slug} (${formatBytes(i.size_bytes)})`).join(' · '))));
+          });
+          const del = el('button', { class: 'btn btn-danger btn-sm mt-md', type: 'button' }, ico('trash'), 'حذف النسخ الزائدة');
+          del.onclick = async () => {
+            if (!confirm('حذف النسخ الزائدة وملفاتها من كلاود؟')) return;
+            del.disabled = true;
+            try {
+              const r2 = await api('/api/admin/cleanup', { method: 'POST', body: { dry_run: false, duplicates: 'delete', keep: keepSel.value }, timeoutMs: 180000 });
+              toast(`نُظّفت ${(r2.duplicates && r2.duplicates.groups) || 0} مجموعة`, 'success');
+              renderStorageCleanup(body);
+            } catch (e) { toast('فشل التنظيف', 'error'); del.disabled = false; }
+          };
+          wrap.append(keepSel, del);
+        }
+        out.append(wrap);
+      } catch (e) {
+        out.textContent = 'تعذّر الفحص: ' + ((e && e.message) || 'خطأ');
+      } finally { dupBtn.disabled = false; }
+    };
+
+    missingBtn.onclick = () => run(missingBtn, { missing: true }, (res) => {
+      const m = res.missing || {};
+      const wrap = el('div', null, el('div', null, `عناصر بلا ملف: ${formatNum(m.count || 0)}`));
+      (m.items || []).forEach((i) => wrap.append(el('div', { class: 'hint' }, `${i.slug} — ${i.reason === 'no_apk_key' ? 'لا يوجد ملف APK' : 'الملف غير موجود في كلاود'}`)));
+      return wrap;
+    });
+
+    body.innerHTML = '';
+    body.append(
+      el('div', { class: 'admin-page-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, 'تنظيف كلاود'),
+          el('p', { class: 'admin-page-sub' }, 'يقارن حاوية R2 بقاعدة البيانات: ملفات يتيمة بعد الحذف، نسخ مكرّرة، وعناصر بلا ملف.'))),
+      el('div', { class: 'panel' },
+        el('div', { class: 'row-actions' }, auditBtn, dupBtn, missingBtn)),
+      el('div', { class: 'panel' }, out),
+    );
+  }
+
   async function renderBackup(body) {
     body.innerHTML = '';
     const file = el('input', { type: 'file', accept: 'application/json,.json', class: 'input',
@@ -3816,9 +3947,10 @@
                 el('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => {
                   if (!confirm(`حذف «${a.name}» نهائياً؟`)) return;
                   try {
-                    await api(`/api/admin/apps/${a.id}`, { method: 'DELETE' });
+                    const del = await api(`/api/admin/apps/${a.id}`, { method: 'DELETE' });
                     logAdminAction(`حذف «${a.name}»`);
-                    toast('تم الحذف', 'success'); renderApp();
+                    toast(deleteResultText(del), (del && del.failed_files) ? 'info' : 'success');
+                    renderApp();
                   } catch { toast('فشل الحذف', 'error'); }
                 } }, ico('trash'), 'حذف'),
               )),
@@ -3911,6 +4043,8 @@
   // -------- new app form --------
   async function renderNewApp(body) {
     body.innerHTML = '';
+    // A fresh visit to the form is a fresh publish attempt.
+    window.__gsPublishStamp = Date.now();
 
     const apkDz = dropzone({ accept: '.apk', label: 'اسحب أو اختر ملف APK' });
     const iconDz = dropzone({ accept: 'image/*', label: 'اختر أيقونة (PNG/JPG)' });
@@ -3933,6 +4067,7 @@
       submitBtn.append(el('div', { class: 'spinner', style: 'width:18px; height:18px; border-width:2px;' }));
 
       let step = 'apk';
+      let publishKey = '';
       try {
         const slugHint = (data.name || 'app').slice(0, 60);
 
@@ -3977,6 +4112,13 @@
         // if it still times out, check whether the app was actually created
         // before telling the owner it failed.
         step = 'create';
+        /* One publish = one idempotency key.
+           The POST can answer slower than the browser waits (the automatic push
+           fans out to every device). Without this key every retry created a
+           SECOND copy of the same item — the «ينشر اثنتين» report. The key is
+           generated once per form submit and reused by the retry below, so the
+           server recognises the replay and returns the row it already made. */
+        payload.idempotency_key = publishKey || (publishKey = makePublishKey(payload));
         let res;
         try {
           res = await api('/api/admin/apps', { method: 'POST', body: payload, timeoutMs: 120000 });
@@ -3989,7 +4131,17 @@
           if (!found) throw e;
           res = found;
         }
-        toast('تم رفع التطبيق بنجاح', 'success');
+        // The server answers `existing: true` when this exact item was already
+        // published (a retried request, or a second copy of the same package).
+        // Saying «تم الرفع» again would be a lie — and is what made one publish
+        // look like two.
+        if (res && res.existing) {
+          toast(res.duplicate
+            ? 'هذا التطبيق منشور بالفعل بنفس اسم الحزمة — فتحنا نسخته الأصلية ولم ننشئ نسخة ثانية'
+            : 'تم النشر بالفعل — فتحنا النسخة الموجودة', 'info');
+        } else {
+          toast('تم رفع التطبيق بنجاح', 'success');
+        }
         activeTab = `edit:${res.id}`;
         renderApp();
       } catch (err) {
@@ -4272,8 +4424,8 @@
         el('button', { class: 'btn btn-danger mt-md', onclick: async () => {
           if (!confirm(`حذف «${app.name}» نهائياً؟`)) return;
           try {
-            await api(`/api/admin/apps/${id}`, { method: 'DELETE' });
-            toast('تم الحذف', 'success');
+            const del = await api(`/api/admin/apps/${id}`, { method: 'DELETE' });
+            toast(deleteResultText(del), (del && del.failed_files) ? 'info' : 'success');
             activeTab = 'apps'; renderApp();
           } catch { toast('فشل الحذف', 'error'); }
         } }, ico('trash'), 'حذف التطبيق نهائياً'),

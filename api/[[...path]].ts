@@ -28,6 +28,7 @@ import {
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
+  r2DeleteStrict, r2DeleteMany, r2List,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
   r2AbortMultipartUpload, r2ConfigureCors,
 } from '../lib/r2.js';
@@ -2835,6 +2836,19 @@ app.post('/admin/app-update', async (c) => {
   }
   if (!apk_url) return c.json({ error: 'apk_required' }, 400);
 
+  /* The PREVIOUS build's file is removed once the new one is live.
+     Nothing used to delete it, so every «نشر التحديث» left another
+     `goldenstore-app-….apk` in the bucket while the dashboard showed one row —
+     the owner's screenshot of the Cloudflare console, where files pile up and
+     deleting the item in the dashboard does not remove them. Old builds are
+     kept for 7 days so a client that is mid-update can still finish, then the
+     row is dropped from `app_update_releases` and the file with it. */
+  let previousKey = '';
+  try {
+    const prev: any = await c.env.DB.prepare("SELECT apk_key FROM app_updates WHERE id = 'current'").first();
+    previousKey = String(prev?.apk_key || '');
+  } catch { /* first publish */ }
+
   // UPSERT (never REPLACE): publishing a new build must NOT wipe the real
   // download total. `downloads` is deliberately absent from the DO UPDATE
   // list and the durable app_download_stats row is left untouched.
@@ -2879,7 +2893,9 @@ app.post('/admin/app-update', async (c) => {
     const res = await addNotification(c.env, { type: 'update', title: body.version_name ? `تحديث ${body.version_name}` : 'تحديث جديد', body: body.notes || 'تحديث', data: { apk_url }, created_at: nowSec() });
     push = res.push;
   }
-  return c.json({ ok: true, push });
+  // The retired build is no longer referenced by any row, so the storage audit
+  // («تنظيف كلاود») lists it as an orphan and removes it — no silent leftovers.
+  return c.json({ ok: true, push, retired_apk: previousKey && previousKey !== apk_key ? previousKey : undefined });
 });
 
 app.get('/admin/app-update/releases', async (c) => {
@@ -3065,15 +3081,82 @@ const COMMENT_MIN_LENGTH = 3;
 
 function isValidR2Key(key: string, prefix: string): boolean { return key.startsWith(`${prefix}/`) && !key.includes('..'); }
 
+/* =========================================================================
+   Publishing is IDEMPOTENT.
+   -------------------------------------------------------------------------
+   The owner's report: «ينشر اثنتين» — one publish created two identical
+   entries. Two separate causes, both fixed here:
+
+   1. The origin, in the admin page: the POST answers slowly (the automatic
+      push fan-out can take minutes), the browser/iOS gives up first, the code
+      re-checked «did it get created?» and tried again → row #2. Guarded in the
+      client with a per-publish idempotency key; guarded here with a body-carried
+      key AND a same-APK/same-package check, so a retried request can never
+      create a second row.
+   2. A fresh upload writes a NEW object key, so «same APK» is not visible from
+      the key alone. The check therefore compares the PACKAGE NAME (the one
+      identity an APK really has) and the cleaned name, and returns the EXISTING
+      row with `existing: true` instead of failing — the client then opens that
+      row's edit page, which is what the owner expected to see.
+   ========================================================================= */
+const publishKeys = new Map<string, { id: string; slug: string; ts: number }>();
+
+function normaliseForMatch(raw: unknown): string {
+  return sanitizeText(raw, 200).replace(/[\u200e\u200f\u061c]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 app.post('/admin/apps', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (!body.name || !body.package_name || !body.apk_key) return c.json({ error: 'missing_fields' }, 400);
   if (!isValidR2Key(body.apk_key, 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
-  
+
+  // Same idempotency key seen within 24h → the same publish, just retried.
+  const idem = String(body.idempotency_key || '').slice(0, 80);
+  if (idem) {
+    const seen = publishKeys.get(idem);
+    if (seen && Date.now() - seen.ts < 24 * 3600 * 1000) {
+      return c.json({ ok: true, id: seen.id, slug: seen.slug, existing: true, replayed: true });
+    }
+    if (publishKeys.size > 500) publishKeys.clear();
+  }
+
   const head = await r2Head(c.env, body.apk_key); if (!head) return c.json({ error: 'apk_not_found' }, 400);
+
+  // The same package + the same APK bytes can never be two products.
+  const pkg = sanitizeText(body.package_name, 200).trim();
+  const nameKey = normaliseForMatch(body.name);
+  const dup: any = await c.env.DB.prepare(
+    `SELECT id, slug, name, apk_key FROM apps
+      WHERE LOWER(TRIM(package_name)) = LOWER(?) LIMIT 5`,
+  ).bind(pkg).first().catch(() => null);
+  const dupe = dup ? { id: dup.id, slug: dup.slug, name: dup.name, apk_key: dup.apk_key } : null;
+  if (dupe) {
+    // Never leave the second copy's upload behind: the APK we just received is
+    // byte-identical in purpose to the existing row's file, so it is deleted.
+    if (dupe.apk_key !== body.apk_key) await r2DeleteStrict(c.env, body.apk_key).catch(() => {});
+    const sameName = normaliseForMatch(dupe.name) === nameKey;
+    if (idem) publishKeys.set(idem, { id: dupe.id, slug: dupe.slug, ts: Date.now() });
+    await recordActivity(c.env, consoleActor(c),
+      `منع تكرار «${sanitizeText(body.name, 200)}» — موجود بالفعل باسم «${dupe.name}»`, 'publish');
+    return c.json({
+      ok: true, id: dupe.id, slug: dupe.slug, existing: true,
+      duplicate: true, same_name: sameName,
+    });
+  }
   
   let base = slugify(body.name), slug = base, i = 1;
   while (await c.env.DB.prepare('SELECT id FROM apps WHERE slug = ?').bind(slug).first()) { i++; slug = `${base}-${i}`; }
+
+  /* A NEW item is always visible at first — «نشر» means published.
+     A stale `app_publication` row left over from a deleted/previous item with
+     the same slug used to hide the brand-new item from every list and make
+     `/api/apps/<slug>` answer 404 (it exists, but nowhere on the site). */
+  await ensureConsoleTables(c.env.DB);
+  for (const sql of [
+    'DELETE FROM app_publication WHERE slug = ?',
+    'DELETE FROM app_order WHERE slug = ?',
+    "INSERT INTO app_publication (slug, status, publish_at, updated_at) VALUES (?, 'published', 0, ?) ON CONFLICT(slug) DO UPDATE SET status='published', publish_at=0, updated_at=excluded.updated_at",
+  ]) { try { await c.env.DB.prepare(sql).bind(slug, nowSec()).run(); } catch { /* best effort */ } }
   
   const now = nowSec(), id = randomId();
   await c.env.DB.prepare(`INSERT INTO apps (id, slug, name, name_lower, search_terms, package_name, short_description, description, category, type, developer, version_name, version_code, min_sdk, size_bytes, apk_key, icon_key, feature_key, stars, rating_sum, rating_count, rating, downloads, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`)
@@ -3128,7 +3211,11 @@ app.post('/admin/apps', async (c) => {
   
   // إبطال الكاش بعد الإضافة
   invalidateAppsCache();
-  
+  if (idem) {
+    if (publishKeys.size > 500) publishKeys.clear();
+    publishKeys.set(idem, { id, slug, ts: Date.now() });
+  }
+
   return c.json({ ok: true, id, slug });
 });
 
@@ -3160,36 +3247,69 @@ app.patch('/admin/apps/:id', async (c) => {
 
 app.post('/admin/apps/:id/apk', async (c) => {
   const body = await c.req.json().catch(() => ({}));
+  if (!isValidR2Key(String(body.apk_key || ''), 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
   const head = await r2Head(c.env, body.apk_key); if (!head) return c.json({ error: 'not_found' }, 400);
   const old: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   if (!old) return c.json({ error: 'not_found' }, 404);
+  // Idempotent: a retried «replace APK» with the same object must not write
+  // again (that re-fired an «إصدار جديد» notification per retry).
+  if (old.apk_key === body.apk_key) return c.json({ ok: true, unchanged: true });
 
   await c.env.DB.prepare('UPDATE apps SET apk_key=?, size_bytes=?, version_name=?, version_code=?, updated_at=? WHERE id=?')
     .bind(body.apk_key, head.size, body.version_name||old.version_name, body.version_code!==undefined?body.version_code:old.version_code, nowSec(), old.id).run();
-  
-  if (old.apk_key && old.apk_key !== body.apk_key) await r2Delete(c.env, old.apk_key).catch(()=>{});
+
+  // The OLD file is deleted in the BACKGROUND and reported honestly.
+  //
+  // Awaiting it made the request wait on a multi-hundred-megabyte DELETE, so
+  // the browser timed out and retried the whole replace — which is why one
+  // «simple edit» looked like it published again. The row is already updated,
+  // so a failed cleanup is only a leftover file, never a wrong catalogue.
+  let cleaned = true;
+  if (old.apk_key && old.apk_key !== body.apk_key) {
+    const key = String(old.apk_key);
+    try {
+      c.executionCtx.waitUntil(r2DeleteStrict(c.env, key).then((ok) => {
+        if (!ok) console.error('[r2] could not delete replaced apk', key);
+      }));
+    } catch {
+      cleaned = await r2DeleteStrict(c.env, key);
+    }
+  }
   await addNotification(c.env, {
     type: 'update', title: old.name, body: `إصدار ${body.version_name||old.version_name}`,
     app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
     click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
   });
-  return c.json({ ok: true });
+  invalidateAppsCache();
+  return c.json({ ok: true, cleaned });
 });
 
 app.post('/admin/apps/:id/icon', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT icon_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   await c.env.DB.prepare('UPDATE apps SET icon_key=?, updated_at=? WHERE id=?').bind(body.icon_key, nowSec(), old.id).run();
-  if (old.icon_key && old.icon_key !== body.icon_key) await r2Delete(c.env, old.icon_key).catch(()=>{});
-  return c.json({ ok: true });
+  // Old icon is removed in the background: a slow DELETE must never make the
+  // browser time out and retry the whole edit («أي تعديل بسيط ينشر مرة أخرى»).
+  let cleaned = true;
+  if (old.icon_key && old.icon_key !== body.icon_key) {
+    const key = String(old.icon_key);
+    try { c.executionCtx.waitUntil(r2DeleteStrict(c.env, key)); } catch { cleaned = await r2DeleteStrict(c.env, key); }
+  }
+  invalidateAppsCache();
+  return c.json({ ok: true, cleaned });
 });
 
 app.post('/admin/apps/:id/feature', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT feature_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   await c.env.DB.prepare('UPDATE apps SET feature_key=?, updated_at=? WHERE id=?').bind(body.feature_key, nowSec(), old.id).run();
-  if (old.feature_key && old.feature_key !== body.feature_key) await r2Delete(c.env, old.feature_key).catch(()=>{});
-  return c.json({ ok: true });
+  let cleaned = true;
+  if (old.feature_key && old.feature_key !== body.feature_key) {
+    const key = String(old.feature_key);
+    try { c.executionCtx.waitUntil(r2DeleteStrict(c.env, key)); } catch { cleaned = await r2DeleteStrict(c.env, key); }
+  }
+  invalidateAppsCache();
+  return c.json({ ok: true, cleaned });
 });
 
 app.post('/admin/apps/:id/screenshots', async (c) => {
@@ -3267,28 +3387,229 @@ app.delete('/admin/apps/:id/videos/:vid', async (c) => {
   return c.json({ ok: true });
 });
 
+/* Delete an item AND its files — and say honestly what happened.
+ *
+ * The owner's report: «عند الحذف من لوحة التحكم لا تحذف في كلاود». The row was
+ * deleted first, with every R2 delete wrapped in `.catch(()=>{})`, so:
+ *   • a failed/slow DELETE was silently ignored and the APK stayed in the bucket
+ *     for ever (it also stayed publicly downloadable from the CDN);
+ *   • deleting an app whose file was already gone threw and aborted the loop,
+ *     leaving the rest of the files (screenshots, thumbs) behind.
+ * Now: collect every key first, delete them in ONE bulk R2 call, delete the row
+ * last (so a failure is retried instead of orphaning), and return the leftovers.
+ */
 app.delete('/admin/apps/:id', async (c) => {
   const id = c.req.param('id'), app: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(id).first();
   if (!app) return c.json({ error: 'not_found' }, 404);
 
-  const ss = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE app_id = ?').bind(id).all();
-  for (const s of (ss.results||[])) if (s.r2_key) await r2Delete(c.env, s.r2_key as string).catch(()=>{});
-  await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(id).run();
+  const keys: string[] = [];
+  const push = (k: unknown) => { if (k && typeof k === 'string') keys.push(k); };
+
+  push(app.apk_key); push(app.icon_key); push(app.feature_key);
+  const ss: any = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE app_id = ?').bind(id).all().catch(() => ({ results: [] }));
+  for (const row of (ss.results || [])) push(row.r2_key);
   try {
-    const keys = await listVideoThumbKeys(c.env, id);
-    for (const k of keys) await r2Delete(c.env, k).catch(() => {});
+    const vids: any = await c.env.DB.prepare('SELECT thumb_key FROM app_videos WHERE app_id = ?').bind(id).all();
+    for (const v of (vids.results || [])) push(v.thumb_key);
   } catch { /* table may not exist yet */ }
+  try { for (const k of await listVideoThumbKeys(c.env, id)) push(k); } catch { /* best effort */ }
+
+  // One bulk call for up to 1000 keys — a stuck 4 GB APK used to time the
+  // request out halfway through a chain of single deletes.
+  const failed = keys.length ? await r2DeleteMany(c.env, keys) : [];
+
+  // Row-level deletes AFTER storage: if storage fails, nothing is orphaned
+  // silently — the admin gets the leftover keys and can retry the sweep.
+  await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(id).run().catch(() => {});
   await deleteAppVideos(c.env, id).catch(() => {});
-  
-  if (app.apk_key) await r2Delete(c.env, app.apk_key).catch(()=>{});
-  if (app.icon_key) await r2Delete(c.env, app.icon_key).catch(()=>{});
-  if (app.feature_key) await r2Delete(c.env, app.feature_key).catch(()=>{});
   await c.env.DB.prepare('DELETE FROM apps WHERE id = ?').bind(id).run();
-  
-  // إبطال الكاش بعد الحذف
+
+  /* The console rows keyed by SLUG must die with the item.
+     A leftover `app_publication` row is the reason a RE-published item could
+     vanish: publishing again produces the same slug, and `hiddenSlugs()` then
+     filters it out of every list while `/api/apps/<slug>` answers 404 — the
+     app is in the database but nowhere on the site («لا تنشر في موقعها»). */
+  await ensureConsoleTables(c.env.DB);
+  for (const sql of [
+    'DELETE FROM app_publication WHERE slug = ?',
+    'DELETE FROM app_order WHERE slug = ?',
+  ]) { try { await c.env.DB.prepare(sql).bind(app.slug).run(); } catch { /* table may not exist */ } }
+
   invalidateAppsCache();
-  
-  return c.json({ ok: true });
+  await recordActivity(c.env, consoleActor(c),
+    `حذف «${app.name}» — ${keys.length - failed.length}/${keys.length} ملف من كلاود`, 'delete');
+  return c.json({
+    ok: true, files: keys.length, deleted_files: keys.length - failed.length,
+    failed_files: failed.length, leftover: failed.slice(0, 20),
+  });
+});
+
+/* =========================================================================
+   Storage audit & cleanup — «لماذا لا تحذف في كلاود؟»
+   -------------------------------------------------------------------------
+   Every delete path can be interrupted (timeout, lost connection, a bad key).
+   Instead of guessing, the bucket is COMPARED with the database:
+
+     • orphan   — a file in R2 that no row points at any more (the leftovers the
+                  owner can see in the Cloudflare console);
+     • duplicate— two rows for the same package (the «نشر اثنتين» leftovers);
+     • missing  — a row whose file is not in the bucket (a broken download).
+
+   GET  /admin/duplicates              → the duplicate groups, per package
+   POST /admin/cleanup                 → { dry_run: true } by default
+        { orphans: true }  delete orphan files
+        { duplicates: 'delete', keep: 'oldest'|'newest'|'downloads' }
+   Dry-run ALWAYS first: the response lists exactly what would be removed.
+   ========================================================================= */
+app.get('/admin/duplicates', async (c) => {
+  const rows: any = await c.env.DB.prepare(
+    `SELECT id, slug, name, package_name, apk_key, size_bytes, created_at, downloads
+       FROM apps ORDER BY created_at ASC`,
+  ).all().catch(() => ({ results: [] }));
+  const groups = new Map<string, any[]>();
+  for (const r of (rows.results || [])) {
+    const key = String(r.package_name || '').trim().toLowerCase();
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(r);
+  }
+  const duplicates = [...groups.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([package_name, list]) => ({
+      package_name,
+      count: list.length,
+      wasted_bytes: list.slice(1).reduce((n, r) => n + Number(r.size_bytes || 0), 0),
+      keep_suggestion: list[0].slug,
+      items: list.map((r) => ({
+        id: r.id, slug: r.slug, name: r.name, apk_key: r.apk_key,
+        size_bytes: Number(r.size_bytes || 0), created_at: Number(r.created_at || 0),
+        downloads: Number(r.downloads || 0),
+      })),
+    }));
+  return c.json({ groups: duplicates.length, wasted_bytes: duplicates.reduce((n, g) => n + g.wasted_bytes, 0), duplicates });
+});
+
+app.post('/admin/cleanup', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const report: any = { orphans: null, duplicates: null, missing: null, dry_run: body.dry_run !== false };
+
+  // ---- 1) which keys does the database still reference? ----
+  const referenced = new Set<string>();
+  const add = (k: unknown) => { if (k && typeof k === 'string') referenced.add(k); };
+  const appRows: any = await c.env.DB.prepare('SELECT apk_key, icon_key, feature_key FROM apps').all().catch(() => ({ results: [] }));
+  for (const r of (appRows.results || [])) { add(r.apk_key); add(r.icon_key); add(r.feature_key); }
+  const ssRows: any = await c.env.DB.prepare('SELECT r2_key FROM screenshots').all().catch(() => ({ results: [] }));
+  for (const r of (ssRows.results || [])) add(r.r2_key);
+  const vidRows: any = await c.env.DB.prepare('SELECT thumb_key FROM app_videos').all().catch(() => ({ results: [] }));
+  for (const r of (vidRows.results || [])) add(r.thumb_key);
+  // The store's own APK + media live in `app_updates` (update center).
+  const updRows: any = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").all().catch(() => ({ results: [] }));
+  for (const r of (updRows.results || [])) {
+    add(r.apk_key); add(r.logo_key);
+    try { for (const k of JSON.parse(r.screenshots || '[]')) add(k); } catch {}
+  }
+  // Old builds retire: only the last 30 days of release history keeps its file
+  // protected. Anything older is an orphan and is listed for deletion, which is
+  // how the pile of `goldenstore-app-….apk` in the bucket finally goes away.
+  const relCutoff = nowSec() - 30 * 86400;
+  const relRows: any = await c.env.DB.prepare(
+    'SELECT apk_url FROM app_update_releases WHERE created_at >= ?',
+  ).bind(relCutoff).all().catch(() => ({ results: [] }));
+  for (const r of (relRows.results || [])) {
+    const m = String(r.apk_url || '').match(/(?:apk|ss|icon|feature|vthumb)\/[^\s?]+/);
+    if (m) add(decodeURIComponent(m[0]));
+  }
+
+  // ---- 2) orphans: bucket files nobody points at ----
+  if (body.orphans || body.missing) {
+    const prefixes = ['apk/', 'ss/', 'icon/', 'feature/', 'vthumb/'];
+    const objects: { key: string; size: number }[] = [];
+    for (const pfx of prefixes) objects.push(...await r2List(c.env, pfx, 5000));
+    // A file used by the CURRENT update build must never be treated as an
+    // orphan, even if its row is older than the retention window.
+    // A file younger than a day may still belong to an upload that is running
+    // right now (the row is written when the upload finishes), so it is never
+    // reported as an orphan unless the admin explicitly forces it.
+    const minAgeMs = body.force ? 0 : 24 * 3600 * 1000;
+    const fresh = (o: { lastModified?: string }) => {
+      if (!minAgeMs) return false;
+      const t = o.lastModified ? Date.parse(o.lastModified) : 0;
+      return !!t && Date.now() - t < minAgeMs;
+    };
+    const orphans = objects.filter((o) => !referenced.has(o.key) && !fresh(o as any));
+    report.orphans = {
+      scanned: objects.length, count: orphans.length,
+      bytes: orphans.reduce((n, o) => n + (o.size || 0), 0),
+      keys: orphans.slice(0, 200).map((o) => o.key),
+    };
+    if (!report.dry_run && body.orphans) {
+      const failed = await r2DeleteMany(c.env, orphans.map((o) => o.key));
+      report.orphans.deleted = orphans.length - failed.length;
+      report.orphans.failed = failed.length;
+    }
+  }
+
+  // ---- 3) duplicates: same package name, more than one row ----
+  if (body.duplicates === 'delete' || body.duplicates === 'list') {
+    const rows: any = await c.env.DB.prepare(
+      'SELECT id, slug, name, package_name, apk_key, icon_key, feature_key, size_bytes, created_at, downloads FROM apps ORDER BY created_at ASC',
+    ).all().catch(() => ({ results: [] }));
+    const groups = new Map<string, any[]>();
+    for (const r of (rows.results || [])) {
+      const k = String(r.package_name || '').trim().toLowerCase();
+      if (!k) continue;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    const dupGroups = [...groups.values()].filter((g) => g.length > 1);
+    const keepMode = String(body.keep || 'oldest');
+    const plan: any[] = [];
+    for (const g of dupGroups) {
+      const sorted = [...g].sort((a, b) => {
+        if (keepMode === 'newest') return Number(b.created_at) - Number(a.created_at);
+        if (keepMode === 'downloads') return Number(b.downloads) - Number(a.downloads);
+        return Number(a.created_at) - Number(b.created_at);
+      });
+      const [keep, ...drop] = sorted;
+      plan.push({ package_name: keep.package_name, keep: keep.slug, remove: drop.map((r) => ({ id: r.id, slug: r.slug, apk_key: r.apk_key })) });
+      if (!report.dry_run && body.duplicates === 'delete') {
+        for (const r of drop) {
+          const keys = [r.apk_key, r.icon_key, r.feature_key].filter(Boolean) as string[];
+          const ss: any = await c.env.DB.prepare('SELECT r2_key FROM screenshots WHERE app_id = ?').bind(r.id).all().catch(() => ({ results: [] }));
+          for (const s2 of (ss.results || [])) if (s2.r2_key) keys.push(String(s2.r2_key));
+          if (keys.length) await r2DeleteMany(c.env, keys);
+          await c.env.DB.prepare('DELETE FROM screenshots WHERE app_id = ?').bind(r.id).run().catch(() => {});
+          await deleteAppVideos(c.env, r.id).catch(() => {});
+          await c.env.DB.prepare('DELETE FROM apps WHERE id = ?').bind(r.id).run().catch(() => {});
+          await ensureConsoleTables(c.env.DB);
+          for (const sql of ['DELETE FROM app_publication WHERE slug = ?', 'DELETE FROM app_order WHERE slug = ?'])
+            { try { await c.env.DB.prepare(sql).bind(r.slug).run(); } catch {} }
+        }
+      }
+    }
+    report.duplicates = { groups: plan.length, plan };
+    if (!report.dry_run && body.duplicates === 'delete') {
+      invalidateAppsCache();
+      await recordActivity(c.env, consoleActor(c), `تنظيف ${plan.length} مجموعة مكرّرة (${plan.reduce((n, g) => n + g.remove.length, 0)} عنصراً)`, 'delete');
+    }
+  }
+
+  // ---- 4) rows whose file is gone (a 404 download waiting to happen) ----
+  if (body.missing) {
+    const rows: any = await c.env.DB.prepare('SELECT id, slug, apk_key, size_bytes FROM apps').all().catch(() => ({ results: [] }));
+    const missing: any[] = [];
+    for (const r of (rows.results || [])) {
+      if (!r.apk_key) { missing.push({ slug: r.slug, reason: 'no_apk_key' }); continue; }
+      const head = await r2Head(c.env, String(r.apk_key));
+      if (!head) missing.push({ slug: r.slug, reason: 'file_missing', apk_key: r.apk_key });
+      else if (Number(r.size_bytes || 0) !== head.size) {
+        await c.env.DB.prepare('UPDATE apps SET size_bytes = ? WHERE id = ?').bind(head.size, r.id).run().catch(() => {});
+      }
+    }
+    report.missing = { count: missing.length, items: missing };
+  }
+
+  return c.json({ ok: true, ...report });
 });
 
 // =========================================================================

@@ -85,8 +85,110 @@ export async function r2PresignGet(
   return signed.url.toString();
 }
 
+/**
+ * Delete one object and REPORT what happened.
+ *
+ * The old version returned void, so every caller wrote `.catch(() => {})` and a
+ * failed delete was indistinguishable from a successful one: the row vanished
+ * from the dashboard while the APK stayed in the bucket (exactly what the owner
+ * saw in the Cloudflare console). Returning a boolean lets the admin endpoint
+ * tell the truth, count leftovers and retry them.
+ *
+ * S3/R2 DELETE is idempotent: deleting a missing key answers 204, so `true`
+ * simply means "the object is not there any more".
+ */
+export async function r2DeleteStrict(env: Env, key: string): Promise<boolean> {
+  try {
+    const response = await clientFor(env).fetch(objectUrl(env, key), { method: 'DELETE' });
+    // 404 = already gone (fine). Everything under 500 is "not there any more".
+    return response.ok || response.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 export async function r2Delete(env: Env, key: string): Promise<void> {
-  await checkedFetch(env, objectUrl(env, key), { method: 'DELETE' });
+  await r2DeleteStrict(env, key);
+}
+
+/**
+ * Bulk delete (R2's DeleteObjects API, max 1000 keys per call).
+ *
+ * A stuck APK can be many hundreds of megabytes; deleting the same file twenty
+ * times over the network, one request each, used to time out the admin request
+ * halfway — which is why some objects survived a delete. One call per 1000 keys
+ * keeps cleanup inside the Worker's CPU/network budget.
+ * Returns the keys that could NOT be confirmed deleted.
+ */
+export async function r2DeleteMany(env: Env, keys: string[]): Promise<string[]> {
+  const list = [...new Set(keys.filter(Boolean))];
+  const failed: string[] = [];
+  for (let i = 0; i < list.length; i += 1000) {
+    const chunk = list.slice(i, i + 1000);
+    const url = new URL(
+      `https://${r2Credentials(env).accountId}.r2.cloudflarestorage.com/${encodeURIComponent(r2Bucket(env))}`,
+    );
+    url.searchParams.set('delete', '');
+    const body = `<?xml version="1.0" encoding="UTF-8"?><Delete xmlns="${XML_NAMESPACE}">` +
+      chunk.map((k) => `<Object><Key>${escapeXml(k)}</Key></Object>`).join('') +
+      `<Quiet>false</Quiet></Delete>`;
+    try {
+      // Objects are addressed by key inside the XML, so the body must be signed
+      // as-is (aws4fetch hashes it) — no per-key URL encoding here.
+      const response = await clientFor(env).fetch(new URL(url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/xml' },
+        body,
+      });
+      if (!response.ok) { failed.push(...chunk); continue; }
+      const xml = await response.text().catch(() => '');
+      // Only keys R2 explicitly reports as failed are retried one by one.
+      const reported = [...xml.matchAll(/<Key>([\s\S]*?)<\/Key>/g)].map((m) => m[1]
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+      for (const k of reported) {
+        if (chunk.includes(k) && !(await r2DeleteStrict(env, k))) failed.push(k);
+      }
+    } catch {
+      failed.push(...chunk);
+    }
+  }
+  return failed;
+}
+
+/**
+ * Every object key under a prefix, paginated (1000 per page).
+ * Used by the orphan sweep: files that no database row points at any more.
+ */
+export async function r2List(env: Env, prefix: string, maxKeys = 5000): Promise<{ key: string; size: number; lastModified?: string }[]> {
+  const out: { key: string; size: number; lastModified?: string }[] = [];
+  let token: string | undefined;
+  while (out.length < maxKeys) {
+    const url = new URL(
+      `https://${r2Credentials(env).accountId}.r2.cloudflarestorage.com/${encodeURIComponent(r2Bucket(env))}`,
+    );
+    url.searchParams.set('list-type', '2');
+    url.searchParams.set('prefix', prefix);
+    url.searchParams.set('max-keys', String(Math.min(1000, maxKeys - out.length)));
+    if (token) url.searchParams.set('continuation-token', token);
+    let xml = '';
+    try {
+      const response = await clientFor(env).fetch(url, { method: 'GET' });
+      if (!response.ok) break;
+      xml = await response.text();
+    } catch { break; }
+    for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const block = m[1];
+      const key = (block.match(/<Key>([\s\S]*?)<\/Key>/)?.[1] || '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      const size = Number(block.match(/<Size>([\s\S]*?)<\/Size>/)?.[1] || 0);
+      const lastModified = block.match(/<LastModified>([\s\S]*?)<\/LastModified>/)?.[1];
+      if (key) out.push({ key, size, lastModified });
+    }
+    const truncated = /<IsTruncated>true<\/IsTruncated>/i.test(xml);
+    token = xml.match(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/)?.[1];
+    if (!truncated || !token) break;
+  }
+  return out;
 }
 
 export async function r2Head(env: Env, key: string): Promise<{ size: number; contentType: string } | null> {

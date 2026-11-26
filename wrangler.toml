@@ -25,7 +25,12 @@ STORE_DOMAIN = "goldenstore.online"
 STORE_LOGO_URL = "https://goldenstore.online/images/logo.png"
 R2_BUCKET = "goldenstore"
 R2_ACCOUNT_ID = "3d6027f4b14f48a62a2dba1db3f8d082"
-R2_PUBLIC_URL = "https://cdn.goldenstore.online"
+# Served by R2's public development URL directly: the old CDN hostname has no
+# DNS record any more (the bucket it pointed at was deleted), so every image
+# 404'd. Changing this one value fixes every URL the API generates — app icons,
+# screenshots, video thumbnails and APK links — with no DNS step and no redeploy
+# of the site itself. A custom domain can replace it later at any time.
+R2_PUBLIC_URL = "https://pub-19788071c0444841a00871f67e620d63.r2.dev"
 FIREBASE_PROJECT_ID = "golden-store-40dd6"
 # Public zone identifier (NOT a secret). Also auto-discovered from
 # STORE_DOMAIN when absent. Only CF_API_TOKEN needs to be a Worker secret.

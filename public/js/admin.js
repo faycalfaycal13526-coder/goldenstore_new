@@ -3581,6 +3581,56 @@
       } finally { orphanDelete.disabled = false; }
     };
 
+    /* ── Files per item ──────────────────────────────────────────────────────
+     * Owner: «لماذا التطبيقات والألعاب والأيقونات مختلطة وليست كل فئة على حدة».
+     * Answers it with the bucket's own data rather than a promise: every item,
+     * its files per folder, and the keys that carry an item's name but belong
+     * to no row (a naming fault such as the old `vthumb/video.jpg`).
+     */
+    const itemsOut = el('div', { style: { fontSize: '13px', lineHeight: '1.7', width: '100%' } });
+    const itemsScan = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('search'), 'اعرض ملفات كل عنصر');
+    const itemsBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } }, itemsScan, itemsOut);
+
+    itemsScan.onclick = async () => {
+      itemsScan.disabled = true;
+      itemsOut.innerHTML = 'أقرأ الحاوية وقاعدة البيانات…';
+      try {
+        const r = await api('/api/admin/r2/items', { timeoutMs: 120000 });
+        itemsOut.innerHTML = '';
+        const sm = r.summary || {};
+        itemsOut.append(el('div', null,
+          `${formatNum(sm.items || 0)} عنصراً (تطبيقات ${formatNum(sm.apps || 0)} · ألعاب ${formatNum(sm.games || 0)})`
+          + ` · ملفات بأسماء عناصر ولا تنتمي إليها: ${formatNum(sm.stray_files || 0)}`
+          + ` · عناصر تحتاج ترتيباً: ${formatNum(sm.items_needing_tidy || 0)}`));
+        const table = el('table', { class: 'table admin-table', style: { marginTop: '10px' } },
+          el('thead', null, el('tr', null,
+            el('th', null, 'العنصر'), el('th', null, 'النوع'),
+            el('th', null, 'APK'), el('th', null, 'أيقونة'), el('th', null, 'عرضية'),
+            el('th', null, 'لقطات'), el('th', null, 'فيديو'), el('th', null, 'حالة التسمية'))));
+        const tbody = el('tbody');
+        (r.items || []).forEach((it) => {
+          const n = (k) => (it.files[k] || []).length;
+          tbody.append(el('tr', null,
+            el('td', null, el('div', null, it.name), el('div', { class: 'hint' }, it.slug)),
+            el('td', null, it.type === 'game' ? 'لعبة' : 'تطبيق'),
+            el('td', null, String(n('apk'))), el('td', null, String(n('icon'))),
+            el('td', null, String(n('feature'))), el('td', null, String(n('ss'))),
+            el('td', null, String(n('vthumb'))),
+            el('td', null, it.tidy
+              ? el('span', { class: 'hint' }, 'سليمة')
+              : el('span', { style: { color: 'var(--danger)' } }, it.stray.length ? `${it.stray.length} ملفاً غريباً` : 'اسم غير مطابق'))));
+        });
+        table.append(tbody);
+        itemsOut.append(table);
+        if ((r.summary || {}).stray_files) {
+          itemsOut.append(el('div', { class: 'hint', style: { marginTop: '8px' } },
+            'الملفات الغريبة تُصلح بزر «رتّب التخزين» أعلاه، أو تُحذف من بطاقة «بقايا هذا العنصر» في صفحة تعديل العنصر.'));
+        }
+      } catch (e) {
+        itemsOut.textContent = (e && e.status >= 500) ? 'الخادم لا يستجيب الآن.' : 'تعذّر الفحص.';
+      } finally { itemsScan.disabled = false; }
+    };
+
     /* ── Where the storage came from ─────────────────────────────────────────
      * Owner: «من اين اتى ذالك الحجم من التخزين» — the Cloudflare panel showed
      * 337 MB while the store held nothing. Two things make that number look
@@ -3756,6 +3806,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('grid'), 'ملفات كل عنصر (مستقل عن D1)'),
+        el('div', { class: 'hint' }, 'يعرض كل تطبيق/لعبة وملفاته في كلاود مجمّعة، ويكشف الملفات التي تحمل اسم عنصر ولا تنتمي إليه. المجلدات بالنوع (apk, icon, feature, ss, vthumb) وداخل كل مجلد اسم العنصر نفسه.'),
+        itemsBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('database'), 'من أين جاء حجم التخزين'),
         el('div', { class: 'hint' }, 'يفحص الحاوية فعلياً: كم ملفاً، وكم منها مستخدم، وكم أجزاء رفع انقطعت قبل نهايته (كلاود يحسبها في «Bucket Size» ولا تظهر بين الملفات).'),
@@ -4681,7 +4735,11 @@
     const iconDz = dropzone({ accept: 'image/*', label: 'اختر أيقونة (PNG/JPG)' });
     const featDz = dropzone({ accept: 'image/*', label: 'اختر صورة عرضية (يفضّل 1024×500)' });
     const ssDz = dropzone({ accept: 'image/*', multiple: true, label: 'اختر لقطات الشاشة (متعددة)' });
-    const ve = videoEditor({ videos: [], slugHint: 'video', onAdd: (v) => v, onDelete: () => true });
+    /* The video editor reads the product name LIVE from the form, so a thumbnail
+       uploaded before the name is typed still lands on the item's own name
+       instead of the generic «video». */
+    const nameInput = () => form.querySelector('[name="name"]');
+    const ve = videoEditor({ videos: [], slugHint: () => (nameInput() && nameInput().value) || '', onAdd: (v) => v, onDelete: () => true });
 
     const form = el('form', { class: 'form', onsubmit: async (e) => {
       e.preventDefault();
@@ -5136,6 +5194,7 @@
       const ve = videoEditor({
         videos,
         slugHint: app.slug,
+        appId: app.id,
         onAdd: async (v) => {
           const r = await api(`/api/admin/apps/${id}/videos`, {
             method: 'POST',
@@ -5272,8 +5331,23 @@
     async function uploadThumb(file) {
       if (!file || !/^image\//.test(file.type || '')) { toast(t('اختر صورة'), 'error'); return null; }
       try {
-        return await r2Upload(file, 'video-thumb', opts.slugHint || 'video', () => {});
+        /* Owner: «لماذا ... الأيقونات مختلطة». Custom video thumbnails used to be
+           uploaded with the literal hint «video», so they all landed on
+           vthumb/video.jpg and vthumb/video-2.jpg — every new item's picture
+           replaced a stranger's. The item's own slug is used now, and a slot
+           number keeps two videos of the same item apart. */
+        let hint = typeof opts.slugHint === 'function' ? opts.slugHint() : opts.slugHint;
+        hint = (hint && hint !== 'video') ? hint : '';
+        const optsForUpload = { app_id: opts.appId || undefined, slot: (thumbsUsed() + 1) };
+        return await r2Upload(file, 'video-thumb', hint, () => {}, optsForUpload);
       } catch { toast(t('فشل رفع الصورة المصغّرة'), 'error'); return null; }
+    }
+    // how many custom thumbnails this item already has (so slots never collide)
+    function thumbsUsed() {
+      try {
+        const list = (typeof opts.videos === 'function' ? opts.videos() : opts.videos) || [];
+        return list.filter((x) => x && x.thumb_key).length;
+      } catch (e) { return 0; }
     }
 
     async function applyThumb(v, file) {

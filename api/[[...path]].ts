@@ -3240,8 +3240,17 @@ async function uploadKeyFor(
   if (opts.appId) {
     const row: any = await env.DB.prepare('SELECT slug FROM apps WHERE id = ?').bind(opts.appId).first().catch(() => null);
     if (row && row.slug) slug = slugify(String(row.slug)).slice(0, 60) || slug;
-    const name = kind === 'screenshot' ? `${slug}-${Math.max(1, Math.floor(Number(opts.slot) || 1))}` : slug;
+    const name = (kind === 'screenshot' || kind === 'video-thumb')
+      ? `${slug}-${Math.max(1, Math.floor(Number(opts.slot) || 1))}`
+      : slug;
     return `${folder}/${name}${ext ? '.' + ext : ''}`;
+  }
+
+  /* A video thumbnail has no item id yet when it is uploaded from the publish
+     screen, but its slug hint is the product's name — use it as the name so a
+     second item can never overwrite the first one's picture. */
+  if (kind === 'video-thumb' && String(slugHint || '').trim() && String(slugHint).trim() !== 'video') {
+    return `${folder}/${slug}-${Math.max(1, Math.floor(Number(opts.slot) || 1))}${ext ? '.' + ext : ''}`;
   }
 
   /* ── A brand-new item: the tidy name if it is free, a numbered one if not.
@@ -4165,6 +4174,73 @@ app.post('/admin/r2/orphans', async (c) => {
  * Nothing referenced by any row is ever included (see belongsToSlug), so this is
  * safe to run on a live catalogue.
  */
+/**
+ * ONE ITEM'S FILES — what this product owns in the bucket, grouped by kind.
+ *
+ * Owner: «لماذا التطبيقات والألعاب والأيقونات مختلطة وليست كل فئة على حدة».
+ * The real answer is that the folders are by KIND (apk/, icon/, feature/, ss/,
+ * vthumb/) — which is deliberate, because a bucket key is a flat address and a
+ * screenshot has no business being listed among APKs — and that within a folder
+ * the name must be the item itself: `icon/subway-surfers.webp`. Where that had
+ * broken down (video thumbnails all called «video»), this endpoint shows it.
+ *
+ * GET /admin/r2/items  → every item with its files, plus the keys that carry an
+ *                        item's name but belong to nobody (naming faults).
+ */
+app.get('/admin/r2/items', async (c) => {
+  const apps: any = await c.env.DB.prepare('SELECT id, slug, name, type, category, apk_key, icon_key, feature_key FROM apps ORDER BY name').all().catch(() => ({ results: [] }));
+  const shots: any = await c.env.DB.prepare('SELECT app_id, r2_key FROM screenshots').all().catch(() => ({ results: [] }));
+  const vids: any = await c.env.DB.prepare('SELECT app_id, thumb_key FROM app_videos WHERE thumb_key IS NOT NULL').all().catch(() => ({ results: [] }));
+  const referenced = await referencedKeys(c.env);
+  const objects = await listAllObjects(c.env);
+
+  const byApp = new Map<string, string[]>();
+  const push = (appId: string, key: string) => {
+    if (!key) return;
+    byApp.set(appId, [...(byApp.get(appId) || []), key]);
+  };
+  for (const r of (shots.results || [])) push(String(r.app_id), String(r.r2_key || ''));
+  for (const r of (vids.results || [])) push(String(r.app_id), String(r.thumb_key || ''));
+
+  const items = (apps.results || []).map((a: any) => {
+    const files = {
+      apk: a.apk_key ? [a.apk_key] : [],
+      icon: a.icon_key ? [a.icon_key] : [],
+      feature: a.feature_key ? [a.feature_key] : [],
+      ss: (byApp.get(String(a.id)) || []).filter((k) => k.startsWith('ss/')),
+      vthumb: (byApp.get(String(a.id)) || []).filter((k) => k.startsWith('vthumb/')),
+    };
+    const own: string[] = [...files.apk, ...files.icon, ...files.feature, ...files.ss, ...files.vthumb];
+    const slug = String(a.slug || '');
+    /* A file named after this item that nothing references = a naming fault or a
+       leftover. That is what makes a folder look «مختلط». */
+    const stray = objects.filter((o) => !referenced.has(o.key) && belongsToSlug(o.key, slug)).map((o) => o.key);
+    return {
+      id: a.id, slug, name: a.name, type: a.type, category: a.category,
+      folder: a.type === 'game' ? 'games' : 'apps',
+      files, own_count: own.length, stray,
+      tidy: stray.length === 0 && own.every((k: string) => belongsToSlug(k, slug)),
+    };
+  });
+
+  const strayTotal = items.reduce((n: number, i: any) => n + i.stray.length, 0);
+  const untidy = items.filter((i: any) => !i.tidy).length;
+  return c.json({
+    ok: true,
+    folders: { apk: 'ملفات التطبيقات', icon: 'الأيقونات', feature: 'الصور العرضية', ss: 'لقطات الشاشة', vthumb: 'صور الفيديوهات' },
+    items,
+    summary: {
+      items: items.length,
+      apps: items.filter((i: any) => i.type !== 'game').length,
+      games: items.filter((i: any) => i.type === 'game').length,
+      stray_files: strayTotal,
+      items_needing_tidy: untidy,
+    },
+    note: 'المجلدات مقسّمة بالنوع (apk, icon, feature, ss, vthumb) وهذا مقصود: داخل كل مجلد اسم الملف هو اسم العنصر نفسه. '
+      + '«ملف باسم العنصر لا يشير إليه المتجر» = خلل تسمية أو بقية نشر — زر «رتّب التخزين» يعالجه.',
+  });
+});
+
 app.get('/admin/apps/:id/leftovers', async (c) => {
   const app: any = await c.env.DB.prepare('SELECT id, slug, name, apk_key, icon_key, feature_key FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   if (!app) return c.json({ error: 'not_found' }, 404);
@@ -4223,7 +4299,7 @@ async function planOrganise(env: Env) {
     'SELECT id, slug, name, apk_key, icon_key, feature_key FROM apps ORDER BY created_at ASC',
   ).all().catch(() => ({ results: [] }));
   const shots: any = await env.DB.prepare('SELECT id, app_id, r2_key FROM screenshots').all().catch(() => ({ results: [] }));
-  const vids: any = await env.DB.prepare('SELECT id, thumb_key FROM app_videos').all().catch(() => ({ results: [] }));
+  const vids: any = await env.DB.prepare('SELECT id, app_id, thumb_key FROM app_videos').all().catch(() => ({ results: [] }));
 
   const moves: { table: string; column: string; rowId: string; slug: string; from: string; to: string; kind: string }[] = [];
   const addMove = (table: string, column: string, rowId: string, slug: string, from: unknown, to: string, kind: string) => {
@@ -4253,10 +4329,27 @@ async function planOrganise(env: Env) {
     const ext = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1) : 'webp';
     addMove('screenshots', 'r2_key', r.id, slug, key, `ss/${slug}-${n}.${ext}`, 'screenshot');
   }
+  /* Thumbnails are named after the product they belong to.
+   *
+   * Owner: «لماذا التطبيقات والألعاب والأيقونات مختلطة وليست كل فئة على حدة».
+   * They were not mixed — they were DROWNING. Every custom video thumbnail was
+   * stored as `vthumb/video.jpg` / `vthumb/video-2.jpg`, because the slug hint
+   * handed to the uploader was the literal word «video». With a dozen items,
+   * each one overwrote a stranger's picture and the folder stopped saying who
+   * owned what. The rule is the same as everywhere else now:
+   * `<folder>/<slug>-<n>.<ext>`, and the organiser fixes what is already stored.
+   */
+  const vidCount = new Map<string, number>();
+  const appsById = new Map((apps.results || []).map((a: any) => [String(a.id), a]));
   for (const v of (vids.results || [])) {
     const key = String(v.thumb_key || '');
     if (!key) continue;
-    addMove('app_videos', 'thumb_key', v.id, 'video', key, organiseKey(key, 'video-thumb'), 'video');
+    const owner: any = appsById.get(String(v.app_id || '')) || null;
+    const slug = owner ? String(owner.slug) : 'video';
+    const n = (vidCount.get(slug) || 0) + 1;
+    vidCount.set(slug, n);
+    const ext = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1) : 'jpg';
+    addMove('app_videos', 'thumb_key', v.id, slug, key, `vthumb/${slug}-${n}.${ext}`, 'video');
   }
   return moves;
 }

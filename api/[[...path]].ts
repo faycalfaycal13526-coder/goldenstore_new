@@ -49,11 +49,21 @@ const CATEGORIES_CACHE_TTL = 3600;
 
 function invalidateAppsCache() { categoriesCache.data = null; categoriesCache.ts = 0; }
 
+/* The Capacitor build of the store runs its WebView on https://localhost
+ * (Android) or capacitor://localhost (iOS), so every call it makes is
+ * cross-origin. These origins are the app itself, not a third-party site: they
+ * are matched exactly and never echo an arbitrary Origin, so allowing them adds
+ * no CSRF surface. Without them the installed app was rejected by CORS before it
+ * could read a single JSON byte — the store appeared empty inside the APK while
+ * the website worked.
+ */
+const NATIVE_ORIGINS = ['https://localhost', 'capacitor://localhost', 'http://localhost'];
+
 // Security: CORS
 app.use('*', async (c, next) => {
   const origin = c.req.header('origin') || '';
   const allowedOrigins = (c.env.ALLOWED_ORIGINS || '').split(',').map((v) => v.trim()).filter(Boolean);
-  const allowed = !!origin && allowedOrigins.includes(origin);
+  const allowed = !!origin && (allowedOrigins.includes(origin) || NATIVE_ORIGINS.includes(origin));
   if (allowed) {
     c.header('Access-Control-Allow-Origin', origin);
     c.header('Access-Control-Allow-Credentials', 'true');

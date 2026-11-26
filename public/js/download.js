@@ -133,9 +133,13 @@
       + (data.version_name ? ' · ' + String(data.version_name) : '');
   }
 
-  // Relative first (same-origin on both hosts). If a proxy/CDN ever breaks
-  // it, fall back to the Worker's own domain so the real total still shows.
-  var API_URLS = ['/api/app-update?_=', 'https://api.goldenstore.online/api/app-update?_='];
+  // Relative first (same-origin on the website). The fallback used to be
+  // https://api.goldenstore.online — a hostname that never answers (it sits on
+  // Cloudflare's 100:: placeholder, see wrangler.toml). Inside the installed app
+  // there is no same-origin API at all, so that dead fallback was the ONLY path:
+  // the release version and total size never loaded in the APK. The Worker's
+  // workers.dev hostname works with no zone permissions.
+  var API_URLS = ['/api/app-update?_=', 'https://goldenstore-api.faycalfaycal13526.workers.dev/api/app-update?_='];
   function fetchRelease(index) {
     var url = API_URLS[index] + Date.now();
     return fetch(url, {

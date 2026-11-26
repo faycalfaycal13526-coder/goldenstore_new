@@ -38,6 +38,32 @@ applyTheme(currentTheme());
 function isNativeApp() {
   return typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 }
+
+/* Is this the INSTALLED APP rather than the website?
+ *
+ * isNativeApp() alone is not enough: the Android WebView exposes the GSAndroid
+ * bridge and does NOT always inject Capacitor's JS runtime, so isNativeApp()
+ * returns false inside the APK. Every API call then stayed relative and resolved
+ * against the WebView's own origin — https://localhost/api/… — which has no
+ * server behind it. The result was exactly the owner's report: «في الموقع تظهر
+ * ولكن في التطبيق لا». Nothing could load inside the APK, not just the store
+ * list but settings and notifications too.
+ *
+ * A plain remote WebView (no bridge at all) is NOT native by this test: those
+ * load pages straight from goldenstore.online, where same-origin works.
+ */
+function isNativeShell() {
+  if (isNativeApp()) return true;                     // Capacitor runtime injected
+  try {
+    if (hasDeviceBridge()) return true;               // GSAndroid bridge present
+    const proto = String(location.protocol || '');
+    if (proto === 'capacitor:' || proto === 'file:') return true;
+    const host = String(location.hostname || '');
+    // A Capacitor WebView serves the bundle from a local host with no API.
+    if ((host === 'localhost' || host === '127.0.0.1') && window.GSAndroid) return true;
+  } catch (e) {}
+  return false;
+}
 /* The Android WebView exposes GSAndroid, NOT Capacitor. Device/install helpers
    must use this bridge detector; isNativeApp() stays for API-base routing. */
 function hasDeviceBridge() {
@@ -53,16 +79,47 @@ function hasDeviceBridge() {
     ));
   } catch (e) { return false; }
 }
-const STORE_API_ORIGIN = 'https://api.goldenstore.online';
+/* The installed app cannot use same-origin requests: its WebView runs on
+ * https://localhost (Android) or capacitor://localhost (iOS), so every API call
+ * is cross-origin and needs an absolute URL.
+ *
+ * This constant used to be 'https://api.goldenstore.online'. That hostname is
+ * still stuck on Cloudflare's 100:: placeholder — the Worker custom domain
+ * cannot be bound because the zone is in a different account (deploy error
+ * 10084). The website was moved off it when the 522 was fixed, but the app was
+ * not, so the installed app kept calling a dead host: nothing on the store
+ * loaded inside the APK while the website looked fine (owner: «في الموقع تظهر
+ * ولكن في التطبيق لا»).
+ *
+ * The Worker's own workers.dev hostname answers 200 with no zone permissions at
+ * all, so that is the app's base now. A Capacitor config `apiBase` still wins,
+ * so a future custom domain can be introduced without touching this file —
+ * but note it must be an ABSOLUTE url: falling back to the page's own origin
+ * (as the old code did when apiBase was unset) means calling localhost.
+ */
+const STORE_API_ORIGIN = 'https://goldenstore-api.faycalfaycal13526.workers.dev';
+
+// The origins a Capacitor WebView reports. They must be allowed by the Worker's
+// CORS middleware, otherwise the app is rejected before any JSON is read.
+const NATIVE_ORIGINS = ['https://localhost', 'capacitor://localhost', 'http://localhost'];
+
+function isNativeOrigin(origin) {
+  if (!origin) return false;
+  return NATIVE_ORIGINS.includes(origin);
+}
 
 function apiBaseUrl() {
-  if (!isNativeApp()) return '';
+  if (!isNativeShell()) return '';
   try {
-    const cfg = window.Capacitor.getConfig && window.Capacitor.getConfig();
+    const cfg = window.Capacitor && window.Capacitor.getConfig && window.Capacitor.getConfig();
     if (cfg && cfg.apiBase) return cfg.apiBase;
   } catch (e) {}
   return STORE_API_ORIGIN;
 }
+
+// Exposed for the test suite: it asserts both the host and that no caller can
+// silently fall back to same-origin inside the app.
+try { window.__gsApiOrigin = STORE_API_ORIGIN; window.__gsIsNativeOrigin = isNativeOrigin; } catch (e) {}
 
 function fullApiUrl(path) {
   const base = apiBaseUrl();
@@ -106,14 +163,19 @@ async function apiNativeCap(path, opts, timeoutMs) {
 }
 async function api(path, opts = {}) {
   const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 15000;
-  if (isNativeApp() && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) {
-    return apiNativeCap(path, opts, timeoutMs);
-  }
+  try {
+    if (isNativeShell() && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) {
+      return apiNativeCap(path, opts, timeoutMs);
+    }
+  } catch (e) { /* fall through to fetch */ }
+  /* Not every build ships CapacitorHttp. Without this the absolute base was
+     computed and then thrown away, so the APK kept calling its own origin. */
+  const requestPath = fullApiUrl(path);
   const ctrl = new AbortController();
   const timer = timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   let res;
   try {
-    res = await fetch(fullApiUrl(path), {
+    res = await fetch(requestPath, {
       credentials: 'include',
       headers: opts.body && !(opts.body instanceof FormData) && typeof opts.body !== 'string'
         ? { 'Content-Type': 'application/json', ...(opts.headers || {}) }

@@ -545,18 +545,55 @@
       });
     };
   }
+  /* Inside the installed app there is NO same-origin API: the WebView runs on
+   * https://localhost, so a relative '/api/settings' resolves to
+   * https://localhost/api/settings and hangs until it fails. The old retry used
+   * location.origin, which is the same dead host — so the app never received
+   * settings at all. The Worker's workers.dev host is reachable from the WebView
+   * and allows the Capacitor origin (see the CORS middleware in the API).
+   */
+  var NATIVE_SETTINGS_HOST = 'https://goldenstore-api.faycalfaycal13526.workers.dev';
+  /* The Android WebView exposes GSAndroid and does not always inject Capacitor's
+   * runtime, so `Capacitor.isNative` alone misses the real APK — that is how the
+   * settings call stayed on the dead https://localhost origin. */
+  function isNativeWebView() {
+    try {
+      if (window.Capacitor && (window.Capacitor.isNative === true
+        || (typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()))) return true;
+      if (window.GSAndroid) return true;
+      var proto = String(location.protocol || '');
+      if (proto === 'capacitor:' || proto === 'file:') return true;
+    } catch (e) {}
+    return false;
+  }
+  function settingsUrls() {
+    var stamp = '?_=' + Date.now();
+    if (isNativeWebView()) return [NATIVE_SETTINGS_HOST + '/api/settings' + stamp];
+    return ['/api/settings' + stamp, NATIVE_SETTINGS_HOST + '/api/settings' + stamp];
+  }
+  function fetchWithTimeout(url, ms) {
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, ms) : null;
+    var opts = { cache: 'no-store' };
+    if (ctrl) opts.signal = ctrl.signal;
+    return fetch(url, opts).then(function (r) {
+      if (timer) clearTimeout(timer);
+      return r.ok ? r.json() : Promise.reject(new Error('settings_unavailable'));
+    }, function (e) {
+      if (timer) clearTimeout(timer);
+      throw e;
+    });
+  }
+
   function load() {
     if (!pending) {
-      pending = fetch('/api/settings?_=' + Date.now(), { cache: 'no-store' })
-        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('settings_unavailable')); })
+      var urls = settingsUrls();
+      pending = fetchWithTimeout(urls[0], 8000)
         .catch(function () {
-          // Retry with an absolute origin: some website deployments proxy /api
-          // differently from the native WebView. Never leave the site unlocked.
-          try {
-            return fetch(location.origin + '/api/settings?_=' + Date.now(), { cache: 'no-store' })
-              .then(function (r2) { return r2.ok ? r2.json() : null; })
-              .catch(function () { return null; });
-          } catch (e) { return null; }
+          // Fall back to the absolute host. Never leave the site unlocked, and
+          // never wait forever: a hung settings call used to blank every page.
+          if (urls.length < 2) return null;
+          return fetchWithTimeout(urls[1], 8000).catch(function () { return null; });
         })
         .then(function (d) {
           values = (d && d.settings) || {};

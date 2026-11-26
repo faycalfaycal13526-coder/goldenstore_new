@@ -177,7 +177,10 @@
     groups.forEach(function (g) {
       var map = {};
       g.keys.forEach(function (k) { map[lang + '::' + k] = 1; });
-      fetch('/api/i18n-content', {
+      // Inside the installed app a relative URL resolves against the WebView's
+      // own origin (https://localhost), which has no server — the request died
+      // before reaching the Worker, so on-demand translations never arrived.
+      fetch(i18nContentUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keys: map, source: g.src }),
@@ -193,6 +196,21 @@
         if (got) { cDirty = true; saveContent(); repaintContent(); }
       }).catch(function () {});
     });
+  }
+
+  /* Absolute API base for the installed app. The Android WebView exposes
+     GSAndroid and may not inject Capacitor's runtime, so both are checked —
+     same rule as isNativeShell() in store.js. The website keeps same-origin. */
+  var NATIVE_API_ORIGIN = 'https://goldenstore-api.faycalfaycal13526.workers.dev';
+  function i18nContentUrl() {
+    var native = false;
+    try {
+      if (window.GSAndroid) native = true;
+      else if (window.Capacitor && (window.Capacitor.isNative === true
+        || (typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()))) native = true;
+      else if (String(location.protocol) === 'capacitor:' || String(location.protocol) === 'file:') native = true;
+    } catch (e) {}
+    return (native ? NATIVE_API_ORIGIN : '') + '/api/i18n-content';
   }
 
   // Replace the text of every holder whose source string is now translated.

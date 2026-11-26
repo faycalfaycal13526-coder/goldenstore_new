@@ -29,13 +29,30 @@ function themeToggleBtn() {
 }
 applyTheme(currentTheme());
 
+/* The installed app has no same-origin API: its WebView is served from
+   https://localhost, so a relative path there has no server behind it. When the
+   native shell is detected, absolute API paths go to the Worker's reachable
+   host. The Android bridge is GSAndroid; Capacitor may not be injected at all. */
+const GS_API_ORIGIN = 'https://goldenstore-api.faycalfaycal13526.workers.dev';
+function gsAbsoluteApiPath(path) {
+  try {
+    if (typeof path !== 'string' || !path.startsWith('/api/')) return path;
+    let native = false;
+    if (window.GSAndroid) native = true;
+    else if (window.Capacitor && (window.Capacitor.isNative === true
+      || (typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()))) native = true;
+    else if (String(location.protocol) === 'capacitor:' || String(location.protocol) === 'file:') native = true;
+    return native ? GS_API_ORIGIN + path : path;
+  } catch (e) { return path; }
+}
+
 async function api(path, opts = {}) {
   const ctrl = new AbortController();
   const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 15000;
   const timer = timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   let res;
   try {
-    res = await fetch(path, {
+    res = await fetch(gsAbsoluteApiPath(path), {
       credentials: 'include',
       headers: opts.body && !(opts.body instanceof FormData) && typeof opts.body !== 'string'
         ? { 'Content-Type': 'application/json' }

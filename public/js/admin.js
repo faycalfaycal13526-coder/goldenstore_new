@@ -683,28 +683,72 @@
       }
     }
 
+    // Turns a failed request into the TRUTH about what went wrong. «كلمة المرور
+    // غير صحيحة» is only ever shown for a real 401 — never for a network or
+    // server failure, because that used to send the owner hunting a password
+    // problem that did not exist.
+    function describeLoginError(err) {
+      const st = err && typeof err.status === 'number' ? err.status : 0;
+      if (st === 401 || st === 403) return 'كلمة المرور غير صحيحة';
+      if (st === 0 || (err && err.message === 'timeout')) {
+        return 'تعذّر الوصول إلى الخادم من هذا الجهاز (لا اتصال). تحقّق من الشبكة ثم أعد المحاولة.';
+      }
+      if (st === 522 || st === 524 || st === 504) {
+        return 'الخادم متوقف مؤقتاً عند Cloudflare (رمز 522) — الموقع يفتح لكن خدمة الدخول لا تستجيب. كلمة المرور سليمة، والمشكلة ليست منك.';
+      }
+      if (st === 502 || st === 503) return 'بوابة Cloudflare لا تستجيب (رمز ' + st + '). كلمة المرور سليمة — الخدمة متوقفة مؤقتاً.';
+      if (st === 404) return 'مسار الدخول غير موجود على الخادم (404) — النسخة المنشورة قديمة. كلمة المرور ليست السبب.';
+      if (st === 500) return 'إعدادات الخادم ناقصة (500). كلمة المرور ليست السبب.';
+      return 'تعذّر الدخول لسبب في الخادم (رمز ' + (st || '؟') + ') — وليس كلمة المرور.';
+    }
+
+    // One quick probe BEFORE spending the owner's password: if the API is down,
+    // say so plainly instead of blaming the password.
+    async function serverReachable() {
+      try {
+        await api('/api/settings', { timeoutMs: 6000 });
+        return { ok: true };
+      } catch (err) {
+        const st = err && typeof err.status === 'number' ? err.status : 0;
+        if (st === 0 || (err && err.message === 'timeout')) return { ok: false, kind: 'offline' };
+        if (st >= 500 || st === 404) return { ok: false, kind: 'down', status: st };
+        return { ok: true };
+      }
+    }
+
     const form = el('form', { class: 'form', autocomplete: 'on', onsubmit: async (e) => {
       e.preventDefault();
       const password = passInput.value;
       if (!password) { passInput.focus(); return; }
       setBusy(true);
+      const health = await serverReachable();
+      if (!health.ok) {
+        setBusy(false);
+        passInput.focus();
+        toast(health.kind === 'offline'
+          ? 'لا يوجد اتصال بالخادم من جهازك. كلمة المرور لم تُرسل أصلاً — تحقّق من الشبكة.'
+          : 'خدمة الدخول متوقفة مؤقتاً عند Cloudflare (رمز ' + health.status + '). كلمة المرور سليمة ولم تُرسل. حاول بعد قليل.',
+        'error');
+        return;
+      }
+      // Step 1 — the password alone. Nothing else can make this look like a bad password.
       try {
         await api('/api/login', { method: 'POST', body: { password } });
-        // Direct in — no extra round trip; render the admin app immediately.
+      } catch (err) {
+        setBusy(false);
+        if (!(err && (err.status === 401 || err.status === 403))) passInput.focus();
+        else passInput.select();
+        toast(describeLoginError(err), 'error');
+        return;
+      }
+      // Step 2 — the dashboard. If THIS fails the password was still correct, so
+      // say exactly that instead of pretending the login was rejected.
+      try {
         activeTab = 'dashboard';
         await renderApp();
       } catch (err) {
         setBusy(false);
-        passInput.select();
-        let msg = 'كلمة المرور غير صحيحة';
-        if (err && (err.status === 0 || err.message === 'timeout')) {
-          msg = 'تعذّر الاتصال بالخادم. حدّث الصفحة وحاول من جديد.';
-        } else if (err && err.status === 500) {
-          msg = 'الإعدادات ناقصة على الخادم. تواصل مع مالك المتجر.';
-        } else if (err && err.status >= 502 && err.status <= 504) {
-          msg = 'الخادم لا يستجيب حالياً. حاول لاحقاً.';
-        }
-        toast(msg, 'error');
+        toast('تم الدخول بنجاح، لكن تعذّر تحميل بيانات اللوحة: ' + describeLoginError(err), 'error');
       }
     } });
 
@@ -3259,12 +3303,20 @@
         renderApp();
       } catch (e) {
         const code = String((e && e.message) || '');
-        msg.textContent = {
+        const st = e && typeof e.status === 'number' ? e.status : 0;
+        const byCode = {
           wrong_current_password: 'كلمة السر الحالية غير صحيحة.',
           password_too_short: 'كلمة السر الجديدة قصيرة (٨ محارف على الأقل).',
           password_mismatch: 'التأكيد لا يطابق.',
           password_unchanged: 'كلمة السر الجديدة مطابقة للحالية.',
-        }[code] || ('تعذّر الحفظ: ' + code);
+        }[code];
+        let text;
+        if (byCode) text = byCode;
+        else if (st === 401 || st === 403) text = 'انتهت جلستك. سجّل الدخول من جديد ثم أعد المحاولة.';
+        else if (st === 0 || (e && e.message === 'timeout')) text = 'لا اتصال بالخادم من جهازك — لم تُرسل كلمة السر.';
+        else if (st >= 500 || st === 404) text = 'الخادم لا يستجيب الآن (رمز ' + st + '). لم تُحفظ كلمة السر، والقديمة ما زالت تعمل. حاول بعد قليل.';
+        else text = 'تعذّر الحفظ لسبب في الخادم (رمز ' + (st || '؟') + '). لم تُحفظ كلمة السر.';
+        msg.textContent = text;
       } finally { saveBtn.disabled = false; }
     };
 

@@ -7,16 +7,18 @@
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   Cross-Origin-Opener-Policy: same-origin-allow-popups
   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data:; media-src 'self' blob: data:; connect-src 'self' https:; font-src 'self' https: https://cdnjs.cloudflare.com; frame-src 'self' https:; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-  Cache-Control: no-store, no-cache, must-revalidate
-  Pragma: no-cache
-  Expires: 0
+# NO Cache-Control here on purpose. Cloudflare Pages does not OVERRIDE with a
+# later rule, it CONCATENATES every matching rule — so a `no-store` in this
+# catch-all was being appended to the /js/* and /css/* rules and winning:
+#   cache-control: no-store, no-cache, must-revalidate, public, max-age=604800
+# HTML keeps Pages' default (revalidated), which is what we want.
 
 # ESSENTIAL FIX — the site was re-downloading itself on every single visit.
 # These two blocks said "no-store, no-cache, must-revalidate" (and the block
 # above says it too), so nothing was ever kept: every page load pulled play.css
 # (44 KB), lang.js (190 KB), store.js (42 KB) and content-i18n.js (56 KB) again —
 # 350 KB before the first app icon on a 4G phone, on every tap between pages.
-# That is "الموقع أصبح ثقيل". Every asset is loaded with a version token (?v=…)
+# That is "الموقع أصبح ثقيل". Every asset carries a version token (?v=...)
 # that is bumped on each release, so a cached copy can never be stale.
 /css/*
   Cache-Control: public, max-age=604800, stale-while-revalidate=86400

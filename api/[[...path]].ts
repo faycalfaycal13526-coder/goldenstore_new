@@ -734,6 +734,24 @@ async function setDownloadBaseline(env: Env, requested: number): Promise<number>
   return total;
 }
 
+/* The release row stores the FULL public URL of the APK (that is how it was
+ * uploaded), so a row written while the store still used
+ * https://cdn.goldenstore.online keeps that host for ever — and that hostname
+ * now resolves to nothing (000), so «تحديث التطبيق» downloads nothing.
+ *
+ * Rewriting the stored URL on every read would be wrong (the row may legitimately
+ * point at another CDN later), so this only repairs a URL that still points at a
+ * host we know is dead, and only when the object really lives in our bucket.
+ */
+function repairReleaseUrl(raw: unknown, env: Env): string {
+  const url = String(raw || '');
+  if (!url) return url;
+  const dead = /^https?:\/\/(cdn|api)\.goldenstore\.online\//i;
+  if (!dead.test(url)) return url;
+  const key = url.replace(dead, '');
+  try { return r2PublicUrl(key, env); } catch { return url; }
+}
+
 app.get('/app-update', async (c) => {
   // Never let a CDN/browser serve a stale total.
   c.header('Cache-Control', 'no-store');
@@ -741,7 +759,7 @@ app.get('/app-update', async (c) => {
   try { row = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").first(); } catch {}
   const legacy = Number(row?.downloads) || 0;
   const downloads = await readDownloadCount(c.env, legacy);
-  const apkUrl = row?.apk_url || CURRENT_RELEASE.apk_url;
+  const apkUrl = repairReleaseUrl(row?.apk_url || CURRENT_RELEASE.apk_url, c.env);
   const out = {
     version_name: row?.version_name || CURRENT_RELEASE.version_name,
     version_code: Number(row?.version_code) || CURRENT_RELEASE.version_code,
@@ -3699,6 +3717,18 @@ function validR2Key(key: unknown): key is string {
   return R2_KEY_RE.test(k) && !k.includes('..') && !k.startsWith('/');
 }
 
+/** The release row stores a full URL (not a key) in `apk_url` — often a URL with
+ *  the old, now dead cdn host. Pulling the key out of it is what keeps the live
+ *  APK out of the orphan sweep: without this, «تنظيف كلاود» would offer to delete
+ *  the very file the update dialog downloads. */
+function keyFromStoredUrl(raw: unknown): string {
+  const url = String(raw || '');
+  if (!url) return '';
+  const m = url.match(/(?:apk|ss|icon|feature|vthumb)\/[^\s?#]+/);
+  if (!m) return '';
+  try { return decodeURIComponent(m[0]); } catch { return m[0]; }
+}
+
 /** Every key the database still points at — so the panel can label an object
  *  «مستخدم» or «يتيم» without guessing. */
 async function referencedKeys(env: Env): Promise<Set<string>> {
@@ -3710,10 +3740,13 @@ async function referencedKeys(env: Env): Promise<Set<string>> {
   for (const r of (ss.results || [])) add(r.r2_key);
   const vids: any = await env.DB.prepare('SELECT thumb_key FROM app_videos').all().catch(() => ({ results: [] }));
   for (const r of (vids.results || [])) add(r.thumb_key);
-  const upd: any = await env.DB.prepare("SELECT apk_key, logo_key, screenshots FROM app_updates WHERE id = 'current'").all().catch(() => ({ results: [] }));
+  const upd: any = await env.DB.prepare("SELECT apk_key, apk_url, logo_key, screenshots, videos FROM app_updates WHERE id = 'current'").all().catch(() => ({ results: [] }));
   for (const r of (upd.results || [])) {
     add(r.apk_key); add(r.logo_key);
+    // apk_url holds the object as a full URL, and it may still name a dead host.
+    add(keyFromStoredUrl(r.apk_url));
     try { for (const k of JSON.parse(r.screenshots || '[]')) add(k); } catch { /* not JSON */ }
+    try { for (const k of JSON.parse(r.videos || '[]')) add(typeof k === 'string' ? k : (k && (k.thumb_key || k.key))); } catch { /* not JSON */ }
   }
   return keys;
 }
@@ -4035,7 +4068,11 @@ app.post('/admin/cleanup', async (c) => {
   const updRows: any = await c.env.DB.prepare("SELECT * FROM app_updates WHERE id = 'current'").all().catch(() => ({ results: [] }));
   for (const r of (updRows.results || [])) {
     add(r.apk_key); add(r.logo_key);
+    // The live release APK lives in apk_url as a full URL — protect it or the
+    // sweep will happily offer to delete the file the update dialog needs.
+    add(keyFromStoredUrl(r.apk_url));
     try { for (const k of JSON.parse(r.screenshots || '[]')) add(k); } catch {}
+    try { for (const k of JSON.parse(r.videos || '[]')) add(typeof k === 'string' ? k : (k && (k.thumb_key || k.key))); } catch {}
   }
   // Old builds retire: only the last 30 days of release history keeps its file
   // protected. Anything older is an orphan and is listed for deletion, which is

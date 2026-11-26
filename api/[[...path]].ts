@@ -3152,19 +3152,59 @@ app.get('/admin/apps/:id', async (c) => {
 });
 
 // Uploads (R2)
+
+/* ── Deterministic upload keys ────────────────────────────────────────────────
+ * Owner asked for new uploads to start tidy instead of being renamed later.
+ *
+ * Keys used to be <folder>/<slug>-<epoch>-<hex>.<ext>, which said nothing about
+ * what an object was and grew a new copy on every re-publish. They are now
+ * <folder>/<slug>.<ext> — the same shape the storage organiser produces, so a
+ * fresh upload and an organised one are indistinguishable.
+ *
+ * The one danger with a fixed name is overwriting a file that is still in use,
+ * so uploadKeyFor() refuses a name that already exists in the bucket and falls
+ * back to <slug>-<n>.<ext> instead. A re-publish of the same app therefore
+ * reuses the same icon/APK name, while a different app with the same slug can
+ * never clobber it.
+ */
+async function uploadKeyFor(
+  env: Env,
+  kind: string,
+  ext: string,
+  slugHint: string,
+  taken: Set<string>,
+): Promise<string> {
+  const folder = kind === 'apk' ? 'apk' : kind === 'icon' ? 'icon' : kind === 'feature' ? 'feature' : kind === 'video-thumb' ? 'vthumb' : 'ss';
+  const slug = slugify(String(slugHint || 'app')).slice(0, 60) || 'app';
+  const base = `${folder}/${slug}`;
+  const extPart = ext ? `.${ext}` : '';
+  const exists = async (key: string) => {
+    if (taken.has(key)) return true;
+    const head = await r2Head(env, key).catch(() => null);
+    return !!head;
+  };
+  let candidate = `${base}${extPart}`;
+  if (!(await exists(candidate))) return candidate;
+  for (let n = 2; n <= 50; n++) {
+    candidate = `${base}-${n}${extPart}`;
+    if (!(await exists(candidate))) return candidate;
+  }
+  // Deterministic names are exhausted: fall back to a unique suffix rather than
+  // silently replacing a file another row may still point at.
+  return `${base}-${Date.now()}-${randomId().slice(0, 6)}${extPart}`;
+}
+
 app.post('/admin/upload-url', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
-  const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : body.kind === 'video-thumb' ? 'vthumb' : 'ss';
-  const key = `${folder}/${slugify(String(body.slug_hint || 'app'))}-${Date.now()}-${randomId().slice(0, 6)}.${ext}`;
+  const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set());
   return c.json({ url: await r2PresignPut(c.env, key, String(body.content_type || 'application/octet-stream'), 7200), key });
 });
 
 app.post('/admin/multipart/create', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
-  const folder = body.kind === 'apk' ? 'apk' : body.kind === 'icon' ? 'icon' : body.kind === 'feature' ? 'feature' : body.kind === 'video-thumb' ? 'vthumb' : 'ss';
-  const key = `${folder}/${slugify(String(body.slug_hint || 'app'))}-${Date.now()}-${randomId().slice(0, 6)}.${ext}`;
+  const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set());
   const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
   const parts = [];
   for (let i = 1; i <= Math.ceil(Number(body.file_size) / (10 * 1024 * 1024)); i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });

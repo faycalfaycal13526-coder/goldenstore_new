@@ -28,7 +28,7 @@ import {
 } from '../lib/d1.js';
 import {
   r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head,
-  r2DeleteStrict, r2DeleteMany, r2List, r2Bucket,
+  r2DeleteStrict, r2DeleteMany, r2List, r2Bucket, r2MultipartUploads, r2AbortMultipartUploadByKey,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
   r2AbortMultipartUpload, r2ConfigureCors,
   r2Move, organiseKey,
@@ -3859,6 +3859,74 @@ async function listAllObjects(env: Env) {
   }
   return [...seen.values()];
 }
+
+/**
+ * WHERE THE STORAGE WENT — an honest accounting of the bucket.
+ *
+ * Owner: «من اين اتى ذالك الحجم من التخزين» while the Cloudflare dashboard said
+ * 337 MB and the store held ZERO items. The dashboard number is an average
+ * snapshot (so it lags deletions) but it also counts something the object list
+ * cannot show: the parts of unfinished multipart uploads. A 4 GB APK goes up in
+ * parts; each part is stored and billed the moment it is sent, and if the upload
+ * never completes those parts belong to no object at all — invisible in the
+ * console's object browser, invisible to every cleanup list, and left for ever.
+ *
+ * This answers the question with real numbers instead of a guess:
+ *   GET /admin/r2/audit   → objects, bytes, referenced vs orphan, unfinished
+ *                           uploads with their age, and a plain-language total.
+ */
+app.get('/admin/r2/audit', async (c) => {
+  const objects = await listAllObjects(c.env);
+  const referenced = await referencedKeys(c.env);
+  const inUse = objects.filter((o) => referenced.has(o.key));
+  const orphans = objects.filter((o) => !referenced.has(o.key));
+  const sum = (list: { size?: number }[]) => list.reduce((n, o) => n + (o.size || 0), 0);
+  const uploads = await r2MultipartUploads(c.env).catch(() => []);
+  const now = Date.now();
+  const folders: Record<string, { count: number; bytes: number }> = {};
+  for (const o of objects) {
+    const folder = o.key.includes('/') ? o.key.slice(0, o.key.indexOf('/') + 1) : '(root)';
+    folders[folder] = folders[folder] || { count: 0, bytes: 0 };
+    folders[folder].count++;
+    folders[folder].bytes += o.size || 0;
+  }
+  return c.json({
+    scanned_objects: objects.length,
+    bytes_stored: sum(objects),
+    bytes_in_use: sum(inUse),
+    bytes_orphan: sum(orphans),
+    in_use: inUse.length,
+    orphans: orphans.length,
+    orphan_keys: orphans.slice(0, 200).map((o) => o.key),
+    by_folder: folders,
+    /* Invisible to every list in the console's object browser — this is the
+       first place the owner can see them. */
+    unfinished_uploads: uploads.length,
+    unfinished_upload_keys: uploads.slice(0, 200).map((u) => ({
+      key: u.key, upload_id: u.uploadId, initiated: u.initiated || null,
+      age_hours: u.initiated ? Math.round((now - Date.parse(u.initiated)) / 3600000) : null,
+    })),
+    note: 'هذا ما يوجد في الحاوية الآن. «غير مستخدم» = ملف لا يشير إليه أي تطبيق. '
+      + '«رفع غير مكتمل» = أجزاء رُفعت ثم انقطع الرفع قبل النهاية — تُحسب في حجم كلاود ولا تظهر بين الملفات.',
+  });
+});
+
+/** Abort every unfinished multipart upload. Their partial parts are the hidden bytes. */
+app.post('/admin/r2/audit/abort', async (c) => {
+  const body = await c.req.json().catch(() => ({}) as any);
+  if (String(body.confirm || '') !== 'ABORT-UPLOADS') {
+    return c.json({ error: 'confirm_required', hint: 'أرسل confirm: ABORT-UPLOADS' }, 400);
+  }
+  const uploads = await r2MultipartUploads(c.env).catch(() => []);
+  const failed: string[] = [];
+  for (const u of uploads) {
+    const ok = await r2AbortMultipartUploadByKey(c.env, u.key, u.uploadId);
+    if (!ok) failed.push(u.key);
+  }
+  const aborted = uploads.length - failed.length;
+  if (aborted) await recordActivity(c.env, consoleActor(c), `إلغاء ${aborted} رفع غير مكتمل من كلاود`, 'delete');
+  return c.json({ ok: true, found: uploads.length, aborted, failed: failed.length, failed_keys: failed.slice(0, 50) });
+});
 
 app.get('/admin/r2/orphans', async (c) => {
   const objects = await listAllObjects(c.env);

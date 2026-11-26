@@ -195,6 +195,63 @@ export async function r2List(env: Env, prefix: string, maxKeys = 5000): Promise<
   return out;
 }
 
+/**
+ * Multipart uploads that were started and never finished.
+ *
+ * This is the one kind of storage the dashboard's «Bucket Size» counts but the
+ * object list cannot see: a 4 GB APK uploads in parts, and every part is already
+ * billed and already contributes to the bucket size while it is still invisible
+ * to ListObjects. A browser that is closed (or a mobile connection that drops)
+ * halfway through leaves those parts behind for ever — that is how a bucket with
+ * a catalogue of zero items reports hundreds of megabytes.
+ *
+ * Owner: «من اين اتى ذالك الحجم من التخزين» — this makes it countable and
+ * deletable instead of a number in the Cloudflare console with no explanation.
+ */
+export async function r2MultipartUploads(env: Env): Promise<{ key: string; uploadId: string; initiated?: string }[]> {
+  const out: { key: string; uploadId: string; initiated?: string }[] = [];
+  let marker: string | undefined;
+  for (let page = 0; page < 20; page++) {
+    const url = new URL(
+      `https://${r2Credentials(env).accountId}.r2.cloudflarestorage.com/${encodeURIComponent(r2Bucket(env))}`,
+    );
+    url.searchParams.set('uploads', '');
+    if (marker) url.searchParams.set('key-marker', marker);
+    let xml = '';
+    try {
+      const response = await clientFor(env).fetch(url, { method: 'GET' });
+      if (!response.ok) break;
+      xml = await response.text();
+    } catch { break; }
+    for (const m of xml.matchAll(/<Upload>([\s\S]*?)<\/Upload>/g)) {
+      const block = m[1];
+      const key = (block.match(/<Key>([\s\S]*?)<\/Key>/)?.[1] || '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      const uploadId = block.match(/<UploadId>([\s\S]*?)<\/UploadId>/)?.[1] || '';
+      const initiated = block.match(/<Initiated>([\s\S]*?)<\/Initiated>/)?.[1];
+      if (key && uploadId) out.push({ key, uploadId, initiated });
+    }
+    const truncated = /<IsTruncated>true<\/IsTruncated>/i.test(xml);
+    marker = xml.match(/<NextKeyMarker>([\s\S]*?)<\/NextKeyMarker>/)?.[1];
+    if (!truncated || !marker) break;
+  }
+  return out;
+}
+
+/** Drop the leftover parts of one unfinished multipart upload. */
+export async function r2AbortMultipartUploadByKey(env: Env, key: string, uploadId: string): Promise<boolean> {
+  try {
+    const url = new URL(
+      `https://${r2Credentials(env).accountId}.r2.cloudflarestorage.com/${encodeURIComponent(r2Bucket(env))}/${key.split('/').map(encodeURIComponent).join('/')}`,
+    );
+    url.searchParams.set('uploadId', uploadId);
+    const response = await clientFor(env).fetch(url, { method: 'DELETE' });
+    return response.ok || response.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 export async function r2Head(env: Env, key: string): Promise<{ size: number; contentType: string } | null> {
   try {
     const response = await clientFor(env).fetch(objectUrl(env, key), { method: 'HEAD' });

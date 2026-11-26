@@ -3532,6 +3532,11 @@
     const orphanBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } },
       orphanScan, orphanDelete, orphanOut);
 
+    const accountScan = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('search'), 'افحص أين ذهب الحجم');
+    const accountAbort = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, ico('trash'), 'ألغِ الرفع المنقطع');
+    accountAbort.disabled = true;
+    const accountOut = el('div', { style: { fontSize: '13px', lineHeight: '1.7', whiteSpace: 'pre-wrap', width: '100%' } });
+
     orphanScan.onclick = async () => {
       orphanScan.disabled = true;
       orphanOut.textContent = 'أقارن الحاوية بقاعدة البيانات…';
@@ -3570,6 +3575,69 @@
       } catch (e) {
         orphanOut.textContent = 'تعذّر الحذف: ' + ((e && e.message) || 'حاول لاحقاً');
       } finally { orphanDelete.disabled = false; }
+    };
+
+    /* ── Where the storage came from ─────────────────────────────────────────
+     * Owner: «من اين اتى ذالك الحجم من التخزين» — the Cloudflare panel showed
+     * 337 MB while the store held nothing. Two things make that number look
+     * impossible, and both are now shown instead of guessed:
+     *   • «Bucket Size» is an AVERAGE over the period, so it keeps reporting
+     *     bytes that were deleted hours ago. Only this audit is exact.
+     *   • the parts of an upload that never finished are stored (and billed)
+     *     but belong to no object, so no file list can show them.
+     */
+    const accountBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } },
+      accountScan, accountAbort, accountOut);
+
+    accountScan.onclick = async () => {
+      accountScan.disabled = true;
+      accountOut.textContent = 'أعدّ الملفات وأقارنها بقاعدة البيانات…';
+      try {
+        const r = await api('/api/admin/r2/audit', { timeoutMs: 120000 });
+        accountOut.innerHTML = '';
+        accountOut.append(
+          el('div', null, `في الحاوية الآن: ${formatNum(r.scanned_objects)} ملفاً · ${formatBytes(r.bytes_stored)}.`),
+          el('div', { style: { marginTop: '6px' } },
+            `مستخدم: ${formatNum(r.in_use)} ملفاً (${formatBytes(r.bytes_in_use)}) · غير مستخدم: ${formatNum(r.orphans)} ملفاً (${formatBytes(r.bytes_orphan)}).`),
+        );
+        if (r.unfinished_uploads) {
+          accountOut.append(el('div', { style: { marginTop: '8px', color: 'var(--danger)' } },
+            `${r.unfinished_uploads} رفع انقطع قبل نهايته — أجزاؤه محسوبة في حجم كلاود ولا تظهر بين الملفات.`));
+          accountOut.append(el('pre', { style: { marginTop: '6px', fontSize: '11px', whiteSpace: 'pre-wrap', direction: 'ltr', textAlign: 'left', opacity: '.85' } },
+            (r.unfinished_upload_keys || []).slice(0, 10)
+              .map((u) => `${u.key}  (${u.age_hours === null ? '?' : u.age_hours + ' ساعة'})`).join('\n')));
+          accountAbort.disabled = false;
+        } else {
+          accountAbort.disabled = true;
+          accountOut.append(el('div', { class: 'hint', style: { marginTop: '8px' } },
+            'لا يوجد رفع منقطع — كل ما في الحاوية ملفات معروفة.'));
+        }
+        if (r.orphans) {
+          accountOut.append(el('div', { class: 'hint', style: { marginTop: '8px' } },
+            'الملفات غير المستخدمة تُحذف من بطاقة «ملفات غير مستخدمة» أعلاه.'));
+        }
+        accountOut.append(el('div', { class: 'hint', style: { marginTop: '6px' } },
+          'ملاحظة: رقم «Bucket Size» في كلاود متوسط على الفترة، ويبقى مرتفعاً ساعات بعد الحذف — الرقم أعلاه هو الحقيقي.'));
+      } catch (e) {
+        accountOut.textContent = (e && e.status >= 500) ? 'الخادم لا يستجيب الآن — لم يتغيّر شيء.' : 'تعذّر الفحص.';
+      } finally { accountScan.disabled = false; }
+    };
+
+    accountAbort.onclick = async () => {
+      if (!confirm('إلغاء كل عمليات الرفع المنقطعة وحذف أجزائها من كلاود؟')) return;
+      accountAbort.disabled = true;
+      accountOut.textContent = 'أُلغي…';
+      try {
+        const r = await api('/api/admin/r2/audit/abort', { method: 'POST', body: { confirm: 'ABORT-UPLOADS' }, timeoutMs: 180000 });
+        accountOut.textContent = r.failed
+          ? `أُلغي ${r.aborted} وبقي ${r.failed} — أعد المحاولة.`
+          : `أُلغي ${r.aborted} رفعاً منقطعاً وحُذفت أجزاؤه — الحجم في كلاود سينخفض خلال ساعات.`;
+        toast(`أُلغي ${r.aborted} رفعاً منقطعاً`, 'success');
+        accountScan.click();
+      } catch (e) {
+        accountOut.textContent = 'تعذّر الإلغاء: ' + ((e && e.message) || 'حاول لاحقاً');
+        accountAbort.disabled = false;
+      }
     };
 
     /* ── Organise the bucket ──────────────────────────────────────────────────
@@ -3678,6 +3746,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('database'), 'من أين جاء حجم التخزين'),
+        el('div', { class: 'hint' }, 'يفحص الحاوية فعلياً: كم ملفاً، وكم منها مستخدم، وكم أجزاء رفع انقطعت قبل نهايته (كلاود يحسبها في «Bucket Size» ولا تظهر بين الملفات).'),
+        accountBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('grid'), 'ترتيب التخزين'),
         el('div', { class: 'hint' }, 'يعيد تسمية الملفات إلى «مجلد/اسم-التطبيق.امتداد» ويحدّث كل رابط في قاعدة البيانات. الملفات غير المستخدمة لا تُلمس.'),

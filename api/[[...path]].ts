@@ -472,11 +472,32 @@ async function resolveReview(c: any, slug: string, reviewId: string): Promise<an
 // النطاق الديناميكي
 function storeDomain(env: Env): string { return env.STORE_DOMAIN || 'goldenstore.online'; }
 
+/* Image URLs.
+ *
+ * These used to be wrapped in Cloudflare's `/cdn-cgi/image/…` resizer:
+ *   https://goldenstore.online/cdn-cgi/image/width=200,…/<r2 url>
+ * That transform is only available once Image Resizing is enabled for the zone.
+ * It is not — the endpoint returns 404 even for the site's own logo — so every
+ * icon, screenshot and feature image in the store was a broken 404, and a freshly
+ * published game looked «missing» because its card had no picture.
+ *
+ * The R2 public bucket URL serves the objects directly, already correctly typed
+ * (image/webp, image/jpeg), so the resize step is pure loss here. Set
+ * R2_IMAGE_TRANSFORM = "on" (wrangler.toml [vars]) to put the resizer back the
+ * day Image Resizing is enabled — no code change needed.
+ */
+function imageTransformEnabled(env: Env): boolean {
+  const v = String((env as any).R2_IMAGE_TRANSFORM || '').trim().toLowerCase();
+  return v === 'on' || v === 'true' || v === '1';
+}
+
 // دالة مساعدة لبناء روابط الصور
 function cdnImageUrl(key: string | undefined, env: Env, width: number): string | null {
   if (!key) return null;
-  try { 
-    return `https://${storeDomain(env)}/cdn-cgi/image/width=${width},format=auto,quality=80/${r2PublicUrl(key, env)}`; 
+  try {
+    const direct = r2PublicUrl(key, env);
+    if (!imageTransformEnabled(env)) return direct;
+    return `https://${storeDomain(env)}/cdn-cgi/image/width=${width},format=auto,quality=80/${direct}`;
   } catch { return null; }
 }
 

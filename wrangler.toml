@@ -3,23 +3,30 @@ main = "api/[[...path]].ts"
 compatibility_date = "2026-10-05"
 compatibility_flags = ["nodejs_compat"]
 
-# Routes and workers_dev belong at the TOP LEVEL — never under [triggers].
-# When they sit inside [triggers], wrangler prints
-# «Unexpected fields found in triggers field: "workers_dev","routes"»,
-# silently DROPS them, and the deploy still exits 0. The Worker then serves on
-# workers.dev only while every route is dead — which is exactly what produced
-# the 522 outage: api.goldenstore.online stayed on Cloudflare's 100::
-# placeholder (no Worker bound), so the Pages proxy in functions/api/[...path].ts
-# got a connection timeout forwarding to it.
+# workers_dev belongs at the TOP LEVEL — never under [triggers]. When it sits
+# inside [triggers], wrangler prints «Unexpected fields found in triggers field»
+# and silently DROPS it while the deploy still exits 0.
 workers_dev = true
 
-# Same-origin /api/* on the site, plus the hostname the Pages Function proxy
-# forwards to. goldenstore.online must be an active zone in this account.
-routes = [
-  { pattern = "goldenstore.online/api/*", zone_name = "goldenstore.online" },
-  { pattern = "www.goldenstore.online/api/*", zone_name = "goldenstore.online" },
-  { pattern = "api.goldenstore.online", custom_domain = true }
-]
+# ── Routes are DISABLED, deliberately ────────────────────────────────────────
+# They cannot be applied: the zone goldenstore.online is not reachable with this
+# account's credentials, so wrangler fails every deploy with
+#     The zone "goldenstore.online" does not exist on your account. [code: 10084]
+#     Can't infer zone from route, please specify zone for "api.goldenstore.online" [10082]
+# and api.goldenstore.online stays on Cloudflare's 100:: placeholder (no Worker
+# bound). That unbound hostname was the source of the 522 outage: the Pages proxy
+# in functions/api/[[path]].ts forwarded /api/* to it and timed out.
+#
+# The proxy now calls the Worker's workers.dev hostname instead, which works with
+# zero zone permissions — so nothing needs these routes. Uncomment them (and move
+# the zone into the account that owns the deploy token) to serve /api/* straight
+# from the custom domain again.
+#
+# routes = [
+#   { pattern = "goldenstore.online/api/*", zone_name = "goldenstore.online" },
+#   { pattern = "www.goldenstore.online/api/*", zone_name = "goldenstore.online" },
+#   { pattern = "api.goldenstore.online", custom_domain = true }
+# ]
 
 # Process scheduled pushes every 5 minutes (Advanced Push System).
 [triggers]

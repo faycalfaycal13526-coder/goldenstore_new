@@ -176,6 +176,7 @@
       { key: 'categories', icon: 'grid', label: t('الفئات') },
       { key: 'activity', icon: 'clock', label: t('سجل النشاطات') },
       { key: 'team', icon: 'shield', label: t('المشرفون والصلاحيات') },
+      { key: 'security', icon: 'lock', label: t('كلمة السر والأمان') },
       { key: 'backup', icon: 'storage', label: t('النسخ الاحتياطي') },
       { key: 'storage-cleanup', icon: 'cloud', label: t('تنظيف كلاود') },
       { key: 'cloud', icon: 'cloud', label: t('كلاود R2') },
@@ -957,6 +958,7 @@
     else if (activeTab === 'categories') await renderCategories(body);
     else if (activeTab === 'activity') await renderActivity(body);
     else if (activeTab === 'team') await renderTeam(body);
+    else if (activeTab === 'security') await renderSecurity(body);
     else if (activeTab === 'backup') await renderBackup(body);
     else if (activeTab === 'storage-cleanup') await renderStorageCleanup(body);
     else if (activeTab === 'cloud') await renderCloudPanel(body);
@@ -3219,6 +3221,77 @@
         el('div', { class: 'admin-table-toolbar' }, filter),
         rows.length ? el('div', { class: 'table-wrap' }, table)
           : el('div', { class: 'hint' }, t('لا نشاطات بعد'))),
+    );
+  }
+
+  /* ===================== كلمة السر والأمان =====================
+     The admin password used to live only in the Worker secret, so changing it
+     meant opening Cloudflare. It can now be changed here; the server stores a
+     PBKDF2 hash (never the text) and it wins over the secret. The current
+     password is required, so a stolen session cannot lock the owner out. */
+  async function renderSecurity(body) {
+    body.innerHTML = '<div class="center-spinner"><div class="spinner"></div></div>';
+    let status = { custom: false, source: 'worker_secret', updated_at: 0, min_length: 8 };
+    try { status = await api('/api/admin/password/status'); } catch (e) {}
+
+    const current = el('input', { class: 'input', type: 'password', autocomplete: 'current-password', 'aria-label': t('كلمة السر الحالية') });
+    const next = el('input', { class: 'input', type: 'password', autocomplete: 'new-password', 'aria-label': t('كلمة السر الجديدة') });
+    const confirm = el('input', { class: 'input', type: 'password', autocomplete: 'new-password', 'aria-label': t('تأكيد كلمة السر') });
+    const show = el('input', { type: 'checkbox' });
+    show.addEventListener('change', () => {
+      for (const f of [current, next, confirm]) f.type = show.checked ? 'text' : 'password';
+    });
+    const msg = el('div', { class: 'hint', style: { minHeight: '20px' } });
+    const saveBtn = el('button', { class: 'btn btn-primary', type: 'button' }, ico('check'), 'حفظ كلمة السر');
+
+    saveBtn.onclick = async () => {
+      msg.textContent = '';
+      if ((next.value || '').length < 8) { msg.textContent = 'كلمة السر يجب أن تكون ٨ محارف على الأقل.'; return; }
+      if (next.value !== confirm.value) { msg.textContent = 'التأكيد لا يطابق كلمة السر الجديدة.'; return; }
+      saveBtn.disabled = true;
+      try {
+        await api('/api/admin/password', {
+          method: 'POST',
+          body: { current_password: current.value, new_password: next.value, confirm_password: confirm.value },
+        });
+        toast('تم تغيير كلمة السر — استخدمها في الدخول القادم', 'success');
+        current.value = ''; next.value = ''; confirm.value = '';
+        renderApp();
+      } catch (e) {
+        const code = String((e && e.message) || '');
+        msg.textContent = {
+          wrong_current_password: 'كلمة السر الحالية غير صحيحة.',
+          password_too_short: 'كلمة السر الجديدة قصيرة (٨ محارف على الأقل).',
+          password_mismatch: 'التأكيد لا يطابق.',
+          password_unchanged: 'كلمة السر الجديدة مطابقة للحالية.',
+        }[code] || ('تعذّر الحفظ: ' + code);
+      } finally { saveBtn.disabled = false; }
+    };
+
+    const field = (label, input, hint) => el('div', { class: 'field' },
+      el('label', null, label), input, hint ? el('div', { class: 'hint' }, hint) : null);
+
+    body.innerHTML = '';
+    body.append(
+      el('div', { class: 'admin-page-head' },
+        el('div', null,
+          el('h1', { class: 'admin-page-title' }, 'كلمة السر والأمان'),
+          el('p', { class: 'admin-page-sub' }, 'غيّر كلمة سر لوحة الإدارة من هنا — بلا حاجة لفتح Cloudflare.'))),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('lock'), 'كلمة سر لوحة الإدارة'),
+        el('div', { class: 'hint', style: { marginBottom: '12px' } },
+          status.custom
+            ? `كلمة السر مخصّصة من لوحة التحكم${status.updated_at ? ' — آخر تغيير: ' + new Date(status.updated_at * 1000).toLocaleDateString('ar-EG-u-nu-latn') : ''}`
+            : 'كلمة السر الحالية هي السرّ المضبوط على Worker — بعد الحفظ من هنا تصبح هذه هي المعتمدة.'),
+        field('كلمة السر الحالية', current),
+        field('كلمة السر الجديدة', next, '٨ محارف على الأقل — يُفضّل حروف وأرقام ورموز.'),
+        field('تأكيد كلمة السر الجديدة', confirm),
+        el('label', { class: 'admin-update-row', style: { cursor: 'pointer' } }, show, el('span', null, 'إظهار كلمة السر')),
+        saveBtn, msg),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('shield'), 'ملاحظات'),
+        el('div', { class: 'hint' }, 'تغيير كلمة السر يُبطل الجلسات القديمة على أجهزة أخرى. ' +
+          'إن نسيت كلمة السر، يمكن دائماً استخدام السرّ المضبوط على Worker (ADMIN_PASSWORD) للدخول ثم تغييرها.')),
     );
   }
 

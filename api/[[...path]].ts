@@ -6296,10 +6296,14 @@ export async function scheduled(_controller: any, env: Env, ctx: any) {
       ctx.waitUntil(processScheduledPushes(env));
       ctx.waitUntil(drainDeliveryJobs(env));
       ctx.waitUntil(publishDueApps(env));
+      // Keep topic membership healthy: subscribe one chunk of still-unsubscribed
+      // native devices per tick so announcements use the instant topic path.
+      ctx.waitUntil(syncTopicSubscriptions(env, { limit: 100, all: false }));
     } else {
       await processScheduledPushes(env);
       await drainDeliveryJobs(env);
       await publishDueApps(env);
+      await syncTopicSubscriptions(env, { limit: 100, all: false });
     }
   } catch (error: any) {
     console.error('[push] cron failed:', error?.message || error);

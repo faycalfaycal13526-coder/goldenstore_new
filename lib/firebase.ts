@@ -1183,24 +1183,37 @@ export type TopicSubResult = {
   ok: boolean; permanent: boolean; status: number; code: string;
 };
 
+/* Server-side topic management uses the Instance ID (IID) API, NOT the FCM
+ * v1 messages endpoint. The previous URL
+ * `fcm.googleapis.com/v1/projects/.../registrations/.../topicSubscriptions`
+ * does not exist, so every subscription silently failed and ALL devices stayed
+ * topic_subscribed = 0 — forcing every announcement down the slow per-device
+ * direct path (300-cap + queued chunks). The Firebase Admin SDK itself still
+ * subscribes via `iid.googleapis.com/iid/v1`. When authenticating with an
+ * OAuth2 access token (not the legacy server key) the `access_token_auth: true`
+ * header is REQUIRED. */
 export async function subscribeTokenToTopic(
   env: Env, token: string, topic: string,
 ): Promise<TopicSubResult> {
-  const credentials = getCredentials(env);
   const accessToken = await getAccessToken(env, FCM_SCOPE);
-  const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}`
-    + `/registrations/${encodeURIComponent(token)}/topicSubscriptions?topic_name=${encodeURIComponent(topic)}`;
+  const url = `https://iid.googleapis.com/iid/v1/${encodeURIComponent(token)}/rel/topics/${encodeURIComponent(topic)}`;
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: '{}',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        access_token_auth: 'true',
+      },
+      body: '',
     });
-    if (response.ok || response.status === 409) {
-      return { ok: true, permanent: false, status: response.status, code: response.status === 409 ? 'ALREADY_EXISTS' : 'OK' };
+    if (response.ok) {
+      return { ok: true, permanent: false, status: response.status, code: 'OK' };
     }
     const payload: any = await response.json().catch(() => ({}));
-    const code = String(payload?.error?.status || payload?.error?.message || response.statusText || '');
+    // IID returns a flat string code, e.g. {"error":"NOT_FOUND"}.
+    const code = String(payload?.error?.status || payload?.error?.message
+      || payload?.error || response.statusText || '');
     const kind = classifyFcmError(response.status, code);
     return { ok: false, permanent: kind === 'permanent', status: response.status, code };
   } catch (error: any) {
@@ -1211,15 +1224,16 @@ export async function subscribeTokenToTopic(
 export async function unsubscribeTokenFromTopic(
   env: Env, token: string, topic: string,
 ): Promise<boolean> {
-  const credentials = getCredentials(env);
   const accessToken = await getAccessToken(env, FCM_SCOPE);
-  const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(credentials.projectId)}`
-    + `/registrations/${encodeURIComponent(token)}/topicSubscriptions/${encodeURIComponent(topic)}?allow_missing=true`;
+  const url = `https://iid.googleapis.com/iid/v1/${encodeURIComponent(token)}/rel/topics/${encodeURIComponent(topic)}`;
   try {
     const response = await fetch(url, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: '{}',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        access_token_auth: 'true',
+      },
     });
     return response.ok || response.status === 404;
   } catch { return false; }

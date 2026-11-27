@@ -6173,6 +6173,45 @@ app.delete('/apps/:slug/follow', async (c) => {
 app.get('/admin/apps/:slug/followers', async (c) =>
   c.json({ count: await appFollowerCount(c.env, c.req.param('slug')) }));
 
+/* TEMPORARY upload diagnostic — guarded by DIAG_KEY. GET runs the exact
+ * multipart cycle the console uses (create → 10 MB part → complete → head →
+ * delete) server-side. PUT echoes how many body bytes arrived, to test the
+ * Pages-proxy body path. Removed once the upload failure is located. */
+app.all('/__upload-diag', async (c) => {
+  const want = String((c.env as any).DIAG_KEY || '');
+  const got = String(c.req.query('key') || '');
+  if (!want || !got || !constantTimeEqual(got, want)) return c.json({ error: 'not_found' }, 404);
+  c.header('Cache-Control', 'no-store');
+  if (c.req.method === 'PUT') {
+    const t0 = Date.now();
+    const buf = await c.req.arrayBuffer();
+    return c.json({ received_bytes: buf.byteLength, ms: Date.now() - t0, cl: c.req.header('content-length') || null });
+  }
+  const out: any = { bucket: r2Bucket(c.env), steps: {} };
+  const key = `health/up-diag-${Date.now()}.apk`;
+  try {
+    let t = Date.now();
+    const uploadId = await r2CreateMultipartUpload(c.env, key, 'application/vnd.android.package-archive');
+    out.steps.create = { ok: true, ms: Date.now() - t };
+    t = Date.now();
+    const part = new Uint8Array(10 * 1024 * 1024);
+    const etag = await r2PutUploadPart(c.env, key, uploadId, 1, part);
+    out.steps.part_10mb = { ok: true, ms: Date.now() - t, etag };
+    t = Date.now();
+    await r2CompleteMultipartUpload(c.env, key, uploadId, [{ PartNumber: 1, ETag: etag }]);
+    out.steps.complete = { ok: true, ms: Date.now() - t };
+    const head = await r2Head(c.env, key);
+    out.steps.head = { ok: !!head, size: head?.size || 0 };
+    await r2DeleteStrict(c.env, key);
+    out.steps.cleanup = { ok: true };
+    out.ok = true;
+  } catch (e: any) {
+    out.ok = false;
+    out.error = String(e?.message || e).slice(0, 500);
+  }
+  return c.json(out);
+});
+
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => { console.error('[api error]', err); return c.json({ error: 'internal_error' }, 500); });
 

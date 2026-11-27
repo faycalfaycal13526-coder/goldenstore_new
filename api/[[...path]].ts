@@ -942,6 +942,15 @@ app.get('/app-update/download', async (c) => {
    * and resumes natively. One hop is saved, not the transfer; the bytes always
    * came from the bucket.
    */
+  // Prefer the edge-cached production media path when the release points at the
+  // bucket's public object; r2.dev is uncached/throttled and made this slow.
+  try {
+    const pub = String(c.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+    if (pub && apkUrl.startsWith(pub + '/')) {
+      const key = apkUrl.slice(pub.length + 1).split('?')[0];
+      if (key.startsWith('apk/')) return c.redirect(`https://${storeDomain(c.env)}/api/media/${key}`, 302);
+    }
+  } catch { /* keep the stored URL */ }
   return c.redirect(apkUrl, 302);
 });
 
@@ -1680,6 +1689,10 @@ async function purgeMediaUrl(env: Env, key: unknown): Promise<void> {
       try { await cache.delete(new Request(`${host}/__edge/media/${w}/${k}`)); } catch { /* best effort */ }
     }
   }
+  // The full-object APK cache entry (edge-cached downloads).
+  for (const host of [`https://${storeDomain(env)}`, 'https://goldenstore.online', 'https://www.goldenstore.online']) {
+    try { await cache.delete(new Request(`${host}/__edge/media/full/${k}`)); } catch { /* best effort */ }
+  }
 }
 
 function appsCacheKey(request: Request): Request {
@@ -1832,8 +1845,13 @@ app.get('/apps/:slug/download', async (c) => {
   // expiry, Range support) fixes every client at once, including an older
   // installed app whose bundled/cached JS still points here.
   const disposition = `attachment; filename="${filename}"`;
+  // Serve through the edge-cached production media path (fast, resumable, cached
+  // at the colo nearest the phone). The r2.dev public URL is a DEVELOPMENT
+  // endpoint: uncached and throttled, which made large APK downloads slow.
+  try {
+    return c.redirect(`https://${storeDomain(c.env)}/api/media/${appData.apk_key}`, 302);
+  } catch { /* fall back to the public object below */ }
   if (prefersDirectDownload(c)) {
-    // Android installs the file itself: hand it the object and skip the hop.
     try {
       return c.redirect(`${r2PublicUrl(appData.apk_key, c.env)}`
         + `?response-content-disposition=${encodeURIComponent(disposition)}`, 302);
@@ -2946,7 +2964,7 @@ async function recordDownloadEvent(env: Env, slug: string, platform = 'web') {
    and belong on the download path, where the browser's own downloader can
    resume them).
    ========================================================================= */
-const MEDIA_FOLDERS = new Set(['icon', 'feature', 'ss', 'vthumb', 'logo', 'screenshots', 'images', 'thumbs']);
+const MEDIA_FOLDERS = new Set(['icon', 'feature', 'ss', 'vthumb', 'logo', 'screenshots', 'images', 'thumbs', 'apk']);
 app.get('/media/*', async (c) => {
   const raw = decodeURIComponent(c.req.path.replace(/^\/(?:api\/)?media\//, ''));
   const key = raw.replace(/^\/+/, '');
@@ -2954,23 +2972,40 @@ app.get('/media/*', async (c) => {
   const folder = key.split('/')[0];
   if (!MEDIA_FOLDERS.has(folder)) return c.json({ error: 'not_found' }, 404);
   if (rateLimit(getClientIp(c), 'media', 600, 60)) { /* counted, never blocked */ }
+  const isApk = folder === 'apk';
+  const range = c.req.header('range') || undefined;
+  const cache = appsCache();
+  // APKs are large and immutable-per-version: cache the FULL object at the edge
+  // so repeat downloads are served from the colo nearest the phone instead of
+  // streaming from the bucket (or the uncached, throttled r2.dev dev URL) every
+  // time. Range/resume requests bypass the cache and stream from R2.
+  const cacheKey = isApk && cache ? new Request(`https://${storeDomain(c.env)}/__edge/media/full/${key}`) : null;
+  const copyHeaders = (src: Headers, extra: Record<string, string> = {}): Record<string, string> => {
+    const h: Record<string, string> = {
+      'Content-Type': src.get('content-type') || 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes', ...extra,
+    };
+    for (const name of ['content-length', 'content-range', 'etag', 'last-modified', 'cache-control', 'content-disposition']) {
+      const v = src.get(name); if (v) h[name] = v;
+    }
+    return h;
+  };
   try {
-    const response = await r2GetObject(c.env, key, c.req.header('range') || undefined,
-      c.req.header('if-none-match') || undefined);
+    if (cacheKey && !range) {
+      const hit = await cache.match(cacheKey);
+      if (hit) return c.body(hit.body as any, hit.status as any, copyHeaders(hit.headers, { 'X-Cache': 'HIT' }));
+    }
+    const response = await r2GetObject(c.env, key, range, c.req.header('if-none-match') || undefined);
     if (!response) return c.json({ error: 'not_found' }, 404);
     // c.body() (not a raw Response) so the CORS middleware's headers survive —
     // the installed app fetches media cross-origin from https://localhost.
-    const headers: Record<string, string> = {
-      'Content-Type': response.headers.get('content-type') || 'application/octet-stream',
-      'Cache-Control': MEDIA_CACHE,
-      'X-Content-Type-Options': 'nosniff',
-      'Accept-Ranges': 'bytes',
-    };
-    for (const h of ['content-length', 'content-range', 'etag', 'last-modified']) {
-      const v = response.headers.get(h);
-      if (v) headers[h] = v;
+    const extra: Record<string, string> = { 'Cache-Control': isApk ? 'public, max-age=86400, stale-while-revalidate=604800' : MEDIA_CACHE };
+    if (isApk) extra['Content-Disposition'] = `attachment; filename="${key.split('/').pop() || 'download.apk'}"`;
+    const out = c.body(response.body as any, response.status as any, copyHeaders(response.headers, extra));
+    if (cacheKey && !range && response.status === 200) {
+      try { (c as any).executionCtx?.waitUntil?.(cache.put(cacheKey, out.clone())); } catch { /* cache is best-effort */ }
     }
-    return c.body(response.body as any, response.status as any, headers);
+    return out;
   } catch {
     return c.json({ error: 'media_unavailable' }, 502);
   }
@@ -4299,7 +4334,9 @@ app.post('/admin/apps/:id/apk', async (c) => {
   } else {
     push = { skipped: 'deferred_until_media' };
   }
+  if (announce) { try { (c as any).executionCtx?.waitUntil?.(drainDeliveryJobs(c.env, 6)); } catch { /* best effort */ } }
   await purgeAppsCache(c.env);
+  await purgeMediaUrl(c.env, body.apk_key);
   return c.json({
     ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null,
     notified, push, first_file: wasShell, deferred: wasShell && deferPublish,
@@ -4339,6 +4376,9 @@ app.post('/admin/apps/:id/publish', async (c) => {
       push = { error: 'notification_failed', message: String(e?.message || e) };
     }
   }
+  // Drain any queued delivery chunks in the background so the announcement
+  // reaches every device now, not on the next 5-minute cron tick.
+  try { (c as any).executionCtx?.waitUntil?.(drainDeliveryJobs(c.env, 6)); } catch { /* best effort */ }
   await purgeAppsCache(c.env);
   await recordActivity(c.env, consoleActor(c), `نشر «${row.name}» بعد اكتمال الصور`, 'publish');
   return c.json({ ok: true, notified, push });

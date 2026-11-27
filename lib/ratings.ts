@@ -34,14 +34,16 @@ export interface VoteAggregate {
 }
 
 const EMPTY_DIST = (): Record<string, number> => ({ '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 });
-const reviewSchemaReady = new WeakSet<object>();
+// Module-level flag — env.DB is a fresh proxy per access, so a WeakSet on it
+// never hits (the DDL re-ran on every rating read). One DB per Worker.
+let reviewSchemaReady = false;
 
 /** Likes/reports tables are created lazily. A deletion must never fail just
     because nobody ever liked or reported a review on a fresh database. */
 export async function ensureReviewTables(env: Env): Promise<void> {
   const db: any = (env as any)?.DB;
-  if (!db || reviewSchemaReady.has(db)) return;
-  reviewSchemaReady.add(db);
+  if (!db || reviewSchemaReady) return;
+  reviewSchemaReady = true;
   const ddl = [
     `CREATE TABLE IF NOT EXISTS review_likes (
        id TEXT PRIMARY KEY, review_id TEXT, user_id TEXT, created_at INTEGER)`,

@@ -13,13 +13,15 @@ const USAGE_SCHEMA = [
      updated_at INTEGER NOT NULL
    )`,
 ];
-const usageSchemaReady = new WeakSet<object>();
+// Module-level flag — env.DB is a fresh proxy per access, so a WeakSet on it
+// never hits and the CREATE TABLE re-ran on every counted Firebase call.
+let usageSchemaReady = false;
 
 export async function ensureUsageSchema(env: Env): Promise<void> {
   const db: any = env.DB;
-  if (usageSchemaReady.has(db)) return;
+  if (usageSchemaReady) return;
   for (const sql of USAGE_SCHEMA) await db.prepare(sql).run();
-  usageSchemaReady.add(db);
+  usageSchemaReady = true;
 }
 
 /** Fire-and-forget-friendly counter. Never throws into the caller. */

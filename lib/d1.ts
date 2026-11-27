@@ -607,14 +607,16 @@ const SUPPORT_SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at)`,
 ];
 
-// Remember which D1 binding already has the schema (per isolate / per test DB).
-const supportSchemaReady = new WeakSet<object>();
+// Module-level flag: `env.DB` is a fresh binding proxy on every access, so a
+// WeakSet keyed on it never hits and the DDL batch re-ran on every call.
+// One D1 database per Worker → one flag per isolate is the correct guard.
+let supportSchemaReady = false;
 
 export async function ensureSupportSchema(env: Env): Promise<void> {
   const db: any = env.DB;
-  if (supportSchemaReady.has(db)) return;
+  if (supportSchemaReady) return;
   for (const sql of SUPPORT_SCHEMA) await db.prepare(sql).run();
-  supportSchemaReady.add(db);
+  supportSchemaReady = true;
 }
 
 /* =========================================================================
@@ -626,11 +628,11 @@ export async function ensureSupportSchema(env: Env): Promise<void> {
    The column is added lazily with an idempotent ALTER, so no manual
    migration is needed on an existing D1 database.
    ========================================================================= */
-const userNotifSchemaReady = new WeakSet<object>();
+let userNotifSchemaReady = false;
 export async function ensureUserNotificationSchema(env: Env): Promise<void> {
   const db: any = env.DB;
-  if (!db || userNotifSchemaReady.has(db)) return;
-  userNotifSchemaReady.add(db);
+  if (!db || userNotifSchemaReady) return;
+  userNotifSchemaReady = true;
   const ddl = [
     `ALTER TABLE notifications ADD COLUMN uid TEXT NOT NULL DEFAULT ''`,
     `CREATE INDEX IF NOT EXISTS idx_notifications_uid ON notifications(uid, created_at DESC)`,
@@ -856,14 +858,14 @@ const VIDEO_SCHEMA = [
 // first deployment, so the upgrade ALTER runs separately and is allowed to
 // fail with "duplicate column name" on fresh databases.
 const VIDEO_UPGRADES = [`ALTER TABLE app_videos ADD COLUMN thumb_key TEXT`];
-const videoSchemaReady = new WeakSet<object>();
+let videoSchemaReady = false;
 
 export async function ensureVideosSchema(env: Env): Promise<void> {
   const db: any = env.DB;
-  if (videoSchemaReady.has(db)) return;
+  if (videoSchemaReady) return;
   for (const sql of VIDEO_SCHEMA) await db.prepare(sql).run();
   for (const sql of VIDEO_UPGRADES) { try { await db.prepare(sql).run(); } catch { /* already present */ } }
-  videoSchemaReady.add(db);
+  videoSchemaReady = true;
 }
 
 function videoFromRow(r: any): AppVideo {

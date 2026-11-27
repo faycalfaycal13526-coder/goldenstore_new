@@ -75,14 +75,15 @@ const ADVANCED_UPGRADES = [
   `ALTER TABLE push_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'legacy'`,
   `ALTER TABLE push_jobs ADD COLUMN tokens TEXT`,
 ];
-const advancedSchemaReady = new WeakSet<object>();
+// Module-level flag — env.DB is a fresh proxy per access (WeakSet never hits).
+let advancedSchemaReady = false;
 
 export async function ensureAdvancedSchema(env: Env): Promise<void> {
   // Tables first, upgrades second, indexes LAST (legacy-DB regression).
   await ensurePushSchema(env);
   await ensureUsageSchema(env);
   const db: any = env.DB;
-  if (advancedSchemaReady.has(db)) return;
+  if (advancedSchemaReady) return;
   for (const sql of ADVANCED_SCHEMA) await db.prepare(sql).run();
   for (const sql of ADVANCED_UPGRADES) {
     try { await db.prepare(sql).run(); } catch { /* column already exists */ }
@@ -91,7 +92,7 @@ export async function ensureAdvancedSchema(env: Env): Promise<void> {
     try { await db.prepare(sql).run(); }
     catch (error: any) { console.warn('[push] optional index skipped:', error?.message || error); }
   }
-  advancedSchemaReady.add(db);
+  advancedSchemaReady = true;
 }
 
 /* -------------------------------------------------------------------------

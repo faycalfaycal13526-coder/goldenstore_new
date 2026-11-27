@@ -294,6 +294,11 @@ app.use('*', async (c, next) => {
   const cfg = await maintenanceConfig(c);
   if (!maintenanceActive(cfg)) return next();
   if (await hasAdminSession(c)) return next();
+  /* The console's «معاينة الموقع» button issues this signed, 10-minute cookie.
+   * The gate MUST honour it: /settings already reports maintenance_preview to
+   * the client (which unlocks the UI), but without this check every other API
+   * call still answered 503 — the owner saw an unlocked, EMPTY store. */
+  if (await hasMaintenancePreview(c)) return next();
   const now = nowSec();
   c.header('Cache-Control', 'no-store');
   c.header('Retry-After', String(Math.max(1, maintenanceRemaining(cfg, now))));
@@ -364,10 +369,16 @@ const CONSOLE_SCHEMA = [
      username TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'viewer', created_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_activity_ts ON admin_activity(ts DESC)`,
 ];
-const consoleReady = new WeakSet<object>();
+/* Schema guards are MODULE-LEVEL flags, not WeakSets keyed on env.DB.
+ * As documented at ensureAnalyticsTables below, `env.DB` is a binding proxy
+ * and `env.DB === env.DB` is false — a WeakSet keyed on it NEVER hits, so every
+ * request re-ran the whole CREATE TABLE batch (six D1 round trips on the busiest
+ * public route). One flag per isolate is the correct memoisation: the Worker is
+ * bound to exactly one D1 database, and a new deploy starts a fresh isolate. */
+let consoleReady = false;
 async function ensureConsoleTables(db: any) {
-  if (!db || consoleReady.has(db)) return;
-  consoleReady.add(db);
+  if (!db || consoleReady) return;
+  consoleReady = true;
   for (const sql of CONSOLE_SCHEMA) { try { await db.prepare(sql).run(); } catch { /* best effort */ } }
 }
 /* What the storefront must NOT show: its publication row says draft/scheduled.
@@ -769,10 +780,10 @@ const DOWNLOAD_STATS_UPGRADES = [
    EXACTLY ONCE and keep every real download recorded since the reset. The
    `restored` flag makes the UPSERT idempotent across cold starts/deploys. */
 const DOWNLOAD_RESTORE_BASELINE = 4000;
-const downloadStatsReady = new WeakSet<object>();
+let downloadStatsReady = false;
 async function ensureDownloadStatsSchema(env: Env): Promise<void> {
   const db: any = env.DB;
-  if (downloadStatsReady.has(db)) return;
+  if (downloadStatsReady) return;
   for (const sql of DOWNLOAD_STATS_SCHEMA) await db.prepare(sql).run();
   for (const sql of DOWNLOAD_STATS_UPGRADES) { try { await db.prepare(sql).run(); } catch { /* already present */ } }
   // If the durable row does not exist yet, carry over the legacy column so
@@ -793,7 +804,7 @@ async function ensureDownloadStatsSchema(env: Env): Promise<void> {
         restored = 1`)
     .bind(DOWNLOAD_RESTORE_BASELINE + legacySeed,
           DOWNLOAD_RESTORE_BASELINE, DOWNLOAD_RESTORE_BASELINE).run();
-  downloadStatsReady.add(db);
+  downloadStatsReady = true;
 }
 async function bumpDownloadCount(env: Env): Promise<number> {
   await ensureDownloadStatsSchema(env);
@@ -915,8 +926,13 @@ app.get('/app-update/download', async (c) => {
     if (row?.apk_url) apkUrl = row.apk_url;
   } catch {}
   if (!apkUrl) return c.json({ error: 'apk_not_available' }, 404);
-  await bumpDownloadCount(c.env).catch(() => {});
-  await recordDownloadEvent(c.env, 'app-update', 'web');
+  // Headless checkers and crawlers must not inflate the public counter — the
+  // same rule the per-app download route already applies.
+  const ua = String(c.req.header('user-agent') || '');
+  if (!/bot|crawler|spider|preview|headless/i.test(ua)) {
+    await bumpDownloadCount(c.env).catch(() => {});
+    await recordDownloadEvent(c.env, 'app-update', 'web');
+  }
   /* Owner: «اضن سبب الثقل الموقع لانه بعيد» — for an APK this is measurable.
    *
    * The site is served by Pages, whose /api/* hop is a second full request to a
@@ -1112,7 +1128,7 @@ app.get('/notifications/like-diagnostics', async (c) => {
 });
 
 app.get('/notifications', async (c) => {
-  const limit = Math.min(Number(c.req.query('limit') || '30'), 50);
+  const limit = safeInt(c.req.query('limit') || '30', 1, 50);
   // The per-user column is created lazily; on an existing database this ALTER
   // is what makes the private-row queries below possible.
   await ensureUserNotificationSchema(c.env).catch(() => {});
@@ -1133,7 +1149,8 @@ app.get('/notifications', async (c) => {
 
 // Notifications Tokens (D1)
 async function requireFirebaseUser(c: any) {
-  const token = c.req.header('authorization')?.replace('Bearer ', '') || '';
+  // Case-insensitive: HTTP auth schemes are case-insensitive ('bearer …' is valid).
+  const token = (c.req.header('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   return token ? verifyFirebaseToken(token, c.env) : null;
 }
 
@@ -1270,10 +1287,10 @@ app.post('/notifications/self-test', async (c) => {
 // bot-block page. The old route mistook that failure for a valid translation
 // and cached the unchanged Arabic source forever, so any string missing from
 // the curated dictionary could never be translated.
-const translateReady = new WeakSet<object>();
+let translateReady = false;
 async function ensureTranslateCache(db: any) {
-  if (!db || translateReady.has(db)) return;
-  translateReady.add(db);
+  if (!db || translateReady) return;
+  translateReady = true;
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS i18n_cache (
       id TEXT PRIMARY KEY,
@@ -1717,9 +1734,15 @@ app.get('/apps', async (c) => {
     try {
       const hit = await cache.match(cacheKey);
       if (hit) {
-        const out = new Response(hit.body, hit);
-        out.headers.set('X-GS-Cache', 'HIT');
-        return out;
+        /* Return through c.body(), NOT a raw `new Response()`: Hono only applies
+         * the middleware's c.header() values (CORS!) to responses it creates
+         * itself. A raw Response dropped Access-Control-Allow-Origin, so every
+         * cache HIT failed CORS inside the Capacitor APK (origin https://localhost)
+         * while a MISS worked — the store looked randomly empty in the app. */
+        const hitHeaders: Record<string, string> = {};
+        hit.headers.forEach((v: string, k: string) => { hitHeaders[k] = v; });
+        hitHeaders['X-GS-Cache'] = 'HIT';
+        return c.body(hit.body, 200, hitHeaders);
       }
     } catch { /* a cache miss must never fail the request */ }
   }
@@ -1841,7 +1864,9 @@ app.post('/apps/:slug/star', async (c) => {
   if (!appData) return c.json({ error: 'not_found' }, 404);
 
   const rating = Math.round(Number(body.rating)), clientFp = String(body.fp || '').trim();
-  if (rating < 1 || rating > 5 || clientFp.length < 16) return c.json({ error: 'invalid_data' }, 400);
+  // NaN passes both `< 1` and `> 5` as false — it must be rejected explicitly,
+  // otherwise the INSERT binds NaN and D1 answers with a 500.
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5 || clientFp.length < 16) return c.json({ error: 'invalid_data' }, 400);
 
   // A rating is only published together with a written comment. Stars on their
   // own are no longer accepted, so every row in the list is an actual review.
@@ -1874,7 +1899,8 @@ app.post('/apps/:slug/star', async (c) => {
   const ts = nowSec();
   return c.json({
     ok: true, rating: newAvg, rating_count: newCount,
-    review: { id: voteId, name: body.name || 'مستخدم', rating, comment, has_comment: true, photo_url: body.photo_url, ts, likes_count: 0, liked: false },
+    // Echo the SANITISED values (the same ones stored), never the raw body.
+    review: { id: voteId, name: sanitizeText(body.name, 60) || 'مستخدم', rating, comment, has_comment: true, photo_url: sanitizeUrl(body.photo_url) || null, ts, likes_count: 0, liked: false },
   });
 });
 
@@ -2192,7 +2218,10 @@ app.get('/me', async (c) => {
    Requires the CURRENT password (a stolen session alone cannot lock the owner
    out), a new one of at least 8 characters, and a confirmation that matches.
    The stored hash replaces the Worker secret from then on. */
-app.get('/admin/password/status', async (c) => {
+/* Registered BEFORE `app.use('/admin/*', requireAdmin)` below, and the central
+ * write guard only covers POST/PUT/PATCH/DELETE — so this GET needs its OWN
+ * explicit guard, or anyone could read whether/when the password was changed. */
+app.get('/admin/password/status', requireAdmin, async (c) => {
   const stored = await storedPasswordHash(c.env);
   let updated = 0;
   try {
@@ -2812,10 +2841,10 @@ async function ensureAnalyticsTables(env: Env) {
   const db: any = (env as any).DB;
   await ensureInsightsTables(db);
 }
-const insightsReady = new WeakSet<object>();
+let insightsReady = false;
 async function ensureInsightsTables(db: any) {
-  if (!db || insightsReady.has(db)) return;
-  insightsReady.add(db);
+  if (!db || insightsReady) return;
+  insightsReady = true;
   for (const sql of INSIGHTS_SCHEMA) { try { await db.prepare(sql).run(); } catch { /* best effort */ } }
 }
 const SETTING_DEFAULTS: Record<string, string> = {
@@ -2929,20 +2958,19 @@ app.get('/media/*', async (c) => {
     const response = await r2GetObject(c.env, key, c.req.header('range') || undefined,
       c.req.header('if-none-match') || undefined);
     if (!response) return c.json({ error: 'not_found' }, 404);
-    const out = new Response(response.body, {
-      status: response.status,
-      headers: {
-        'Content-Type': response.headers.get('content-type') || 'application/octet-stream',
-        'Cache-Control': MEDIA_CACHE,
-        'X-Content-Type-Options': 'nosniff',
-        'Accept-Ranges': 'bytes',
-      },
-    });
+    // c.body() (not a raw Response) so the CORS middleware's headers survive —
+    // the installed app fetches media cross-origin from https://localhost.
+    const headers: Record<string, string> = {
+      'Content-Type': response.headers.get('content-type') || 'application/octet-stream',
+      'Cache-Control': MEDIA_CACHE,
+      'X-Content-Type-Options': 'nosniff',
+      'Accept-Ranges': 'bytes',
+    };
     for (const h of ['content-length', 'content-range', 'etag', 'last-modified']) {
       const v = response.headers.get(h);
-      if (v) out.headers.set(h, v);
+      if (v) headers[h] = v;
     }
-    return out;
+    return c.body(response.body as any, response.status as any, headers);
   } catch {
     return c.json({ error: 'media_unavailable' }, 502);
   }
@@ -3103,9 +3131,18 @@ app.post('/profile/demographics', async (c) => {
   return c.json({ ok: true });
 });
 app.get('/profile/demographics/:uid', async (c) => {
+  /* Privacy: a uid is not a secret (it travels with reviews and tokens), so an
+   * open lookup let anyone read another account's age/gender/country. Only the
+   * signed-in owner of the row — or an admin session — may read it. */
+  const uid = c.req.param('uid');
+  const user = await requireFirebaseUser(c).catch(() => null);
+  if (!(user && user.uid === uid) && !(await hasAdminSession(c))) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
   await ensureInsightsTables(c.env.DB);
   const row: any = await c.env.DB.prepare('SELECT age_range, gender, country, opted_in FROM user_demographics WHERE uid = ?')
-    .bind(c.req.param('uid')).first().catch(() => null);
+    .bind(uid).first().catch(() => null);
+  c.header('Cache-Control', 'private, no-store');
   return c.json({ demographics: row || null });
 });
 
@@ -3252,10 +3289,10 @@ const ADMIN_INDEX_SQL = [
   `CREATE INDEX IF NOT EXISTS idx_user_demographics_upd ON user_demographics(updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_support_threads_uid ON support_threads(uid, created_at DESC)`,
 ];
-const adminIndexesReady = new WeakSet<object>();
+let adminIndexesReady = false;
 async function ensureAdminIndexes(env: any): Promise<void> {
-  if (!env || !env.DB || adminIndexesReady.has(env.DB)) return;
-  adminIndexesReady.add(env.DB);
+  if (!env || !env.DB || adminIndexesReady) return;
+  adminIndexesReady = true;
   // An index on a column that does not exist yet (legacy DB) must never break
   // the request; the migration file is the canonical, ordered version.
   for (const sql of ADMIN_INDEX_SQL) {
@@ -3455,10 +3492,10 @@ app.post('/admin/notifications', async (c) => {
 // ---- Release history -----------------------------------------------------
 // Kept separate from the singleton `app_updates` row so the Update Center can
 // show every published build. Created lazily: no manual migration required.
-const releaseTableReady = new WeakSet<object>();
+let releaseTableReady = false;
 async function ensureReleaseTable(db: any) {
-  if (!db || releaseTableReady.has(db)) return;
-  releaseTableReady.add(db);
+  if (!db || releaseTableReady) return;
+  releaseTableReady = true;
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS app_update_releases (
       id TEXT PRIMARY KEY,
@@ -3727,11 +3764,17 @@ app.post('/admin/upload-url', async (c) => {
 
 app.post('/admin/multipart/create', async (c) => {
   const body = await c.req.json().catch(() => ({}));
+  // A missing/NaN size used to produce ZERO part URLs (the loop never ran) and
+  // an absurd size could ask for tens of thousands of signatures in one call.
+  const fileSize = Number(body.file_size);
+  if (!Number.isFinite(fileSize) || fileSize <= 0) return c.json({ error: 'invalid_file_size' }, 400);
+  const partCount = Math.ceil(fileSize / (10 * 1024 * 1024));
+  if (partCount > 10000) return c.json({ error: 'file_too_large', max_parts: 10000 }, 400);
   const ext = safeExt(String(body.filename), body.kind === 'apk' ? 'apk' : body.kind === 'feature' ? 'jpg' : body.kind === 'icon' ? 'png' : 'jpg');
   const key = await uploadKeyFor(c.env, String(body.kind || ''), ext, String(body.slug_hint || 'app'), new Set(), { appId: body.app_id ? String(body.app_id) : undefined, slot: body.slot });
   const uploadId = await r2CreateMultipartUpload(c.env, key, String(body.content_type || 'application/octet-stream'));
   const parts = [];
-  for (let i = 1; i <= Math.ceil(Number(body.file_size) / (10 * 1024 * 1024)); i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });
+  for (let i = 1; i <= partCount; i++) parts.push({ partNumber: i, url: await r2PresignUploadPart(c.env, key, uploadId, i, 3600) });
   return c.json({ key, uploadId, partSize: 10 * 1024 * 1024, parts });
 });
 
@@ -4178,7 +4221,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
    * ones we were told; otherwise the bytes really changed and it is a release. */
   const sizeNow = Number(head.size) || 0;
   const versionNow = String(body.version_name || old.version_name || '');
-  const codeNow = body.version_code !== undefined ? Number(body.version_code) : old.version_code;
+  const codeNow = body.version_code !== undefined ? safeInt(body.version_code, 0, 999999999) : old.version_code;
   const sameKey = old.apk_key === body.apk_key;
   const sameFile = sameKey && Number(old.size_bytes || 0) === sizeNow
     && String(old.version_name || '') === versionNow
@@ -4247,20 +4290,28 @@ app.post('/admin/apps/:id/apk', async (c) => {
 app.post('/admin/apps/:id/icon', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT icon_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
-  await c.env.DB.prepare('UPDATE apps SET icon_key=?, updated_at=? WHERE id=?').bind(body.icon_key, nowSec(), old.id).run();
-  const cleanup = await replaceOldFile(c.env, old.icon_key, body.icon_key);
+  if (!old) return c.json({ error: 'not_found' }, 404);
+  // null/'' clears the picture; anything else must be a real icon/ key, or the
+  // row would point at a foreign object while the old file is already deleted.
+  const key = body.icon_key == null || body.icon_key === '' ? null : String(body.icon_key);
+  if (key !== null && !isValidR2Key(key, 'icon')) return c.json({ error: 'invalid_icon_key' }, 400);
+  await c.env.DB.prepare('UPDATE apps SET icon_key=?, updated_at=? WHERE id=?').bind(key, nowSec(), old.id).run();
+  const cleanup = await replaceOldFile(c.env, old.icon_key, key);
   await purgeAppsCache(c.env);
-  await purgeMediaUrl(c.env, body.icon_key);
+  await purgeMediaUrl(c.env, key);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
 app.post('/admin/apps/:id/feature', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const old: any = await c.env.DB.prepare('SELECT feature_key, id FROM apps WHERE id = ?').bind(c.req.param('id')).first();
-  await c.env.DB.prepare('UPDATE apps SET feature_key=?, updated_at=? WHERE id=?').bind(body.feature_key, nowSec(), old.id).run();
-  const cleanup = await replaceOldFile(c.env, old.feature_key, body.feature_key);
+  if (!old) return c.json({ error: 'not_found' }, 404);
+  const key = body.feature_key == null || body.feature_key === '' ? null : String(body.feature_key);
+  if (key !== null && !isValidR2Key(key, 'feature')) return c.json({ error: 'invalid_feature_key' }, 400);
+  await c.env.DB.prepare('UPDATE apps SET feature_key=?, updated_at=? WHERE id=?').bind(key, nowSec(), old.id).run();
+  const cleanup = await replaceOldFile(c.env, old.feature_key, key);
   await purgeAppsCache(c.env);
-  await purgeMediaUrl(c.env, body.feature_key);
+  await purgeMediaUrl(c.env, key);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -4305,7 +4356,11 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
   const slots = new Map<number, string>();
   const existing: any = await c.env.DB.prepare('SELECT id, position FROM screenshots WHERE app_id = ?').bind(id)
     .all().catch(() => ({ results: [] }));
-  for (const row of existing.results || []) slots.set(Number(row.position) || 0, String(row.id));
+  /* Keyed by the 1-BASED slot in the file name, not the raw DB position:
+   * `ss/<slug>-1.jpg` is position 0, `-2.jpg` is position 1 … Comparing the
+   * name's slot against the 0-based position replaced the WRONG row (slot 1
+   * updated the second screenshot) and duplicated the right one. */
+  for (const row of existing.results || []) slots.set((Number(row.position) || 0) + 1, String(row.id));
 
   const moved: string[] = [], failed: string[] = [], replaced: number[] = [], added: number[] = [];
   for (const k of body.screenshot_keys) {

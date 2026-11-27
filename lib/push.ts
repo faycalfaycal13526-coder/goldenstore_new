@@ -168,11 +168,14 @@ const PUSH_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_push_delivery_note
      ON push_delivery(notification_id, status)`,
 ];
-const pushSchemaReady = new WeakSet<object>();
+// Module-level flag — env.DB is a fresh proxy per access, so a WeakSet on it
+// never hits: every push call re-ran the whole DDL batch AND backfillDevices()
+// (which is explicitly meant to run once per isolate). One DB per Worker.
+let pushSchemaReady = false;
 
 export async function ensurePushSchema(env: Env): Promise<void> {
   const db: any = env.DB;
-  if (pushSchemaReady.has(db)) return;
+  if (pushSchemaReady) return;
   // 1) tables  2) add missing columns  3) THEN indexes. Never reorder.
   for (const sql of PUSH_SCHEMA) await db.prepare(sql).run();
   for (const sql of PUSH_UPGRADES) {
@@ -185,7 +188,7 @@ export async function ensurePushSchema(env: Env): Promise<void> {
       console.warn('[fcm] optional index skipped:', error?.message || String(error));
     }
   }
-  pushSchemaReady.add(db);
+  pushSchemaReady = true;
   // Migrate pre-unification rows into the single device registry once per
   // Worker isolate. Without this, existing installations would keep being
   // addressed by two independent engines (the source of triple notifications).

@@ -224,7 +224,7 @@ const MAX_BODY_SIZE = 1024 * 1024;
 const UPLOAD_BODY_LIMIT = 32 * 1024 * 1024;
 app.use('*', async (c, next) => {
   const cl = c.req.header('content-length');
-  const limit = c.req.path === '/api/admin/r2/put' ? UPLOAD_BODY_LIMIT : MAX_BODY_SIZE;
+  const limit = (c.req.path === '/api/admin/r2/put' || c.req.path === '/api/__upload-diag') ? UPLOAD_BODY_LIMIT : MAX_BODY_SIZE;
   if (cl && Number(cl) > limit) return c.json({ error: 'payload_too_large', limit }, 413);
   await next();
 });

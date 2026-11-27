@@ -385,6 +385,21 @@
     throw lastErr;
   }
 
+  /** A part of a multipart upload, written by the Worker on our behalf. */
+  function partPutUrl(key, uploadId, partNumber) {
+    const base = (window.Store && Store.apiBaseUrl && Store.apiBaseUrl()) || '';
+    return `${base}/api/admin/r2/put?key=${encodeURIComponent(key)}`
+      + `&upload_id=${encodeURIComponent(uploadId)}&part=${encodeURIComponent(partNumber)}`;
+  }
+
+  /** Same-origin upload target: the Worker performs the bucket write.
+   *  Store.apiBaseUrl() is '' on the web (a relative URL, same origin) and the
+   *  API host inside the installed app — exactly what `api()` already uses. */
+  function ownOriginPutUrl(key) {
+    const base = (window.Store && Store.apiBaseUrl && Store.apiBaseUrl()) || '';
+    return `${base}/api/admin/r2/put?key=${encodeURIComponent(key)}`;
+  }
+
   async function r2Upload(file, kind, slugHint, onProgress, opts) {
     const contentType = file.type || 'application/octet-stream';
 
@@ -418,10 +433,36 @@
     }
     const { url, key } = presign;
 
-    await retryXhrPut(url, file, contentType, (loaded, total) => {
-      if (onProgress) onProgress(loaded / total);
-    }, 2, 30 * 60 * 1000);  // 30-min timeout for single PUT (large APKs)
-    return trackUploaded(key);
+    /* WHY THE BYTES GO TO /api/r2-put AND NOT TO THE BUCKET.
+     *
+     * «عندما أقوم بتحديث تطبيق لا يبعث إلى R2». A browser PUT to
+     * `pub-….r2.dev` / `*.r2.cloudflarestorage.com` is cross-origin. When the
+     * bucket's CORS rule does not allow the exact method the browser sends
+     * (multipart uses POST for create/complete and DELETE for abort — the rule
+     * listed only GET/PUT/HEAD), or when an extension/private-DNS resolver
+     * blocks the bucket host, the request dies BEFORE it leaves the device.
+     * Nothing reaches the Worker, so there is no status code to show and the
+     * panel can only say «فشل».
+     *
+     * `/api/r2-put` is the store's own origin: the browser uploads to us and the
+     * Worker writes the object. A failure is now a JSON reason with a status.
+     * The presigned URL stays as the fallback, so nothing that works today
+     * stops working. */
+    try {
+      await retryXhrPut(ownOriginPutUrl(key), file, contentType, (loaded, total) => {
+        if (onProgress) onProgress(loaded / total);
+      }, 1, 30 * 60 * 1000);
+      return trackUploaded(key);
+    } catch (err) {
+      const msg = String((err && err.message) || '');
+      // A 4xx from the Worker is a real answer (size, session, key) — do not
+      // silently retry the old path for it.
+      if (/_4\d\d$/.test(msg)) throw err;
+      await retryXhrPut(url, file, contentType, (loaded, total) => {
+        if (onProgress) onProgress(loaded / total);
+      }, 2, 30 * 60 * 1000);
+      return trackUploaded(key);
+    }
   }
 
   // Turn a publish failure into a plain, actionable sentence in the UI
@@ -592,9 +633,21 @@
         let etag = null;
         for (let attempt = 0; attempt <= 1; attempt++) {
           try {
-            etag = await retryXhrPut(pending[i].url, chunk, null, (loaded) => {
+            /* A part uploads through the store's own origin first (see
+             * ownOriginPutUrl): one request, no CORS preflight against the
+             * bucket, no cross-origin visibility gap. The part number and the
+             * upload id travel with it, so the Worker writes the same part the
+             * signed URL would have written. */
+            etag = await retryXhrPut(partPutUrl(key, uploadId, partNum), chunk, null, (loaded) => {
               if (onProgress) onProgress((totalUploaded + loaded) / file.size);
-            }, 3, 10 * 60 * 1000);  // 10-min timeout per 10MB part
+            }, 1, 10 * 60 * 1000).catch(async (ownErr) => {
+              if (/_4\d\d$/.test(String(ownErr && ownErr.message))) throw ownErr;
+              // The bucket route stays as the fallback for anything the Worker
+              // cannot carry (a very large part, an old deployment).
+              return retryXhrPut(pending[i].url, chunk, null, (loaded) => {
+                if (onProgress) onProgress((totalUploaded + loaded) / file.size);
+              }, 3, 10 * 60 * 1000);
+            });
             break;
           } catch (e) {
             // 403 = this part's signed URL expired mid-upload. Get a fresh one
@@ -3581,6 +3634,65 @@
       } finally { orphanDelete.disabled = false; }
     };
 
+    /* ── «التحديث لا يرفع ولا يبعث إشعاراً» — فحص يشغّل المسار الحقيقي ────────
+     * The two promises of the «تحديث» button failed in two different places, and
+     * both used to surface as the same word: «فشل». This runs the real path:
+     *   1. a presigned upload URL, then a PUT through the store's own origin,
+     *   2. a multipart create+abort (what every APK above 10 MB uses),
+     *   3. the notification engine: is push on? are there tokens? are the last
+     *      release rows really in the database?
+     * It also offers the two repairs that can be applied from here: re-apply the
+     * bucket's CORS rule (now including POST/DELETE for multipart) and open the
+     * notification settings.
+     */
+    const doctorOut = el('div', { style: { fontSize: '13px', lineHeight: '1.9', width: '100%' } });
+    const doctorRun = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('wrench'), 'افحص الرفع والإشعارات');
+    const doctorCors = el('button', { class: 'btn btn-secondary btn-sm', type: 'button', style: { display: 'none' } }, ico('cloud'), 'أصلح قواعد CORS للحاوية');
+    const doctorBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } },
+      doctorRun, doctorCors, doctorOut);
+
+    doctorRun.onclick = async () => {
+      doctorRun.disabled = true;
+      doctorOut.textContent = 'أفحص…';
+      try {
+        const r = await api('/api/admin/publish/doctor', { timeoutMs: 90000 });
+        const s1 = r.storage || {}, mp = r.multipart || {}, n = r.notifications || {};
+        doctorOut.innerHTML = '';
+        const row = (label, ok, detail) => el('div', null,
+          el('span', { style: { color: ok ? 'var(--success)' : 'var(--danger)' } }, ok ? '● ' : '● '),
+          `${label}: ${detail}`);
+        doctorOut.append(
+          row('الكتابة إلى الحاوية', !!s1.write, s1.write
+            ? `نجحت (${formatNum(s1.ms || 0)} ms)`
+            : (s1.error || 'فشلت من الخادم نفسه — راجع مفاتيح R2')),
+          row('الرفع متعدد الأجزاء (APK كبير)', !!mp.ok, mp.ok ? 'يعمل' : (mp.error || 'فشل')),
+          row('الإشعارات', !!n.can_send, n.can_send
+            ? `تعمل · أجهزة: ${formatNum(n.device_tokens || 0)} · اشتراكات ويب: ${formatNum(n.web_subscriptions || 0)}`
+            : (n.why_blocked === 'quiet_hours'
+              ? `مؤجّلة الآن — ساعات الهدوء ${n.quiet_range}`
+              : 'الدفع متوقف من الإعدادات (push_enabled)')),
+        );
+        const last = (n.last_updates || []).length;
+        doctorOut.append(el('div', { class: 'hint' }, last
+          ? `آخر إشعارات التحديث: ${(n.last_updates || []).map((x) => x.title).join(' · ')}`
+          : 'لا يوجد أي إشعار تحديث مسجّل بعد — إن حدّثت تطبيقاً ولم يظهر هنا فالسبب في الخادم.'));
+        doctorOut.append(el('div', { style: { marginTop: '4px' } }, r.verdict || ''));
+        doctorCors.style.display = (mp.ok && s1.write) ? 'none' : '';
+      } catch (e) {
+        doctorOut.textContent = (e && e.status === 401) ? 'انتهت الجلسة، أعد الدخول.' : 'تعذّر الفحص.';
+      } finally { doctorRun.disabled = false; }
+    };
+
+    doctorCors.onclick = async () => {
+      doctorCors.disabled = true;
+      try {
+        const r = await api('/api/admin/r2/cors', { method: 'POST', timeoutMs: 30000 });
+        toast(`ضُبطت CORS لـ${(r.origins || []).length} نطاقاً — الطرق: ${(r.methods || []).join(', ')}`, 'success');
+      } catch (e) {
+        toast('تعذّر ضبط CORS — تأكد أن مفتاح R2 يملك صلاحية تعديل الحاوية', 'error');
+      } finally { doctorCors.disabled = false; }
+    };
+
     /* ── تنظيف الحاوية: بقايا الأسماء القديمة ونسخ مكرّرة ─────────────────────
      * The new bucket's object list still shows history:
      * `apk/getting-over-it-179570037`, `ss/subway-surfers.webp`,
@@ -3934,6 +4046,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('wrench'), 'التحديث والرفع والإشعارات — فحص'),
+        el('div', { class: 'hint' }, 'يشغّل مسار الرفع الحقيقي (ملف صغير + APK كبير متعدد الأجزاء) ويفحص محرّك الإشعارات: هل الدفع مفعّل؟ كم جهازاً مسجّلاً؟ وهل كُتب إشعار لآخر إصدار؟'),
+        doctorBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('trash'), 'تنظيف الحاوية — البقايا والنسخ المكرّرة'),
         el('div', { class: 'hint' }, 'يقرأ بايتات كل ملف ويقرر من قاعدة البيانات: ملف لا يشير إليه أي عنصر = بقايا (مثل apk/getting-over-it-179570037)، وملف بنفس بايتات ملف مستخدم = نسخة. لا يُحذف أبداً ملف يستخدمه الموقع.'),
@@ -5163,13 +5279,25 @@
             method: 'POST',
             body: { apk_key, version_name: vn || undefined, version_code: vc ? Number(vc) : undefined },
           });
-          /* «أريد عند التحديث يحذف القديم». The server now deletes it in the
-             request and tells us whether that worked — never claim success. */
-          toast(rep && rep.cleaned === false
-            ? 'حُدّث الإصدار، لكن الملف القديم بقي في كلاود — احذفه من «ملفات غير مستخدمة»'
-            : 'تم تحديث APK وحُذف الملف القديم', rep && rep.cleaned === false ? 'info' : 'success');
+          /* «أريد عند التحديث يحذف القديم» + «لا يبعث إشعاراً». The server
+             reports three separate facts now — the file replaced, the old one
+             removed, and whether the notification (+push) actually went out —
+             so the panel never claims something that did not happen. */
+          const pushState = (rep && rep.push) || {};
+          const pushNote = pushState.skipped === 'push_disabled' ? ' — الإشعار محفوظ، والدفع متوقف من الإعدادات'
+            : pushState.skipped === 'quiet_hours' ? ' — الإشعار محفوظ، والدفع مؤجّل (ساعات الهدوء)'
+            : pushState.error ? ' — تعذّر الدفع' : ' — أُرسل إشعار الإصدار';
+          const lines = [
+            rep && rep.notified === false ? 'حُدّث الملف، لكن لم يُسجّل إشعار' : `حُدّث الإصدار ${(rep && rep.version && rep.version.name) || ''}${rep && rep.notified ? pushNote : ''}`,
+            rep && rep.cleaned === false ? 'الملف القديم بقي في كلاود — احذفه من «تنظيف الحاوية»' : 'وحُذف الملف القديم',
+          ];
+          toast(lines.join(' · '), rep && (rep.cleaned === false || rep.notified === false) ? 'info' : 'success');
           renderEditApp(body, id);
-        } catch (err) { toast('فشل التحديث', 'error'); }
+        } catch (err) {
+          // Say WHY, in words: the upload step and the row update are different
+          // failures and used to share one sentence.
+          toast(publishErrorText(err, 'apk', app.name), 'error');
+        }
       } });
       apkForm.append(
         apkDz,
@@ -5198,7 +5326,7 @@
             ? 'حُدّثت الأيقونة، لكن القديمة بقيت في كلاود — احذفها من «ملفات غير مستخدمة»'
             : 'تم تحديث الأيقونة وحُذفت القديمة', rep && rep.cleaned === false ? 'info' : 'success');
           renderEditApp(body, id);
-        } catch (err) { toast('فشل التحديث', 'error'); }
+        } catch (err) { toast(publishErrorText(err, 'icon', app.name), 'error'); }
       } });
       iconForm.append(iconDz, el('button', { type: 'submit', class: 'btn btn-primary btn-sm' }, ico('upload'), 'استبدال الأيقونة'));
       body.append(el('div', { class: 'panel' },
@@ -5220,7 +5348,7 @@
             ? 'حُدّثت الصورة، لكن القديمة بقيت في كلاود — احذفها من «ملفات غير مستخدمة»'
             : 'تم تحديث الصورة وحُذفت القديمة', rep && rep.cleaned === false ? 'info' : 'success');
           renderEditApp(body, id);
-        } catch (err) { toast('فشل التحديث', 'error'); }
+        } catch (err) { toast(publishErrorText(err, 'feature', app.name), 'error'); }
       } });
       featForm.append(featDz, el('button', { type: 'submit', class: 'btn btn-primary btn-sm' }, ico('upload'), 'حفظ الصورة العرضية'));
       body.append(el('div', { class: 'panel' },

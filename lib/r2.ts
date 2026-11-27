@@ -132,6 +132,29 @@ export async function r2GetObject(
   }
 }
 
+/**
+ * Write one object straight from the Worker.
+ *
+ * The console used to upload every file with a browser PUT to
+ * `*.r2.cloudflarestorage.com` — a cross-origin request whose failure is
+ * invisible to the site: no Worker log, no error code, only «فشل» in the panel.
+ * With this, the browser PUTs to `/api/r2-put` (its own origin) and the Worker
+ * performs the bucket write, so a failure comes back as a JSON reason.
+ */
+export async function r2PutObject(
+  env: Env, key: string, body: ArrayBuffer | Uint8Array, contentType = 'application/octet-stream',
+): Promise<void> {
+  const response = await clientFor(env).fetch(objectUrl(env, key), {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: body as any,
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`R2 PUT ${response.status}: ${detail.slice(0, 200) || response.statusText}`);
+  }
+}
+
 export async function r2DeleteStrict(env: Env, key: string): Promise<boolean> {
   try {
     const response = await clientFor(env).fetch(objectUrl(env, key), { method: 'DELETE' });
@@ -338,6 +361,30 @@ export async function r2PresignUploadPart(
   return signed.url.toString();
 }
 
+/**
+ * Write ONE part of a multipart upload from the Worker.
+ *
+ * The browser used to PUT each part straight to a pre-signed bucket URL: a
+ * cross-origin request per part, on a connection the phone has to keep alive
+ * for minutes, whose failure never reaches the site. `/api/r2-put` writes the
+ * part here instead and returns the ETag the completion step needs.
+ */
+export async function r2PutUploadPart(
+  env: Env, key: string, uploadId: string, partNumber: number, body: ArrayBuffer | Uint8Array,
+): Promise<string> {
+  const url = objectUrl(env, key);
+  url.searchParams.set('partNumber', String(partNumber));
+  url.searchParams.set('uploadId', uploadId);
+  const response = await clientFor(env).fetch(url, { method: 'PUT', body: body as any });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`R2 part ${partNumber} failed (${response.status}): ${detail.slice(0, 200)}`);
+  }
+  const etag = response.headers.get('etag');
+  if (!etag) throw new Error(`R2 part ${partNumber} returned no ETag`);
+  return etag;
+}
+
 export async function r2CompleteMultipartUpload(
   env: Env,
   key: string,
@@ -376,10 +423,25 @@ export async function r2ConfigureCors(env: Env, allowedOrigins: string[]): Promi
   );
   bucketUrl.searchParams.set('cors', '');
   const originsXml = allowedOrigins.map((origin) => `<AllowedOrigin>${escapeXml(origin)}</AllowedOrigin>`).join('');
+  /* Every verb the CONSOLE actually uses must be allowed here.
+   *
+   * The rule used to list GET/PUT/HEAD only. A >10 MB file does not use a single
+   * PUT: the console opens an S3 MULTIPART upload, which is a POST (create),
+   * PUT per part, POST again (complete) and DELETE (abort). A browser refuses an
+   * XHR whose method is not in the origin's allowed list — the request never
+   * leaves the device, so the Worker never sees a failed call and the panel can
+   * only say «فشل». That is exactly the «التحديث لا يبعث إلى R2» report: a 100 MB
+   * APK could not be uploaded at all, while a small icon could.
+   *
+   * `AllowedHeader *` already covers the signed headers; the ETag is exposed so
+   * the console can confirm what it wrote. */
   const body =
     `<?xml version="1.0" encoding="UTF-8"?><CORSConfiguration xmlns="${XML_NAMESPACE}">` +
-    `<CORSRule>${originsXml}<AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod>` +
-    `<AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader>` +
+    `<CORSRule>${originsXml}` +
+    `<AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod>` +
+    `<AllowedMethod>POST</AllowedMethod><AllowedMethod>HEAD</AllowedMethod>` +
+    `<AllowedMethod>DELETE</AllowedMethod>` +
+    `<AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader>` +
     `<MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule></CORSConfiguration>`;
   await checkedFetch(env, bucketUrl, {
     method: 'PUT',

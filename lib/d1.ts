@@ -270,25 +270,27 @@ export async function listNotifications(env: Env, limit?: number, uid = ''): Pro
   // (broadcast rows only) instead of returning a 500 to the whole store.
   const legacy = async () => {
     const r: any = await env.DB.prepare(
-      `SELECT * FROM notifications ORDER BY created_at DESC${limit ? ' LIMIT ?' : ''}`,
+      `SELECT * FROM notifications ORDER BY created_at DESC, rowid DESC${limit ? ' LIMIT ?' : ''}`,
     ).bind(...(limit ? [Math.min(Number(limit) || 50, 50)] : [])).all().catch(() => ({ results: [] }));
     return r.results || [];
   };
   if (uid) {
     const publicRows = await rows(
-      `SELECT * FROM notifications WHERE NOT (${privateClause}) ORDER BY created_at DESC LIMIT ?`,
+      `SELECT * FROM notifications WHERE NOT (${privateClause}) ORDER BY created_at DESC, rowid DESC LIMIT ?`,
       [Math.min(Number(limit) || 50, 50)],
     );
     const ownRows = await rows(
-      `SELECT * FROM notifications WHERE uid = ? ORDER BY created_at DESC LIMIT ?`,
+      `SELECT * FROM notifications WHERE uid = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
       [uid, Math.min(Number(limit) || 50, 50)],
     );
     return [...publicRows, ...ownRows]
       .sort((a: any, b: any) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))
       .slice(0, Math.min(Number(limit) || 50, 50));
   }
+  // Two releases in the same second must still come back newest-first: the
+  // console showed the OLD one on top because only created_at was ordered.
   const sql = `SELECT * FROM notifications WHERE NOT (${privateClause})
-    ORDER BY created_at DESC${limit ? ' LIMIT ?' : ''}`;
+    ORDER BY created_at DESC, rowid DESC${limit ? ' LIMIT ?' : ''}`;
   const stmt = env.DB.prepare(sql);
   const result: any = await (limit ? stmt.bind(limit).all() : stmt.all()).catch(() => null);
   return result ? (result.results || []) : legacy();

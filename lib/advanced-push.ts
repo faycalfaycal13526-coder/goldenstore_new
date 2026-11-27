@@ -280,7 +280,7 @@ export async function pushHistory(env: Env, limit = 30): Promise<any[]> {
   await ensureAdvancedSchema(env);
   const db: any = env.DB;
   const notes: any = await db.prepare(
-    'SELECT id, title, body, type, app_slug, created_at FROM notifications ORDER BY created_at DESC LIMIT ?',
+    'SELECT id, title, body, type, app_slug, created_at FROM notifications ORDER BY created_at DESC, rowid DESC LIMIT ?',
   ).bind(Math.max(1, Math.min(Number(limit) || 30, 100))).all().catch(() => ({ results: [] }));
   const sends: any = await db.prepare(`SELECT notification_id,
       SUM(targeted) AS targeted, SUM(success) AS success, SUM(failure) AS failure

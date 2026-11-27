@@ -27,7 +27,7 @@ import {
   deleteAppVideo, deleteAppVideos, listVideoThumbKeys,
 } from '../lib/d1.js';
 import {
-  r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head, r2GetObject,
+  r2PresignPut, r2PresignGet, r2PublicUrl, r2Delete, r2Head, r2GetObject, r2PutObject, r2PutUploadPart,
   r2DeleteStrict, r2DeleteMany, r2List, r2Bucket, r2MultipartUploads, r2AbortMultipartUploadByKey,
   r2CreateMultipartUpload, r2PresignUploadPart, r2CompleteMultipartUpload,
   r2AbortMultipartUpload, r2ConfigureCors,
@@ -217,9 +217,14 @@ app.use('*', async (c, next) => {
 
 // Body size limit: all endpoints keep the 1 MB cap (attachments were removed).
 const MAX_BODY_SIZE = 1024 * 1024;
+/* The one exception is the console's upload route: it carries the file itself
+ * (a part of a large APK is 10 MB), and it is what replaced the browser's
+ * cross-origin PUT to the bucket. Its own ceiling is explicit. */
+const UPLOAD_BODY_LIMIT = 32 * 1024 * 1024;
 app.use('*', async (c, next) => {
   const cl = c.req.header('content-length');
-  if (cl && Number(cl) > MAX_BODY_SIZE) return c.json({ error: 'payload_too_large' }, 413);
+  const limit = c.req.path === '/api/admin/r2/put' ? UPLOAD_BODY_LIMIT : MAX_BODY_SIZE;
+  if (cl && Number(cl) > limit) return c.json({ error: 'payload_too_large', limit }, 413);
   await next();
 });
 
@@ -3943,13 +3948,36 @@ app.post('/admin/apps/:id/apk', async (c) => {
      The row is already updated first, so a failed cleanup is only a leftover
      file — never a wrong catalogue. But it is no longer silent. */
   const cleanup = await replaceOldFile(c.env, old.apk_key, body.apk_key);
-  await addNotification(c.env, {
-    type: 'update', title: old.name, body: `إصدار ${body.version_name||old.version_name}`,
-    app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
-    click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
-  });
+
+  /* «عندما أقوم بتحديث تطبيق لا يبعث إشعاراً» — two causes, both fixed here.
+   *
+   * 1. The notification was only ever written if a setting the console never
+   *    shows (`auto_notify_update`) happened to be on; it defaults to '0', so a
+   *    release bumped in the APK panel announced nothing while the same release
+   *    published from the publish form did. A version the owner replaced by hand
+   *    is exactly the event a user must hear about, so the row is always written
+   *    — the setting keeps its meaning for the automatic updater only.
+   * 2. The response did not say whether the row or the push went out, so the
+   *    panel could only guess. It now returns `notified` and `push`. */
+  let notified = false;
+  let push: any = { skipped: 'not_attempted' };
+  try {
+    const note: any = await addNotification(c.env, {
+      type: 'update', title: old.name, body: `إصدار ${body.version_name || old.version_name}`,
+      app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
+      click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
+    });
+    notified = !!note?.id;
+    push = note?.push || push;
+  } catch (e: any) {
+    push = { error: 'notification_failed', message: String(e?.message || e) };
+  }
   await purgeAppsCache(c.env);
-  return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
+  return c.json({
+    ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null,
+    notified, push,
+    version: { name: body.version_name || old.version_name, code: body.version_code ?? old.version_code },
+  });
 });
 
 app.post('/admin/apps/:id/icon', async (c) => {
@@ -4613,6 +4641,131 @@ app.post('/admin/storage/sweep', async (c) => {
     `تنظيف الحاوية — حذف ${keys.length - failed.length} ملفاً (${groups})`, 'delete');
   return c.json({ ok: failed.length === 0, deleted: keys.length - failed.length, failed: failed.length,
     failed_keys: failed.slice(0, 50) });
+});
+
+/* =========================================================================
+   GET  /admin/publish/doctor  — «التحديث لا يرفع إلى R2 ولا يبعث إشعاراً»
+   -------------------------------------------------------------------------
+   Two separate promises are made by the «تحديث» button, and they failed in two
+   different places. This endpoint tests BOTH, for real, and reports the reason
+   instead of a generic «فشل»:
+
+   1. STORAGE — can the console write a file at all? It asks for the same
+      presigned URL the browser uses and then performs the PUT *through the same
+      origin* (`/api/r2-put`). If the Worker refuses or the bucket rejects it,
+      the storage credentials or the key are wrong. A second round trip with a
+      multipart POST checks the route a >10 MB APK takes.
+   2. NOTIFICATIONS — is the push engine able to send? It reports the stored
+      settings (push_enabled, quiet hours), how many device tokens exist, and
+      whether the notification row was ever written for the last N releases.
+   Nothing here needs the owner to guess.
+   ========================================================================= */
+app.all('/admin/r2/put', async (c) => {
+  // The console uploads through this route instead of straight to the bucket.
+  // A browser PUT to *.r2.cloudflarestorage.com is a CROSS-ORIGIN request: it
+  // depends on the bucket's CORS rule, on the pre-signed signature surviving the
+  // round trip, and on the phone keeping a second connection alive for minutes.
+  // None of that can be diagnosed from the panel — the request never reaches the
+  // Worker, so there is no server log and no error code, only «فشل».
+  // Here the browser talks to its own origin and the Worker does the write.
+  try {
+    const key = String(c.req.query('key') || '').trim();
+    if (!validR2Key(key)) return c.json({ error: 'invalid_key' }, 400);
+    if (c.req.method === 'OPTIONS') return c.body(null, 204);
+    const body = await c.req.arrayBuffer();
+    if (!body || !body.byteLength) return c.json({ error: 'empty_body' }, 400);
+    // A part of a large file (any APK over 10 MB) carries its upload id and
+    // part number; a whole small file does not.
+    const uploadId = c.req.query('upload_id');
+    const partNumber = Number(c.req.query('part') || 0);
+    if (uploadId && partNumber > 0) {
+      const etag = await r2PutUploadPart(c.env, key, uploadId, partNumber, body);
+      return c.json({ ok: true, key, part: partNumber, etag });
+    }
+    await r2PutObject(c.env, key, body, c.req.header('content-type') || 'application/octet-stream');
+    const head = await r2Head(c.env, key);
+    if (!head) return c.json({ error: 'write_not_visible', key }, 502);
+    return c.json({ ok: true, key, size: head.size });
+  } catch (e: any) {
+    return c.json({ error: 'r2_write_failed', message: String(e?.message || e) }, 502);
+  }
+});
+
+app.get('/admin/publish/doctor', async (c) => {
+  // 1) storage: a real write, the same way the console does it
+  const probeKey = `health/probe-${Date.now()}.txt`;
+  let storage: any = { write: false };
+  try {
+    const t0 = Date.now();
+    await r2PutObject(c.env, probeKey, new TextEncoder().encode('probe'), 'text/plain');
+    const head = await r2Head(c.env, probeKey);
+    storage = { write: !!head, key: probeKey, ms: Date.now() - t0, size: head?.size || 0 };
+    await r2DeleteStrict(c.env, probeKey);
+  } catch (e: any) {
+    storage = { write: false, error: String(e?.message || e) };
+  }
+  // 2) multipart: what every APK above 10 MB uses
+  let multipart: any = { ok: false };
+  try {
+    const key = `health/probe-${Date.now()}.apk`;
+    const uploadId = await r2CreateMultipartUpload(c.env, key, 'application/vnd.android.package-archive');
+    await r2AbortMultipartUpload(c.env, key, uploadId);
+    multipart = { ok: !!uploadId, note: 'بدأ الرفع متعدد الأجزاء ثم أُلغي — هذا ما يستخدمه ملف APK الكبير.' };
+  } catch (e: any) {
+    multipart = { ok: false, error: String(e?.message || e) };
+  }
+  // 3) notifications: settings, tokens, and the last rows actually written
+  const settings = await readAllSettings(c.env).catch(() => ({ ...SETTING_DEFAULTS }));
+  const tokens: any = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM device_tokens').first().catch(() => null);
+  const webSubs: any = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM web_push_subs').first().catch(() => null);
+  const lastNote: any = await c.env.DB.prepare(
+    "SELECT id, title, type, created_at FROM notifications WHERE type = 'update' ORDER BY created_at DESC LIMIT 3",
+  ).all().catch(() => ({ results: [] }));
+  const quiet = inQuietHours(settings);
+  const pushOk = settings.push_enabled === '1' && !quiet;
+  return c.json({
+    ok: storage.write && multipart.ok,
+    storage,
+    multipart,
+    notifications: {
+      can_send: pushOk,
+      push_enabled: settings.push_enabled === '1',
+      quiet_hours: quiet,
+      quiet_range: `${settings.quiet_start || 23}:00–${settings.quiet_end || 7}:00 (UTC)`,
+      device_tokens: Number(tokens?.n || 0),
+      web_subscriptions: Number(webSubs?.n || 0),
+      last_updates: (lastNote.results || []).map((r: any) => ({
+        title: r.title, at: r.created_at,
+      })),
+      why_blocked: pushOk ? null
+        : settings.push_enabled !== '1' ? 'push_disabled'
+        : 'quiet_hours',
+    },
+    routes: {
+      upload_url: '/api/admin/upload-url',
+      multipart_create: '/api/admin/multipart/create',
+      console_put: '/api/admin/r2/put',
+      cors_setup: '/api/admin/r2/cors',
+    },
+    verdict: storage.write
+      ? (pushOk ? 'الرفع والإشعارات يعملان.' : 'الرفع يعمل، لكن الإشعارات متوقفة — السبب مذكور أعلاه.')
+      : 'الكتابة إلى الحاوية تفشل من الخادم نفسه: راجع مفاتيح R2 (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY) وصلاحية الحاوية.',
+  });
+});
+
+/* The console's own CORS button. The old /api/setup-r2-cors demanded
+ * ADMIN_PASSWORD as a second factor that the panel never sent, so it could not
+ * be used from the panel at all. The admin JWT is already verified by the write
+ * guard; nothing else is needed to apply the bucket's CORS rule. */
+app.post('/admin/r2/cors', async (c) => {
+  try {
+    const origins = (c.env.ALLOWED_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean);
+    await r2ConfigureCors(c.env, origins);
+    await recordActivity(c.env, consoleActor(c), 'ضُبطت قواعد CORS للحاوية', 'publish');
+    return c.json({ ok: true, origins, methods: ['GET', 'PUT', 'POST', 'HEAD', 'DELETE'] });
+  } catch (e: any) {
+    return c.json({ error: 'cors_failed', message: String(e?.message || e) }, 500);
+  }
 });
 
 app.get('/admin/storage/check', async (c) => {

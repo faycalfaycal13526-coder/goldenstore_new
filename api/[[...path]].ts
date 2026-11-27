@@ -3780,8 +3780,16 @@ app.post('/admin/multipart/create', async (c) => {
 
 app.post('/admin/multipart/complete', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  await r2CompleteMultipartUpload(c.env, body.key, body.uploadId, body.parts);
-  return c.json({ ok: true, key: body.key });
+  try {
+    await r2CompleteMultipartUpload(c.env, body.key, body.uploadId, body.parts);
+    return c.json({ ok: true, key: body.key });
+  } catch (e: any) {
+    // Surface the real R2 reason (InvalidPart / MalformedXML / …) instead of a
+    // bare 500, so a failed assembly is diagnosable from the panel and the log.
+    const message = String(e?.message || e);
+    console.error('[multipart/complete]', body.key, message);
+    return c.json({ error: 'multipart_complete_failed', message: message.slice(0, 400) }, 502);
+  }
 });
 
 // Re-sign parts whose pre-signed URL already expired.

@@ -368,14 +368,14 @@
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           __lastXhrFail = null;
-          // The bucket's presigned PUT returns the part ETag as a header; the
-          // same-origin Worker route also sets that header now, but older
-          // deployments returned it only in the JSON body. Accept either so a
-          // multipart publish never dies with a null ETag («upload_etag_missing»).
-          let etag = xhr.getResponseHeader('ETag');
-          if (!etag) {
-            try { const j = JSON.parse(xhr.responseText || '{}'); if (j && j.etag) etag = String(j.etag); } catch (e) { /* not JSON */ }
-          }
+          // The same-origin Worker route returns the part ETag in the JSON body
+          // (authoritative). Prefer it: an edge/proxy may rewrite the ETag
+          // *header* (compression suffix / weak validator), and a rewritten
+          // value makes CompleteMultipartUpload reject the part. The bucket's
+          // presigned PUT has an empty body, so fall back to its ETag header.
+          let etag = null;
+          try { const j = JSON.parse(xhr.responseText || '{}'); if (j && j.etag) etag = String(j.etag); } catch (e) { /* not JSON */ }
+          if (!etag) etag = xhr.getResponseHeader('ETag');
           resolve(etag);
         } else {
           __lastXhrFail = { url: String(url).slice(0, 140), status: xhr.status, body: String(xhr.responseText || '').slice(0, 160) };
@@ -771,6 +771,8 @@
       reportUploadDiag({
         phase: 'multipart', kind, file_size: file.size, key,
         parts_done: completedParts.length, parts_total: pending.length,
+        etag_first: completedParts[0] && completedParts[0].ETag,
+        etag_last: completedParts.length && completedParts[completedParts.length - 1].ETag,
         msg: String(err && err.message || err), status: Number(err && err.status) || 0,
       });
       // Abort multipart upload on failure (cleanup)

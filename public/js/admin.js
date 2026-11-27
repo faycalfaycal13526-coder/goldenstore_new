@@ -5773,10 +5773,17 @@
        * exists instead of duplicating it, and the toast says exactly how many
        * were replaced and how many were added. */
       const ssDz = dropzone({ accept: 'image/*', multiple: true, label: 'أضف لقطات جديدة' });
+      // The 1-based slot encoded in a screenshot's file name (…-3.webp → 3).
+      const ssSlotOf = (k) => { const m = String(k || '').split('/').pop().match(/-(\d+)\.[A-Za-z0-9]+$/); return m ? Math.max(1, Number(m[1])) : 0; };
+      // A free slot must avoid BOTH existing positions and existing file-name
+      // slots, so a new upload never overwrites another picture's object.
       const freeSlot = (() => {
-        let n = 1;
-        const used = new Set((screenshots || []).map((s) => Number(s.position) || 0));
-        while (used.has(n)) n++;
+        const used = new Set();
+        for (const s of (screenshots || [])) {
+          used.add((Number(s.position) || 0) + 1);
+          const sl = ssSlotOf(s.r2_key || s.key); if (sl) used.add(sl);
+        }
+        let n = 1; while (used.has(n)) n++;
         return n;
       })();
       const ssSlot = formField('slot', 'رقم اللقطة (اختر رقماً موجوداً لاستبدالها)', 'number',
@@ -5820,7 +5827,7 @@
                 const f = (inp.files || [])[0];
                 if (!f) return;
                 try {
-                  const key = await r2Upload(f, 'screenshot', app.slug, () => {}, { app_id: app.id, slot: ss.position });
+                  const key = await r2Upload(f, 'screenshot', app.slug, () => {}, { app_id: app.id, slot: ssSlotOf(ss.r2_key || ss.key) || ((Number(ss.position) || 0) + 1) });
                   const res = await api(`/api/admin/apps/${id}/screenshots`, { method: 'POST', body: { screenshot_keys: [key] } });
                   toast((res && (res.replaced || []).length) ? 'استُبدلت اللقطة في مكانها' : 'أُضيفت اللقطة', 'success');
                   renderEditApp(body, id);

@@ -4385,8 +4385,6 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
    */
   const baseRow: any = await c.env.DB.prepare('SELECT slug FROM apps WHERE id = ?').bind(id).first().catch(() => null);
   const slugForSs = slugify(String(baseRow?.slug || 'app')).slice(0, 60) || 'app';
-  const ssKeyFor = (raw: string, position: number) =>
-    organiseKey(String(raw), `${slugForSs}-${position + 1}`);
   const max: any = await c.env.DB.prepare('SELECT MAX(position) as max_pos FROM screenshots WHERE app_id = ?').bind(id).first();
   let pos = (max?.max_pos || 0) + 1;
 
@@ -4433,14 +4431,11 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
         .bind(k, nowSec(), slots.get(slot)).run();
       replaced.push(slot);
     } else {
-      const wanted = ssKeyFor(k, pos);
-      let finalKey = k;
-      if (wanted !== k) {
-        const mv = await r2Move(c.env, k, wanted);
-        if (mv.ok) finalKey = mv.key; else failed.push(k);
-      }
-      await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, finalKey, pos, nowSec()).run();
-      if (finalKey !== k) moved.push(finalKey);
+      /* Keep the uploaded object EXACTLY where it landed. Renaming/moving it to
+       * a «tidy» slot used to overwrite or strand other screenshots (six rows,
+       * one file). Each upload already has its own key; store it as-is so every
+       * picture stays a separate, living file. */
+      await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, k, pos, nowSec()).run();
       added.push(pos);
       pos++;
     }

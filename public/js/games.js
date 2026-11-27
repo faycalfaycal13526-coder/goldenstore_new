@@ -115,7 +115,7 @@
       });
 
       if (!allApps.length) {
-        content.append(S.emptyState(t('لا توجد ألعاب بعد'), t('ميّز تطبيقاً كـ«لعبة» من لوحة التحكم لتظهر هنا.'), 'gamepad'));
+        content.append(S.emptyState(t('لا توجد ألعاب بعد'), t('ستظهر هنا ألعاب المتجر فور إضافتها من لوحة الإدارة.'), 'gamepad'));
         return;
       }
 

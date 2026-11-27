@@ -370,12 +370,19 @@ async function ensureConsoleTables(db: any) {
   consoleReady.add(db);
   for (const sql of CONSOLE_SCHEMA) { try { await db.prepare(sql).run(); } catch { /* best effort */ } }
 }
+/* What the storefront must NOT show: its publication row says draft/scheduled.
+ *
+ * The two-step publish («ملف التطبيق أولاً ثم الصور») creates its row as a
+ * DRAFT and the APK step publishes it, so a half-made item is never listed and
+ * a download button never answers 404. Deliberately built on the existing draft
+ * mechanism: an older row that has no file keeps exactly the visibility it has
+ * today — this change must never make something of his disappear. */
 async function hiddenSlugs(env: Env): Promise<Set<string>> {
   await ensureConsoleTables(env.DB);
   const rows: any = await env.DB.prepare(
     "SELECT slug FROM app_publication WHERE status = 'draft' OR (status = 'scheduled' AND publish_at > ?)"
   ).bind(nowSec()).all().catch(() => ({ results: [] }));
-  return new Set((rows.results || []).map((r: any) => String(r.slug)));
+  return new Set<string>((rows.results || []).map((r: any) => String(r.slug)));
 }
 async function consoleOrder(env: Env): Promise<Map<string, number>> {
   const rows: any = await env.DB.prepare('SELECT slug, position FROM app_order').all().catch(() => ({ results: [] }));
@@ -2415,10 +2422,14 @@ app.get('/admin/publish/health', async (c) => {
       files: checked,
       files_missing: missingFiles.map((f) => f.key),
       publication: { status, publish_at: Number(p?.publish_at || 0) || 0, scheduled },
+      /* `no_apk` is not «hidden»: a row with no file is deliberately not listed
+         until its APK arrives (two-step publish), so it must not be reported as
+         a broken item — its own reason says what it is waiting for. */
       visible_in_catalogue: !hidden && !!r.apk_key,
-      blocked_by: hidden
-        ? (status === 'draft' ? 'draft' : 'scheduled_for_later')
-        : missingFiles.length ? 'file_missing' : !r.apk_key ? 'no_apk' : null,
+      blocked_by: !r.apk_key
+        ? 'no_apk'
+        : hidden ? (status === 'draft' ? 'draft' : 'scheduled_for_later')
+        : missingFiles.length ? 'file_missing' : null,
     });
   }
 
@@ -3803,8 +3814,24 @@ function normaliseForMatch(raw: unknown): string {
 
 app.post('/admin/apps', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  if (!body.name || !body.package_name || !body.apk_key) return c.json({ error: 'missing_fields' }, 400);
-  if (!isValidR2Key(body.apk_key, 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
+  /* ── TWO-STEP PUBLISH («ملف التطبيق أولاً ثم الصور») ──────────────────────
+   * The owner reported: the APK finishes uploading, then the pictures start,
+   * and the whole thing dies with «تعذّر الاتصال بالخادم أثناء ملف التطبيق» —
+   * and the pictures that had already been uploaded were then swept away. The
+   * cause is structural: the row only existed AFTER every byte. One long-lived
+   * connection had to survive the APK, the icon, the feature image and every
+   * screenshot before anything was saved.
+   *
+   * The row is now created as soon as the APK is there (`post_create: true`),
+   * so the pictures are attached to an existing item and a break in the middle
+   * costs one picture, not the whole publish. Callers that still send everything
+   * in one request (the installed console, older builds) are unchanged: without
+   * `post_create` an apk_key is still required.
+   */
+  const apkKey = String(body.apk_key || '');
+  if (!body.name || !body.package_name) return c.json({ error: 'missing_fields' }, 400);
+  if (!apkKey && !body.post_create) return c.json({ error: 'missing_fields' }, 400);
+  if (apkKey && !isValidR2Key(apkKey, 'apk')) return c.json({ error: 'invalid_apk_key' }, 400);
 
   // Same idempotency key seen within 24h → the same publish, just retried.
   const idem = String(body.idempotency_key || '').slice(0, 80);
@@ -3816,7 +3843,10 @@ app.post('/admin/apps', async (c) => {
     if (publishKeys.size > 500) publishKeys.clear();
   }
 
-  const head = await r2Head(c.env, body.apk_key); if (!head) return c.json({ error: 'apk_not_found' }, 400);
+  // No APK key at all = the shell of a two-step publish. It is only a shell; it
+  // is not announceable and the console fills it in immediately.
+  const head = apkKey ? await r2Head(c.env, apkKey) : null;
+  if (apkKey && !head) return c.json({ error: 'apk_not_found' }, 400);
 
   /* The same product can never become two rows.
    *
@@ -3851,7 +3881,7 @@ app.post('/admin/apps', async (c) => {
   if (dupe) {
     // Never leave the second copy's upload behind: the APK we just received is
     // byte-identical in purpose to the existing row's file, so it is deleted.
-    if (dupe.apk_key !== body.apk_key) await r2DeleteStrict(c.env, body.apk_key).catch(() => {});
+    if (apkKey && dupe.apk_key !== apkKey) await r2DeleteStrict(c.env, apkKey).catch(() => {});
     const sameName = normaliseForMatch(dupe.name) === nameKey;
     if (idem) publishKeys.set(idem, { id: dupe.id, slug: dupe.slug, ts: Date.now() });
     await recordActivity(c.env, consoleActor(c),
@@ -3865,6 +3895,12 @@ app.post('/admin/apps', async (c) => {
   let base = slugify(body.name), slug = base, i = 1;
   while (await c.env.DB.prepare('SELECT id FROM apps WHERE slug = ?').bind(slug).first()) { i++; slug = `${base}-${i}`; }
 
+  /* A shell (no APK yet) is a DRAFT: not listed anywhere until its file lands,
+     because a download that would 404 is worse than a moment's delay. The APK
+     route publishes it. A one-request publish is published immediately, exactly
+     as before. */
+  const shellDraft = !apkKey;
+
   /* A NEW item is always visible at first — «نشر» means published.
      A stale `app_publication` row left over from a deleted/previous item with
      the same slug used to hide the brand-new item from every list and make
@@ -3873,12 +3909,14 @@ app.post('/admin/apps', async (c) => {
   for (const sql of [
     'DELETE FROM app_publication WHERE slug = ?',
     'DELETE FROM app_order WHERE slug = ?',
-    "INSERT INTO app_publication (slug, status, publish_at, updated_at) VALUES (?, 'published', 0, ?) ON CONFLICT(slug) DO UPDATE SET status='published', publish_at=0, updated_at=excluded.updated_at",
+    shellDraft
+      ? "INSERT INTO app_publication (slug, status, publish_at, updated_at) VALUES (?, 'draft', 0, ?) ON CONFLICT(slug) DO UPDATE SET status='draft', publish_at=0, updated_at=excluded.updated_at"
+      : "INSERT INTO app_publication (slug, status, publish_at, updated_at) VALUES (?, 'published', 0, ?) ON CONFLICT(slug) DO UPDATE SET status='published', publish_at=0, updated_at=excluded.updated_at",
   ]) { try { await c.env.DB.prepare(sql).bind(slug, nowSec()).run(); } catch { /* best effort */ } }
   
   const now = nowSec(), id = randomId();
   await c.env.DB.prepare(`INSERT INTO apps (id, slug, name, name_lower, search_terms, package_name, short_description, description, category, type, developer, version_name, version_code, min_sdk, size_bytes, apk_key, icon_key, feature_key, stars, rating_sum, rating_count, rating, downloads, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`)
-    .bind(id, slug, sanitizeText(body.name, 200), sanitizeText(body.name, 200).toLowerCase(), JSON.stringify(searchTerms(body.name, body.developer, body.short_description, body.package_name)), sanitizeText(body.package_name, 200), sanitizeText(body.short_description, 500)||null, sanitizeText(body.description, 10000)||null, sanitizeText(body.category, 60)||'other', body.type === 'game' ? 'game' : 'app', sanitizeText(body.developer, 120)||null, sanitizeText(body.version_name, 60)||null, safeInt(body.version_code,0,999999999)||null, safeInt(body.min_sdk,1,99)||null, head.size, body.apk_key, body.icon_key||null, body.feature_key||null, now, now).run();
+    .bind(id, slug, sanitizeText(body.name, 200), sanitizeText(body.name, 200).toLowerCase(), JSON.stringify(searchTerms(body.name, body.developer, body.short_description, body.package_name)), sanitizeText(body.package_name, 200), sanitizeText(body.short_description, 500)||null, sanitizeText(body.description, 10000)||null, sanitizeText(body.category, 60)||'other', body.type === 'game' ? 'game' : 'app', sanitizeText(body.developer, 120)||null, sanitizeText(body.version_name, 60)||null, safeInt(body.version_code,0,999999999)||null, safeInt(body.min_sdk,1,99)||null, head ? head.size : 0, apkKey || null, body.icon_key || null, body.feature_key || null, now, now).run();
 
   if (Array.isArray(body.screenshot_keys)) {
     for (let j = 0; j < body.screenshot_keys.length; j++) {
@@ -3916,7 +3954,11 @@ app.post('/admin/apps', async (c) => {
   // app row had already been created — which is why REPLACING an APK (no
   // broadcast) always appeared to work. The row is written first, then the
   // push runs in the background.
-  if ((await getStoreSettings(c.env)).notify_new_publications) {
+  /* An announcement waits for the file itself. A two-step shell has no APK yet,
+     so announcing here would push a «new app» whose download does not exist —
+     the «نُشر ولم يُنزّل» complaint. The APK route announces instead, exactly
+     once, when the file is attached. */
+  if (apkKey && (await getStoreSettings(c.env)).notify_new_publications) {
     const note = {
       type: 'new_app' as const, title: body.name, body: '', app_slug: slug,
       image_url: icon_url(body.icon_key, c.env) || '',
@@ -3940,7 +3982,7 @@ app.post('/admin/apps', async (c) => {
     publishKeys.set(idem, { id, slug, ts: Date.now() });
   }
 
-  return c.json({ ok: true, id, slug });
+  return c.json({ ok: true, id, slug, has_apk: !!apkKey, awaiting_files: !apkKey });
 });
 
 /* ── SAVING «البيانات الأساسية» ──────────────────────────────────────────────
@@ -4099,6 +4141,16 @@ app.post('/admin/apps/:id/apk', async (c) => {
   const old: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   if (!old) return c.json({ error: 'not_found' }, 404);
 
+  /* ── «ملف التطبيق أولاً ثم الصور»: the step that finishes the publish ─────
+   * A two-step publish creates the row with no file, uploads the APK, and lands
+   * here. That first arrival is not a «تحديث» — it is the moment the item
+   * becomes real, so it is announced like a publication, ONCE. The guard is the
+   * row itself: an update only counts as a first arrival while `apk_key` is
+   * still empty. Re-uploading a file later is a release (the `update` notice
+   * below), never a second «new app».
+   */
+  const wasShell = !old.apk_key;
+
   /* «عندما حدّثت التطبيق كل الصور نُشرت مرة ثانية».
    *
    * The key of an existing item's file is deterministic — `apk/<slug>.apk` — so
@@ -4118,6 +4170,19 @@ app.post('/admin/apps/:id/apk', async (c) => {
     && String(old.version_name || '') === versionNow
     && (body.version_code === undefined || Number(old.version_code) === codeNow);
   if (sameFile) return c.json({ ok: true, unchanged: true, notified: false });
+
+  /* A shell was created as a draft; the file that completes it is what puts it
+     on the site. Done here, after the row is updated, so the catalogue can never
+     show an item whose download is not there. */
+  if (wasShell) {
+    await ensureConsoleTables(c.env.DB);
+    try {
+      await c.env.DB.prepare(`INSERT INTO app_publication (slug, status, publish_at, updated_at)
+        VALUES (?, 'published', 0, ?) ON CONFLICT(slug) DO UPDATE SET
+          status = 'published', publish_at = 0, updated_at = excluded.updated_at`)
+        .bind(old.slug, nowSec()).run();
+    } catch { /* best effort; the health panel would name it */ }
+  }
 
   await c.env.DB.prepare('UPDATE apps SET apk_key=?, size_bytes=?, version_name=?, version_code=?, updated_at=? WHERE id=?')
     .bind(body.apk_key, sizeNow, versionNow, codeNow, nowSec(), old.id).run();
@@ -4143,12 +4208,15 @@ app.post('/admin/apps/:id/apk', async (c) => {
     let execCtx: any = null;
     try { execCtx = c.executionCtx; } catch { execCtx = null; }
     const note: any = await addNotification(c.env, {
-      type: 'update', title: old.name, body: `إصدار ${body.version_name || old.version_name}`,
+      // The file that completes a shell is a publication, not an update.
+      type: wasShell ? 'new_app' : 'update',
+      title: old.name,
+      body: wasShell ? '' : `إصدار ${body.version_name || old.version_name}`,
       app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
       click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
       // The row is what «notified» means; the push must not delay the click.
       fast: !!execCtx,
-    }, execCtx);
+    } as any, execCtx);
     notified = !!note?.id;
     push = note?.push || push;
   } catch (e: any) {
@@ -4157,7 +4225,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
   await purgeAppsCache(c.env);
   return c.json({
     ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null,
-    notified, push,
+    notified, push, first_file: wasShell,
     version: { name: body.version_name || old.version_name, code: body.version_code ?? old.version_code },
   });
 });

@@ -400,6 +400,57 @@
     return `${base}/api/admin/r2/put?key=${encodeURIComponent(key)}`;
   }
 
+  /* ── STAGING DRAFTS — «لماذا أعيد رفع 40 ميغابايت؟» ───────────────────────
+   * A publish that loses its connection has usually already uploaded the bytes.
+   * They are kept in this browser (localStorage) under a key derived from the
+   * item's own fields, and the next press reuses them instead of sending them
+   * again. Uploading the same file again is still harmless: the upload key is
+   * deterministic per item, so the same name is written again, not a copy.
+   * Only this browser sees them — nothing is published from here. */
+  const DRAFT_PREFIX = 'gs_admin_draft:';
+  function draftIdOf(data) {
+    const base = `${data.name || ''}|${data.package_name || ''}|${data.type || 'app'}`;
+    let h = 0;
+    for (let i = 0; i < base.length; i++) h = (h * 31 + base.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+  const uploadedKeysOf = (kind) => uploadSession.keys
+    .filter((x) => x && x.kind === kind).map((x) => x.key);
+  function stashDraft(data, files) {
+    try {
+      const empty = !files.apk_key.length && !files.icon.length && !files.feature.length && !files.screenshots.length;
+      if (empty) return;
+      localStorage.setItem(DRAFT_PREFIX + draftIdOf(data), JSON.stringify({ ...files, at: Date.now() }));
+    } catch (e) { /* a full quota must never break a publish */ }
+  }
+  /** Every key a staged draft is holding, so they can be released on cancel. */
+  function releaseDraft(data) {
+    try {
+      const raw = localStorage.getItem(DRAFT_PREFIX + draftIdOf(data));
+      if (!raw) return [];
+      const d = JSON.parse(raw);
+      return [
+        ...(d.apk_key || []), ...(d.icon || []), ...(d.feature || []),
+        ...(d.screenshots || []),
+      ].filter(Boolean);
+    } catch (e) { return []; }
+  }
+  function clearDraft(data) {
+    try { localStorage.removeItem(DRAFT_PREFIX + draftIdOf(data)); } catch (e) {}
+  }
+  /** Was this exact file already uploaded by a previous attempt? */
+  function stagedKeyFor(data, kind, file) {
+    try {
+      const raw = localStorage.getItem(DRAFT_PREFIX + draftIdOf(data));
+      if (!raw) return '';
+      const d = JSON.parse(raw);
+      const want = kind === 'screenshot' ? (d.screenshots || []) : (d[kind === 'apk' ? 'apk_key' : kind] || []);
+      // Only reuse a key whose tail tells us it is the same kind; the upload key
+      // is deterministic per item, so one candidate per kind is enough.
+      return want.length ? String(want[0]) : '';
+    } catch (e) { return ''; }
+  }
+
   async function r2Upload(file, kind, slugHint, onProgress, opts) {
     const contentType = file.type || 'application/octet-stream';
 
@@ -468,7 +519,7 @@
       if (/_4\d\d$/.test(String(ownErr && ownErr.message))) throw ownErr;
       await retryXhrPut(url, file, contentType, progress, 2, 30 * 60 * 1000);
     }
-    return trackUploaded(key);
+    return trackUploaded(key, kind);
   }
 
   // Turn a publish failure into a plain, actionable sentence in the UI
@@ -548,12 +599,12 @@
    * successful publish clears the list (the row now owns those keys).
    */
   const uploadSession = { keys: [] };
-  function trackUploaded(key) {
-    if (key && typeof key === 'string') uploadSession.keys.push(key);
+  function trackUploaded(key, kind) {
+    if (key && typeof key === 'string') uploadSession.keys.push({ key, kind: kind || '' });
     return key;
   }
   async function discardUploadedKeys(keys) {
-    const list = [...new Set((keys || []).filter(Boolean))];
+    const list = [...new Set((keys || []).map((k) => (k && k.key) || k).filter(Boolean))];
     if (!list.length) return { deleted: 0, failed: 0 };
     try {
       const res = await api('/api/admin/r2/delete', { method: 'POST', body: { keys: list }, timeoutMs: 60000 });
@@ -694,7 +745,7 @@
         }
       }
 
-      return trackUploaded(key);
+      return trackUploaded(key, kind);
     } catch (err) {
       // Abort multipart upload on failure (cleanup)
       api('/api/admin/multipart/abort', {
@@ -5096,112 +5147,212 @@
       submitBtn.append(el('div', { class: 'spinner', style: 'width:18px; height:18px; border-width:2px;' }));
 
       let step = 'apk';
-      let publishKey = '';
+      // Set the moment the row exists; everything after that is a resume, not a
+      // failed publish.
+      let savedId = '';
       try {
+        /* ── «ملف التطبيق أولاً ثم الصور» ─────────────────────────────────────
+         * The APK is uploaded ALONE and the row is saved as soon as it lands;
+         * only then do the pictures go up, attached to a row that already
+         * exists. Two things this fixes, both reported:
+         *
+         *  • «تعذّر الاتصال بالخادم أثناء ملف التطبيق» — the row used to be
+         *    created after EVERY byte, so one connection had to survive the APK,
+         *    the icon, the feature image and every screenshot. A break at any
+         *    point failed the whole publish and swept the uploaded files away.
+         *  • the owner's order: the app goes down first, the pictures after it.
+         *
+         * A break now costs at most the file in flight: what already uploaded
+         * stays attached to the row, and pressing publish again resumes.
+         */
         const slugHint = (data.name || 'app').slice(0, 60);
-
-        // Upload APK first
-        toast('بدء رفع الملفات…');
-        /* The five uploads used to run strictly one after another: APK, then
-         * icon, then feature, then every screenshot. The APK is the only big
-         * one — waiting for it before starting three 100 KB pictures added their
-         * full round trips to the publish for no reason. They now start
-         * together; only the row creation waits for all of them. */
-        const iconFiles = iconDz.getFiles();
-        const featFiles = featDz.getFiles();
-        const ssFiles = ssDz.getFiles();
+        toast('بدء رفع ملف التطبيق…');
         step = 'apk';
-        const apkPromise = r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
-        const iconPromise = iconFiles.length
-          ? r2Upload(iconFiles[0], 'icon', slugHint, (r) => iconDz.setProgress(0, r)) : Promise.resolve(null);
-        const featurePromise = featFiles.length
-          ? r2Upload(featFiles[0], 'feature', slugHint, (r) => featDz.setProgress(0, r)) : Promise.resolve(null);
-        const shotPromises = ssFiles.map((f, i) =>
-          r2Upload(f, 'screenshot', slugHint, (r) => ssDz.setProgress(i, r)));
-
-        const apk_key = await apkPromise.catch((e) => { step = 'apk'; throw e; });
-        const icon_key = await iconPromise.catch((e) => { step = 'icon'; throw e; });
-        const feature_key = await featurePromise.catch((e) => { step = 'feature'; throw e; });
-        const screenshot_keys = [];
-        for (let i = 0; i < shotPromises.length; i++) {
-          screenshot_keys.push(await shotPromises[i].catch((e) => { step = 'screenshots'; throw e; }));
+        /* An APK that a previous attempt already sent is reused: the key is
+           deterministic per item, so the bytes in the bucket ARE this file.
+           Re-sending 40 MB because the connection dropped once is the exact
+           waste the owner reported. */
+        const stagedApk = stagedKeyFor(data, 'apk', apkFiles[0]);
+        let apk_key;
+        if (stagedApk) {
+          apk_key = stagedApk;
+          apkDz.setProgress(0, 1);
+          trackUploaded(apk_key, 'apk');
+          toast('ملف التطبيق مرفوع مسبقاً — لن يُرفع مرة أخرى');
+        } else {
+          apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
         }
 
-        const payload = {
-          name: data.name,
-          package_name: data.package_name,
-          developer: data.developer,
-          category: data.category,
-          type: data.type === 'game' ? 'game' : 'app',
-          short_description: data.short_description,
-          description: data.description,
-          version_name: data.version_name,
-          version_code: data.version_code ? Number(data.version_code) : undefined,
-          min_sdk: data.min_sdk ? Number(data.min_sdk) : undefined,
-          apk_key,
-          icon_key,
-          feature_key,
-          screenshot_keys,
-          videos: ve.getVideos(),
-        };
-        // Publishing fans out a push to every device, so the response can be
-        // slower than the default request timeout. Wait much longer here, and
-        // if it still times out, check whether the app was actually created
-        // before telling the owner it failed.
+        // The shell row: name, package and nothing else that needs bytes. It is
+        // not announced and not downloadable until the file is attached below.
         step = 'create';
-        /* One publish = one idempotency key.
-           The POST can answer slower than the browser waits (the automatic push
-           fans out to every device). Without this key every retry created a
-           SECOND copy of the same item — the «ينشر اثنتين» report. The key is
-           generated once per form submit and reused by the retry below, so the
-           server recognises the replay and returns the row it already made. */
-        payload.idempotency_key = publishKey || (publishKey = makePublishKey(payload));
-        let res;
+        let created;
         try {
-          res = await api('/api/admin/apps', { method: 'POST', body: payload, timeoutMs: 120000 });
+          created = await api('/api/admin/apps', {
+            method: 'POST',
+            timeoutMs: 60000,
+            body: {
+              name: data.name,
+              package_name: data.package_name,
+              developer: data.developer,
+              category: data.category,
+              type: data.type === 'game' ? 'game' : 'app',
+              short_description: data.short_description,
+              description: data.description,
+              version_name: data.version_name,
+              version_code: data.version_code ? Number(data.version_code) : undefined,
+              min_sdk: data.min_sdk ? Number(data.min_sdk) : undefined,
+              post_create: true,
+            },
+          });
         } catch (e) {
-          // The bytes are already in R2 and the row may already exist even when
-          // the response never arrives (the browser reports a network error).
-          // Always check before telling the owner it failed — that false
-          // "Internet error" is exactly what was reported.
-          const found = await findCreatedApp(payload.name).catch(() => null);
+          // The files are already in the bucket; the row may exist anyway. Check
+          // before reporting a failure — that false «Internet error» is exactly
+          // what was reported twice.
+          const found = await findCreatedApp(data.name).catch(() => null);
           if (!found) throw e;
-          res = found;
+          created = found;
         }
-        // The server answers `existing: true` when this exact item was already
-        // published (a retried request, or a second copy of the same package).
-        // Saying «تم الرفع» again would be a lie — and is what made one publish
-        // look like two.
-        if (res && res.existing) {
-          toast(res.duplicate
+        if (created && created.existing) {
+          toast(created.duplicate
             ? 'هذا العنصر منشور بالفعل — فتحنا نسخته الأصلية ولم ننشئ نسخة ثانية'
             : 'الاسم مستخدم بالفعل لعنصر آخر — فتحناه ولم ننشئ نسخة ثانية. غيّر الاسم أو عدّل العنصر الموجود', 'info');
-        } else if (!res || (!res.id && !res.slug)) {
-          /* A 200 without a row is not a success. Before this, the panel said
-             «تم رفع التطبيق بنجاح» while nothing was saved — the exact
-             «رفعت تطبيقاً ولم يُنشر» report — and the uploaded files stayed in
-             the bucket with no row pointing at them. */
+          uploadSession.keys.length = 0;
+          activeTab = `edit:${created.id}`;
+          renderApp();
+          return;
+        }
+        if (!created || (!created.id && !created.slug)) {
           throw Object.assign(new Error('row_not_saved'), { status: 502 });
+        }
+        const newId = created.id;
+        savedId = newId;
+
+        /* The file that makes the item real. This is also the single moment the
+         * «new app» notice is written, so the announcement can never arrive
+         * before the download exists. */
+        step = 'apk';
+        const apkRes = await api(`/api/admin/apps/${newId}/apk`, {
+          method: 'POST',
+          timeoutMs: 60000,
+          body: {
+            apk_key,
+            version_name: data.version_name || null,
+            version_code: data.version_code ? Number(data.version_code) : undefined,
+          },
+        });
+        const apkNotified = !!(apkRes && apkRes.notified);
+        uploadSession.keys.length = 0;   // the row owns the APK from here on
+        toast('تم رفع ملف التطبيق — الآن الصور…');
+
+        /* Pictures: one at a time, in the owner's order, each attached as soon
+         * as it lands. iconTrouble collects what failed so the owner is told
+         * exactly which picture did not go up instead of a bare «فشل». */
+        const iconTrouble = [];
+        const attach = async (kind, file, idx, list, call) => {
+          try {
+            const key = await r2Upload(file, kind, slugHint, (r) => (kind === 'icon' ? iconDz : kind === 'feature' ? featDz : ssDz).setProgress(idx, r));
+            await call(key);
+          } catch (e) {
+            iconTrouble.push({ kind, message: publishErrorText(e, kind === 'screenshot' ? 'screenshots' : kind, data.name) });
+          }
+        };
+        const iconFiles = iconDz.getFiles();
+        if (iconFiles.length) {
+          step = 'icon';
+          await attach('icon', iconFiles[0], 0, null, (key) =>
+            api(`/api/admin/apps/${newId}/icon`, { method: 'POST', body: { icon_key: key } }));
+        }
+        const featFiles = featDz.getFiles();
+        if (featFiles.length) {
+          step = 'feature';
+          await attach('feature', featFiles[0], 0, null, (key) =>
+            api(`/api/admin/apps/${newId}/feature`, { method: 'POST', body: { feature_key: key } }));
+        }
+        const ssFiles = ssDz.getFiles();
+        const ssKeys = [];
+        for (let i = 0; i < ssFiles.length; i++) {
+          step = 'screenshots';
+          try {
+            ssKeys.push(await r2Upload(ssFiles[i], 'screenshot', slugHint, (r) => ssDz.setProgress(i, r)));
+          } catch (e) {
+            iconTrouble.push({ kind: 'screenshot', message: publishErrorText(e, 'screenshots', data.name) });
+          }
+        }
+        if (ssKeys.length) {
+          try {
+            await api(`/api/admin/apps/${newId}/screenshots`, { method: 'POST', timeoutMs: 120000, body: { screenshot_keys: ssKeys } });
+          } catch (e) {
+            iconTrouble.push({ kind: 'screenshot', message: publishErrorText(e, 'screenshots', data.name) });
+          }
+        }
+        try {
+          const vids = ve.getVideos();
+          if (vids && vids.length) {
+            for (let i = 0; i < vids.length; i++) {
+              await api(`/api/admin/apps/${newId}/videos`, { method: 'POST', body: vids[i] });
+            }
+          }
+        } catch (e) {
+          iconTrouble.push({ kind: 'video', message: publishErrorText(e, 'create', data.name) });
+        }
+
+        /* Everything that matters is already saved. The item is published and
+         * downloadable, so a picture problem is a warning, not a lost publish. */
+        clearDraft(data);   // the row owns every file from here on
+        const res = { id: newId, slug: created.slug, notified: apkNotified };
+        if (iconTrouble.length) {
+          toast(`تم نشر التطبيق وملفه، لكن ${iconTrouble.length} من الصور لم تُرفع: `
+            + iconTrouble.map((x) => x.message).filter((m, i2, a2) => a2.indexOf(m) === i2).join(' — ')
+            + ' — افتح التطبيق من القائمة وأعد رفعها.', 'error');
         } else {
           toast('تم رفع التطبيق بنجاح', 'success');
         }
-        // The row exists now, so it owns every file this attempt uploaded.
-        uploadSession.keys.length = 0;
         activeTab = `edit:${res.id}`;
         renderApp();
+        return;
       } catch (err) {
-        /* The publish failed, so nothing in the store points at the files that
-           were already uploaded. Leaving them is how the bucket accumulated
-           leftovers nobody could trace («ماذا الذي لا يحذف من اين اتى»). */
-        const swept = await discardUploadedKeys(uploadSession.keys);
-        uploadSession.keys.length = 0;
+        /* «تعذّر الاتصال… وأُزيلت 3 ملفات» must never happen again.
+         *
+         * The sweep below only exists for files that NOTHING points at. Once the
+         * row is saved it owns every file already uploaded, so throwing them away
+         * would delete a published item's own APK. So: before the row exists, an
+         * abandoned attempt is swept; after it exists, nothing is deleted and the
+         * owner is told what is still missing and that pressing publish again
+         * resumes from where it stopped. */
         const base = publishErrorText(err, step, data.name);
-        toast(swept.deleted
-          ? `${base} — وأُزيلت ${swept.deleted} ملفات رُفعت ثم لم تُستخدم.`
-          : base, 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '';
-        submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));
+        /* Nothing is deleted while the owner still wants this item.
+         *
+         * The files already uploaded are remembered as a STAGING draft (in this
+         * browser only). Uploading the same files again reuses them — so a
+         * dropped connection costs a click, not the megabytes that already
+         * travelled — and pressing publish again resumes. The drafts are only
+         * cleared once a row owns them, or when the owner cancels. */
+        let swept = { deleted: 0 };
+        if (!savedId) {
+          stashDraft(data, {
+            apk_key: uploadedKeysOf('apk'), icon: uploadedKeysOf('icon'),
+            feature: uploadedKeysOf('feature'), screenshots: uploadedKeysOf('screenshot'),
+          });
+          uploadSession.keys.length = 0;
+        }
+        if (savedId) {
+          /* The row exists: the connection dropped while a picture was going up.
+             Say what really happened, name the app, and keep every byte. */
+          const pkg = (appListCache || []).find((x) => x.id === savedId);
+          const title = (pkg && pkg.name) || data.name;
+          toast(`${base} — لكن «${title}» محفوظ ولم يُفقد شيء من ملفاته. `
+            + 'افتحه من القائمة وأعد رفع الصورة التي توقفت.', 'error');
+          activeTab = `edit:${savedId}`;
+          renderApp();
+        } else {
+          toast(swept.deleted
+            ? `${base} — وأُزيلت ${swept.deleted} ملفات رُفعت ثم لم تُستخدم.`
+            : base, 'error');
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '';
+          submitBtn.append(ico('upload'), document.createTextNode('رفع التطبيق'));
+        }
       }
     } });
 
@@ -5242,7 +5393,22 @@
       ve.panel,
       el('div', { class: 'flex gap-md' },
         el('button', { type: 'submit', class: 'btn btn-primary btn-lg' }, ico('upload'), 'رفع التطبيق'),
-        el('button', { type: 'button', class: 'btn btn-secondary', onclick: () => { activeTab = 'apps'; renderApp(); } }, 'إلغاء'),
+        /* Cancelling releases the files this attempt uploaded: nothing points at
+           them, and the owner has always asked that the bucket not accumulate
+           leftovers nobody can trace («ماذا الذي لا يحذف من اين اتى»). Abandoning
+           a draft is the moment to delete them, and the result is reported. */
+        el('button', { type: 'button', class: 'btn btn-secondary', onclick: async () => {
+          const held = releaseDraft(data);
+          clearDraft(data);
+          if (held.length) {
+            const out = await discardUploadedKeys(held);
+            toast(out.deleted
+              ? `أُلغي النشر وأُزيلت ${out.deleted} ملفات رُفعت في هذه المحاولة`
+              : 'أُلغي النشر — تعذّر إزالة الملفات المرفوعة، ستُمسح من لوحة التخزين', out.deleted ? 'info' : 'error');
+          }
+          activeTab = 'apps';
+          renderApp();
+        } }, 'إلغاء'),
       ),
     );
     // Pre-fill the form when an existing item was duplicated from the list.

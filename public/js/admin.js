@@ -446,23 +446,29 @@
      *
      * `/api/r2-put` is the store's own origin: the browser uploads to us and the
      * Worker writes the object. A failure is now a JSON reason with a status.
-     * The presigned URL stays as the fallback, so nothing that works today
-     * stops working. */
+     * If the Worker itself is unreachable the presigned URL is still tried once,
+     * but it is no longer the first choice: it costs the bucket's distance on
+     * every byte. */
+    /* SPEED: the browser sends the bytes to its nearest Cloudflare POP and the
+     * Worker there writes them into the bucket. The bucket sits in one region
+     * (the owner's is Western North America), so a direct upload from Algeria
+     * would pay that distance on every byte of the file; through the Worker it is
+     * paid once, on the Worker's own fast link, not on the phone's. The direct
+     * path is used only when the same-origin one cannot work at all. */
+    const progress = (loaded, total) => { if (onProgress) onProgress(loaded / total); };
     try {
-      await retryXhrPut(ownOriginPutUrl(key), file, contentType, (loaded, total) => {
-        if (onProgress) onProgress(loaded / total);
-      }, 1, 30 * 60 * 1000);
-      return trackUploaded(key);
-    } catch (err) {
-      const msg = String((err && err.message) || '');
-      // A 4xx from the Worker is a real answer (size, session, key) — do not
-      // silently retry the old path for it.
-      if (/_4\d\d$/.test(msg)) throw err;
-      await retryXhrPut(url, file, contentType, (loaded, total) => {
-        if (onProgress) onProgress(loaded / total);
-      }, 2, 30 * 60 * 1000);
-      return trackUploaded(key);
+      await retryXhrPut(ownOriginPutUrl(key), file, contentType, progress, 2, 30 * 60 * 1000);
+    } catch (ownErr) {
+      /* SPEED: the presigned PUT is NOT attempted first any more — that sent
+       * every byte across the bucket's region twice on a slow link. It stays as
+       * the one fallback for the case the Worker route cannot run at all (an old
+       * deployment, a body the Worker will not carry), so nothing that used to
+       * work breaks. A 4xx from our own route is a real refusal and is reported
+       * as-is instead of being masked by a second attempt. */
+      if (/_4\d\d$/.test(String(ownErr && ownErr.message))) throw ownErr;
+      await retryXhrPut(url, file, contentType, progress, 2, 30 * 60 * 1000);
     }
+    return trackUploaded(key);
   }
 
   // Turn a publish failure into a plain, actionable sentence in the UI
@@ -590,8 +596,6 @@
     });
 
     const { key, uploadId, partSize, parts: partUrls } = mp;
-    const completedParts = [];
-    let totalUploaded = 0;
 
     // 2. Upload each part with retry.
     //
@@ -621,6 +625,9 @@
       signedAt = Date.now();
     }
 
+    const completedParts = [];
+    let doneBytes = 0;
+
     try {
       for (let i = 0; i < pending.length; i++) {
         const start = i * partSize;
@@ -639,13 +646,13 @@
              * upload id travel with it, so the Worker writes the same part the
              * signed URL would have written. */
             etag = await retryXhrPut(partPutUrl(key, uploadId, partNum), chunk, null, (loaded) => {
-              if (onProgress) onProgress((totalUploaded + loaded) / file.size);
+              if (onProgress) onProgress((doneBytes + loaded) / file.size);
             }, 1, 10 * 60 * 1000).catch(async (ownErr) => {
               if (/_4\d\d$/.test(String(ownErr && ownErr.message))) throw ownErr;
               // The bucket route stays as the fallback for anything the Worker
               // cannot carry (a very large part, an old deployment).
               return retryXhrPut(pending[i].url, chunk, null, (loaded) => {
-                if (onProgress) onProgress((totalUploaded + loaded) / file.size);
+                if (onProgress) onProgress((doneBytes + loaded) / file.size);
               }, 3, 10 * 60 * 1000);
             });
             break;
@@ -664,8 +671,8 @@
           throw new Error('upload_etag_missing');
         }
 
-        totalUploaded += (end - start);
-        if (onProgress) onProgress(totalUploaded / file.size);
+        doneBytes += (end - start);
+        if (onProgress) onProgress(doneBytes / file.size);
 
         completedParts.push({ PartNumber: partNum, ETag: etag });
       }
@@ -5095,21 +5102,29 @@
 
         // Upload APK first
         toast('بدء رفع الملفات…');
-        const apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
-        let icon_key = null;
+        /* The five uploads used to run strictly one after another: APK, then
+         * icon, then feature, then every screenshot. The APK is the only big
+         * one — waiting for it before starting three 100 KB pictures added their
+         * full round trips to the publish for no reason. They now start
+         * together; only the row creation waits for all of them. */
         const iconFiles = iconDz.getFiles();
-        step = 'icon';
-        if (iconFiles.length) icon_key = await r2Upload(iconFiles[0], 'icon', slugHint, (r) => iconDz.setProgress(0, r));
-        let feature_key = null;
         const featFiles = featDz.getFiles();
-        step = 'feature';
-        if (featFiles.length) feature_key = await r2Upload(featFiles[0], 'feature', slugHint, (r) => featDz.setProgress(0, r));
-        const screenshot_keys = [];
         const ssFiles = ssDz.getFiles();
-        step = 'screenshots';
-        for (let i = 0; i < ssFiles.length; i++) {
-          const k = await r2Upload(ssFiles[i], 'screenshot', slugHint, (r) => ssDz.setProgress(i, r));
-          screenshot_keys.push(k);
+        step = 'apk';
+        const apkPromise = r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
+        const iconPromise = iconFiles.length
+          ? r2Upload(iconFiles[0], 'icon', slugHint, (r) => iconDz.setProgress(0, r)) : Promise.resolve(null);
+        const featurePromise = featFiles.length
+          ? r2Upload(featFiles[0], 'feature', slugHint, (r) => featDz.setProgress(0, r)) : Promise.resolve(null);
+        const shotPromises = ssFiles.map((f, i) =>
+          r2Upload(f, 'screenshot', slugHint, (r) => ssDz.setProgress(i, r)));
+
+        const apk_key = await apkPromise.catch((e) => { step = 'apk'; throw e; });
+        const icon_key = await iconPromise.catch((e) => { step = 'icon'; throw e; });
+        const feature_key = await featurePromise.catch((e) => { step = 'feature'; throw e; });
+        const screenshot_keys = [];
+        for (let i = 0; i < shotPromises.length; i++) {
+          screenshot_keys.push(await shotPromises[i].catch((e) => { step = 'screenshots'; throw e; }));
         }
 
         const payload = {

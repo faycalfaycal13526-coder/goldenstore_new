@@ -602,7 +602,19 @@ function inQuietHours(settings: Record<string, string>): boolean {
   return start > end ? (h >= start || h < end) : (h >= start && h < end);
 }
 
-async function addNotification(env: Env, data: any) {
+/** The push half of a saved notification (settings + quiet hours + FCM). */
+async function broadcastSaved(env: Env, rich: any, data: any, settings: Record<string, string>) {
+  if (settings.push_enabled !== '1') return { skipped: 'push_disabled', targeted: 0, success: 0, failure: 0 };
+  if (inQuietHours(settings)) return { skipped: 'quiet_hours', targeted: 0, success: 0, failure: 0 };
+  try {
+    return await deliverNotification(env, rich, data.segment || { mode: 'all' });
+  } catch (error: any) {
+    console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
+    return { error: 'push_failed', message: String(error?.message || error), targeted: 0, success: 0, failure: 0 };
+  }
+}
+
+async function addNotification(env: Env, data: any, ctx?: any) {
   const id = randomId();
   const title = sanitizeText(data.title, 200), body = sanitizeText(data.body, 1000);
   const type = data.type === 'new_app' || data.type === 'update' ? data.type : 'announcement';
@@ -625,6 +637,21 @@ async function addNotification(env: Env, data: any) {
     data: data.data,
   };
   const settings = await readAllSettings(env).catch(() => ({ ...SETTING_DEFAULTS }));
+  /* ── The row is saved now; the BROADCAST is backgrounded ────────────────
+   * `addNotification` used to await `deliverNotification`, which fans out to
+   * every device through FCM. That is what made «النشر بطيئاً»: the console (and
+   * the update button) sat waiting for a job measured in seconds while the row
+   * was already written. `fast` keeps the row synchronous — so the caller can
+   * report `notified: true` honestly — and hands the push to `waitUntil`.
+   * The delivery itself is queued by the engine anyway (delivery_jobs), so
+   * nothing is lost if the request ends first. */
+  if (data.fast && ctx && typeof ctx.waitUntil === 'function') {
+    const fire = () => broadcastSaved(env, rich, data, settings).catch((error: any) => {
+      console.error('[fcm] broadcast failed but notification was saved:', error?.message || error);
+    });
+    ctx.waitUntil(fire());
+    return { id, push: { queued: true } };
+  }
   let push: any;
   if (settings.push_enabled !== '1') {
     push = { skipped: 'push_disabled', targeted: 0, success: 0, failure: 0 };
@@ -3897,10 +3924,11 @@ app.post('/admin/apps', async (c) => {
       created_at: now,
     };
     try {
-      c.executionCtx.waitUntil(addNotification(c.env, note).catch(() => {}));
+      // `fast`: the row is written inside the request, the FCM fan-out runs
+      // afterwards — publishing used to wait for it (that is the slowness).
+      c.executionCtx.waitUntil(addNotification(c.env, { ...note, fast: true }, c.executionCtx).catch(() => {}));
     } catch {
-      // No execution context (tests/edge cases): fall back to a plain call so
-      // the notification is still delivered.
+      // No execution context (tests/edge cases): write it inline, no broadcast.
       await addNotification(c.env, note).catch(() => {});
     }
   }
@@ -4112,11 +4140,15 @@ app.post('/admin/apps/:id/apk', async (c) => {
   let notified = false;
   let push: any = { skipped: 'not_attempted' };
   try {
+    let execCtx: any = null;
+    try { execCtx = c.executionCtx; } catch { execCtx = null; }
     const note: any = await addNotification(c.env, {
       type: 'update', title: old.name, body: `إصدار ${body.version_name || old.version_name}`,
       app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
       click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
-    });
+      // The row is what «notified» means; the push must not delay the click.
+      fast: !!execCtx,
+    }, execCtx);
     notified = !!note?.id;
     push = note?.push || push;
   } catch (e: any) {

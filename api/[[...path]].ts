@@ -5035,6 +5035,18 @@ app.post('/admin/storage/sweep', async (c) => {
       whether the notification row was ever written for the last N releases.
    Nothing here needs the owner to guess.
    ========================================================================= */
+// Does a staged upload key still exist in the bucket? The console reuses a
+// previously-uploaded APK on retry, but the object may have been deleted (the
+// «unused files» sweep or the R2 console). Reusing a missing key made the attach
+// step fail with apk_not_found; the console now checks first and re-uploads.
+app.get('/admin/r2/head', async (c) => {
+  const key = String(c.req.query('key') || '').trim();
+  if (!validR2Key(key)) return c.json({ error: 'invalid_key' }, 400);
+  const head = await r2Head(c.env, key).catch(() => null);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ exists: !!head, size: head?.size || 0 });
+});
+
 app.all('/admin/r2/put', async (c) => {
   // The console uploads through this route instead of straight to the bucket.
   // A browser PUT to *.r2.cloudflarestorage.com is a CROSS-ORIGIN request: it

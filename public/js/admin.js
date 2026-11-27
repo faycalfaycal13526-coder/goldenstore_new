@@ -472,6 +472,15 @@
     } catch (e) { return ''; }
   }
 
+  /** Is a staged object still present in the bucket? Fail-open to «missing» so a
+   *  deleted file is re-uploaded rather than attached as a dead key. */
+  async function r2KeyExists(key) {
+    try {
+      const r = await api('/api/admin/r2/head?key=' + encodeURIComponent(key), { timeoutMs: 20000 });
+      return !!(r && r.exists);
+    } catch (e) { return false; }
+  }
+
   async function r2Upload(file, kind, slugHint, onProgress, opts) {
     const contentType = file.type || 'application/octet-stream';
 
@@ -5274,12 +5283,17 @@
            waste the owner reported. */
         const stagedApk = stagedKeyFor(data, 'apk', apkFiles[0]);
         let apk_key;
-        if (stagedApk) {
+        // Reuse a previously-uploaded APK ONLY if the object still exists in the
+        // bucket. It may have been removed (unused-files sweep / R2 console);
+        // reusing a missing key made the attach step fail with apk_not_found.
+        const stagedAlive = stagedApk ? await r2KeyExists(stagedApk) : false;
+        if (stagedApk && stagedAlive) {
           apk_key = stagedApk;
           apkDz.setProgress(0, 1);
           trackUploaded(apk_key, 'apk');
           toast('ملف التطبيق مرفوع مسبقاً — لن يُرفع مرة أخرى');
         } else {
+          if (stagedApk && !stagedAlive) toast('الملف السابق لم يعد في التخزين — يُرفع من جديد');
           apk_key = await r2Upload(apkFiles[0], 'apk', slugHint, (r) => apkDz.setProgress(0, r));
         }
 

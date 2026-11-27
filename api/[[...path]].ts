@@ -132,6 +132,7 @@ const PUBLIC_WRITE_EXACT = new Set([
   '/api/notifications/preference', '/api/notifications/receipt',
   '/api/notifications/click', '/api/notifications/self-test',
   '/api/profile/demographics', '/api/support/threads', '/api/publish-request',
+  '/api/__upload-diag', // TEMP upload diagnostic (DIAG_KEY-guarded) — removed after verification
 ]);
 const PUBLIC_WRITE_PATTERNS: RegExp[] = [
   /^\/api\/apps\/[^/]+\/(star|star-check|request-update|report|follow)$/,

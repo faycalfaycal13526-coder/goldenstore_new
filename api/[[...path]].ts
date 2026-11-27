@@ -4215,6 +4215,11 @@ app.post('/admin/apps/:id/apk', async (c) => {
    * below), never a second «new app».
    */
   const wasShell = !old.apk_key;
+  /* A two-step publish keeps the item HIDDEN while its pictures go up, so a
+   * visitor never sees a published page with missing images and the «new app»
+   * push carries the real icon. The console sets defer_publish and calls
+   * /admin/apps/:id/publish once the media is attached. */
+  const deferPublish = body.defer_publish === true || body.publish === false;
 
   /* «عندما حدّثت التطبيق كل الصور نُشرت مرة ثانية».
    *
@@ -4239,7 +4244,7 @@ app.post('/admin/apps/:id/apk', async (c) => {
   /* A shell was created as a draft; the file that completes it is what puts it
      on the site. Done here, after the row is updated, so the catalogue can never
      show an item whose download is not there. */
-  if (wasShell) {
+  if (wasShell && !deferPublish) {
     await ensureConsoleTables(c.env.DB);
     try {
       await c.env.DB.prepare(`INSERT INTO app_publication (slug, status, publish_at, updated_at)
@@ -4269,30 +4274,74 @@ app.post('/admin/apps/:id/apk', async (c) => {
    *    panel could only guess. It now returns `notified` and `push`. */
   let notified = false;
   let push: any = { skipped: 'not_attempted' };
-  try {
-    let execCtx: any = null;
-    try { execCtx = c.executionCtx; } catch { execCtx = null; }
-    const note: any = await addNotification(c.env, {
-      // The file that completes a shell is a publication, not an update.
-      type: wasShell ? 'new_app' : 'update',
-      title: old.name,
-      body: wasShell ? '' : `إصدار ${body.version_name || old.version_name}`,
-      app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
-      click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
-      // The row is what «notified» means; the push must not delay the click.
-      fast: !!execCtx,
-    } as any, execCtx);
-    notified = !!note?.id;
-    push = note?.push || push;
-  } catch (e: any) {
-    push = { error: 'notification_failed', message: String(e?.message || e) };
+  // A deferred first arrival stays a draft and is announced later by /publish,
+  // once the icon and screenshots are attached. Updates announce as before.
+  const announce = !wasShell || !deferPublish;
+  if (announce) {
+    try {
+      let execCtx: any = null;
+      try { execCtx = c.executionCtx; } catch { execCtx = null; }
+      const note: any = await addNotification(c.env, {
+        // The file that completes a shell is a publication, not an update.
+        type: wasShell ? 'new_app' : 'update',
+        title: old.name,
+        body: wasShell ? '' : `إصدار ${body.version_name || old.version_name}`,
+        app_slug: old.slug, image_url: icon_url(old.icon_key, c.env) || '',
+        click_url: `/app?slug=${encodeURIComponent(old.slug)}`, created_at: nowSec(),
+        // The row is what «notified» means; the push must not delay the click.
+        fast: !!execCtx,
+      } as any, execCtx);
+      notified = !!note?.id;
+      push = note?.push || push;
+    } catch (e: any) {
+      push = { error: 'notification_failed', message: String(e?.message || e) };
+    }
+  } else {
+    push = { skipped: 'deferred_until_media' };
   }
   await purgeAppsCache(c.env);
   return c.json({
     ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null,
-    notified, push, first_file: wasShell,
+    notified, push, first_file: wasShell, deferred: wasShell && deferPublish,
     version: { name: body.version_name || old.version_name, code: body.version_code ?? old.version_code },
   });
+});
+
+/* Final step of a deferred publish: the APK and every picture are attached, so
+ * the item can now go public and be announced ONCE, with its real icon. Idempotent:
+ * a second call republishes but never writes a second «new app» notice. */
+app.post('/admin/apps/:id/publish', async (c) => {
+  const row: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(c.req.param('id')).first();
+  if (!row) return c.json({ error: 'not_found' }, 404);
+  if (!row.apk_key) return c.json({ error: 'apk_required' }, 400);
+  await ensureConsoleTables(c.env.DB);
+  await c.env.DB.prepare(`INSERT INTO app_publication (slug, status, publish_at, updated_at)
+    VALUES (?, 'published', 0, ?) ON CONFLICT(slug) DO UPDATE SET
+      status = 'published', publish_at = 0, updated_at = excluded.updated_at`)
+    .bind(row.slug, nowSec()).run();
+  let notified = false;
+  let push: any = { skipped: 'already_announced' };
+  const prior: any = await c.env.DB.prepare("SELECT id FROM notifications WHERE app_slug = ? AND type = 'new_app' LIMIT 1")
+    .bind(row.slug).first().catch(() => null);
+  if (!prior) {
+    try {
+      let execCtx: any = null;
+      try { execCtx = c.executionCtx; } catch { execCtx = null; }
+      const note: any = await addNotification(c.env, {
+        type: 'new_app', title: row.name, body: '', app_slug: row.slug,
+        image_url: icon_url(row.icon_key, c.env) || '',
+        click_url: `/app?slug=${encodeURIComponent(row.slug)}`, created_at: nowSec(),
+        fast: !!execCtx,
+      } as any, execCtx);
+      notified = !!note?.id;
+      push = note?.push || { skipped: 'not_attempted' };
+    } catch (e: any) {
+      push = { error: 'notification_failed', message: String(e?.message || e) };
+    }
+  }
+  await purgeAppsCache(c.env);
+  await recordActivity(c.env, consoleActor(c), `نشر «${row.name}» بعد اكتمال الصور`, 'publish');
+  return c.json({ ok: true, notified, push });
 });
 
 app.post('/admin/apps/:id/icon', async (c) => {
@@ -4373,6 +4422,9 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
   const moved: string[] = [], failed: string[] = [], replaced: number[] = [], added: number[] = [];
   for (const k of body.screenshot_keys) {
     if (!isValidR2Key(k, 'ss')) continue;
+    // Never point a row at an object that is not in the bucket: a dead key is a
+    // blank placeholder on the app page. Skip it and report it instead.
+    if (!(await r2Head(c.env, String(k)).catch(() => null))) { failed.push(String(k)); continue; }
     const slot = slotOf(k);
     if (slot && slots.has(slot)) {
       // The same slot, new bytes: replace the row, keep its place in the order.

@@ -5353,22 +5353,25 @@
             apk_key,
             version_name: data.version_name || null,
             version_code: data.version_code ? Number(data.version_code) : undefined,
+            // Stay hidden until the pictures are attached, then /publish announces
+            // the item once with its real icon — no published page with blank images.
+            defer_publish: true,
           },
         });
-        const apkNotified = !!(apkRes && apkRes.notified);
         uploadSession.keys.length = 0;   // the row owns the APK from here on
         toast('تم رفع ملف التطبيق — الآن الصور…');
 
         /* Pictures: one at a time, in the owner's order, each attached as soon
          * as it lands. iconTrouble collects what failed so the owner is told
          * exactly which picture did not go up instead of a bare «فشل». */
-        const iconTrouble = [];
+        const imageTrouble = [];
+        const videoTrouble = [];
         const attach = async (kind, file, idx, list, call) => {
           try {
             const key = await r2Upload(file, kind, slugHint, (r) => (kind === 'icon' ? iconDz : kind === 'feature' ? featDz : ssDz).setProgress(idx, r));
             await call(key);
           } catch (e) {
-            iconTrouble.push({ kind, message: publishErrorText(e, kind === 'screenshot' ? 'screenshots' : kind, data.name) });
+            imageTrouble.push({ kind, message: publishErrorText(e, kind === 'screenshot' ? 'screenshots' : kind, data.name) });
           }
         };
         const iconFiles = iconDz.getFiles();
@@ -5390,14 +5393,17 @@
           try {
             ssKeys.push(await r2Upload(ssFiles[i], 'screenshot', slugHint, (r) => ssDz.setProgress(i, r)));
           } catch (e) {
-            iconTrouble.push({ kind: 'screenshot', message: publishErrorText(e, 'screenshots', data.name) });
+            imageTrouble.push({ kind: 'screenshot', message: publishErrorText(e, 'screenshots', data.name) });
           }
         }
         if (ssKeys.length) {
           try {
-            await api(`/api/admin/apps/${newId}/screenshots`, { method: 'POST', timeoutMs: 120000, body: { screenshot_keys: ssKeys } });
+            const ssRes = await api(`/api/admin/apps/${newId}/screenshots`, { method: 'POST', timeoutMs: 120000, body: { screenshot_keys: ssKeys } });
+            if (ssRes && Array.isArray(ssRes.missing) && ssRes.missing.length) {
+              imageTrouble.push({ kind: 'screenshot', message: 'بعض الصور لم تصل إلى التخزين' });
+            }
           } catch (e) {
-            iconTrouble.push({ kind: 'screenshot', message: publishErrorText(e, 'screenshots', data.name) });
+            imageTrouble.push({ kind: 'screenshot', message: publishErrorText(e, 'screenshots', data.name) });
           }
         }
         try {
@@ -5408,17 +5414,36 @@
             }
           }
         } catch (e) {
-          iconTrouble.push({ kind: 'video', message: publishErrorText(e, 'create', data.name) });
+          videoTrouble.push({ kind: 'video', message: publishErrorText(e, 'create', data.name) });
         }
 
-        /* Everything that matters is already saved. The item is published and
-         * downloadable, so a picture problem is a warning, not a lost publish. */
         clearDraft(data);   // the row owns every file from here on
-        const res = { id: newId, slug: created.slug, notified: apkNotified };
-        if (iconTrouble.length) {
-          toast(`تم نشر التطبيق وملفه، لكن ${iconTrouble.length} من الصور لم تُرفع: `
-            + iconTrouble.map((x) => x.message).filter((m, i2, a2) => a2.indexOf(m) === i2).join(' — ')
-            + ' — افتح التطبيق من القائمة وأعد رفعها.', 'error');
+        /* Publish ONLY once the pictures are in place. If a picture failed, the
+         * item stays a safe draft (APK kept) and the owner finishes it from edit —
+         * visitors never see a published page with blank images. */
+        if (imageTrouble.length) {
+          toast(`حُفظ التطبيق وملفه كمسودة، لكن ${imageTrouble.length} من الصور لم تُرفع: `
+            + imageTrouble.map((x) => x.message).filter((m, i2, a2) => a2.indexOf(m) === i2).join(' — ')
+            + ' — افتح التطبيق وأعد رفع الصور ثم انشره.', 'error');
+          activeTab = `edit:${newId}`;
+          renderApp();
+          return;
+        }
+        step = 'create';
+        let announced = false;
+        try {
+          const pub = await api(`/api/admin/apps/${newId}/publish`, { method: 'POST', timeoutMs: 60000 });
+          announced = !!(pub && pub.notified);
+        } catch (e) {
+          toast('اكتمل رفع التطبيق وصوره، لكن تعذّر نشره الآن. افتحه من القائمة واضغط نشر.', 'error');
+          activeTab = `edit:${newId}`;
+          renderApp();
+          return;
+        }
+        const res = { id: newId, slug: created.slug, notified: announced };
+        if (videoTrouble.length) {
+          toast('تم نشر التطبيق، لكن بعض الفيديو لم يُضف: '
+            + videoTrouble.map((x) => x.message).filter((m, i2, a2) => a2.indexOf(m) === i2).join(' — '), 'error');
         } else {
           toast('تم رفع التطبيق بنجاح', 'success');
         }

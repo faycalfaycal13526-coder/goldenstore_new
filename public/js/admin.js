@@ -5357,24 +5357,49 @@
         featForm,
       ));
 
-      // Screenshots
+      /* Screenshots.
+       *
+       * «عندما حدّثت التطبيق كل الصور نُشرت مرة ثانية». Two faults met here:
+       * adding a new picture always uploaded it into the NEXT free slot, so a
+       * RE-UPLOAD (the same slot, perhaps a corrected picture) could only ever
+       * add another one; and the server appended a row per key, so the page
+       * ended up showing the same slot twice.
+       *
+       * The picker now asks for the slot, the server updates a slot that already
+       * exists instead of duplicating it, and the toast says exactly how many
+       * were replaced and how many were added. */
       const ssDz = dropzone({ accept: 'image/*', multiple: true, label: 'أضف لقطات جديدة' });
+      const freeSlot = (() => {
+        let n = 1;
+        const used = new Set((screenshots || []).map((s) => Number(s.position) || 0));
+        while (used.has(n)) n++;
+        return n;
+      })();
+      const ssSlot = formField('slot', 'رقم اللقطة (اختر رقماً موجوداً لاستبدالها)', 'number',
+        { value: freeSlot, min: 1 });
       const ssForm = el('form', { class: 'form', onsubmit: async (e) => {
         e.preventDefault();
         const files = ssDz.getFiles();
         if (!files.length) { toast('اختر صور', 'error'); return; }
+        const first = Math.max(1, Number(ssForm.querySelector('[name=slot]').value) || freeSlot);
         try {
           const screenshot_keys = [];
           for (let i = 0; i < files.length; i++) {
-            const k = await r2Upload(files[i], 'screenshot', app.slug, (r) => ssDz.setProgress(i, r), { app_id: app.id, slot: screenshots.length + i + 1 });
+            const k = await r2Upload(files[i], 'screenshot', app.slug, (r) => ssDz.setProgress(i, r), { app_id: app.id, slot: first + i });
             screenshot_keys.push(k);
           }
-          await api(`/api/admin/apps/${id}/screenshots`, { method: 'POST', body: { screenshot_keys } });
-          toast('تمت الإضافة', 'success');
+          const res = await api(`/api/admin/apps/${id}/screenshots`, { method: 'POST', body: { screenshot_keys } });
+          const didReplace = (res && res.replaced) || [];
+          const didAdd = (res && res.added) || [];
+          const bits = [];
+          if (didReplace.length) bits.push(`استُبدلت ${didReplace.length}`);
+          if (didAdd.length) bits.push(`أُضيفت ${didAdd.length}`);
+          toast(bits.length ? bits.join(' · ') : 'لم يتغيّر شيء', 'success');
           renderEditApp(body, id);
-        } catch (err) { toast('فشل الرفع', 'error'); }
+        } catch (err) { toast(publishErrorText(err, 'screenshots', app.name), 'error'); }
       } });
-      ssForm.append(ssDz, el('button', { type: 'submit', class: 'btn btn-primary btn-sm' }, ico('upload'), 'إضافة لقطات'));
+      ssForm.append(ssDz, ssSlot,
+        el('button', { type: 'submit', class: 'btn btn-primary btn-sm' }, ico('upload'), 'رفع / استبدال'));
       const ssPanel = el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('image'), 'لقطات الشاشة'),
       );
@@ -5383,6 +5408,24 @@
         screenshots.forEach((ss) => {
           const wrap = el('div', { style: 'position:relative; flex-shrink:0;' },
             ss.url ? el('img', { src: ss.url, style: 'max-height:180px; width:auto; max-width:320px; min-width:72px; object-fit:contain; background:var(--surface-2); border:1px solid var(--line); border-radius:8px;' }) : null,
+            (() => {
+              // Replacing a picture used to be impossible: the picker always
+              // uploaded into a NEW slot, so the old one could only be deleted.
+              const inp = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+              inp.addEventListener('change', async () => {
+                const f = (inp.files || [])[0];
+                if (!f) return;
+                try {
+                  const key = await r2Upload(f, 'screenshot', app.slug, () => {}, { app_id: app.id, slot: ss.position });
+                  const res = await api(`/api/admin/apps/${id}/screenshots`, { method: 'POST', body: { screenshot_keys: [key] } });
+                  toast((res && (res.replaced || []).length) ? 'استُبدلت اللقطة في مكانها' : 'أُضيفت اللقطة', 'success');
+                  renderEditApp(body, id);
+                } catch (err) { toast(publishErrorText(err, 'screenshots', app.name), 'error'); }
+              });
+              return el('button', { class: 'btn btn-sm btn-secondary', title: 'استبدال هذه الصورة',
+                style: 'position:absolute; top:6px; inset-inline-start:6px;',
+                onclick: () => inp.click() }, ico('upload'));
+            })(),
             el('button', { class: 'btn btn-sm btn-danger', style: 'position:absolute; top:6px; inset-inline-end:6px;',
               onclick: async () => {
                 if (!confirm('حذف هذه اللقطة؟')) return;

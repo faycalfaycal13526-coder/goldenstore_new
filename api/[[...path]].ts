@@ -548,7 +548,7 @@ function mediaUrl(key: string | undefined, env: Env, width: number, variant = ''
       return `https://${storeDomain(env)}/cdn-cgi/image/width=${width},format=auto,quality=80/${direct}`;
     }
     // `?v=` changes with the object, so a replaced picture is not served stale.
-    return `/api/media/${key.split('/').map(encodeURIComponent).join('/')}?w=${width}${variant ? '&k=' + variant : ''}`;
+    return `/api/media/${key.split('/').map(encodeURIComponent).join('/')}?w=${width}${variant ? '&v=' + variant : ''}`;
   } catch { return null; }
 }
 
@@ -560,12 +560,25 @@ function cdnImageUrl(key: string | undefined, env: Env, width: number, variant =
 /** A short, stable token for the object: the same key always gives the same
  *  token, a re-uploaded picture (new key from the organiser or a new upload)
  *  gives a new one — which is all `?v=` needs to do. */
-function keyToken(key: string | undefined): string {
-  const base = String(key || '');
+function hashToken(base: string): string {
   let h = 0;
   for (let i = 0; i < base.length; i++) h = (h * 31 + base.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
 }
+/* The `?v=` a picture URL carries.
+ *
+ * It used to be a hash of the KEY alone. Because a replacement keeps the key
+ * (`icon/<slug>.webp`, `ss/<slug>-2.jpg`), the URL was byte-identical before and
+ * after an update — so the phone (which now keeps pictures for an hour, R90) and
+ * Cloudflare's edge both served the OLD picture, and the console looked like it
+ * had published nothing. Mixing the row's updated_at in makes a replacement a
+ * new URL, which is the only reliable way to change a cached image. */
+function versionToken(key: string | undefined, stamp?: unknown): string {
+  const base = String(key || '');
+  const n = Number(stamp) || 0;
+  return n ? `${hashToken(base)}-${n.toString(36)}` : hashToken(base);
+}
+function keyToken(key: string | undefined): string { return versionToken(key); }
 function feature_url(feature_key: string | undefined, env: Env, width: number = 800): string | null {
   return cdnImageUrl(feature_key, env, width, keyToken(feature_key));
 }
@@ -1589,6 +1602,21 @@ const APPS_STALE = 300;
  * so the set is the index; it is capped, and the 30-second TTL bounds what a
  * missed purge (a write handled by a different isolate) can ever expose. */
 const appsCacheKeys = new Set<string>();
+/* A replaced picture keeps its key, so the stored URL of that key must be
+ * dropped as well — otherwise the next reader gets the old `?v=` and therefore
+ * the old bytes. Kept next to the apps cache because both are purged by the same
+ * writes. */
+async function purgeMediaUrl(env: Env, key: unknown): Promise<void> {
+  const cache = appsCache();
+  const k = String(key || '');
+  if (!cache || !k) return;
+  for (const w of [96, 200, 320, 720, 800]) {
+    for (const host of [`https://${storeDomain(env)}`, 'https://goldenstore.online']) {
+      try { await cache.delete(new Request(`${host}/__edge/media/${w}/${k}`)); } catch { /* best effort */ }
+    }
+  }
+}
+
 function appsCacheKey(request: Request): Request {
   const u = new URL(request.url);
   u.pathname = '/__edge/apps';
@@ -1657,7 +1685,10 @@ app.get('/apps', async (c) => {
     // deleted comment can never keep contributing to the average in the cards.
     const aggMap = await allVoteAggregates(c.env);
     const apps = ordered.map(a => {
-      const out: any = { ...appPublic(a, false, c.env), icon_url: icon_url(a.icon_key, c.env), feature_url: feature_url(a.feature_key, c.env) };
+      const stamp = a.updated_at || a.created_at;
+      const out: any = { ...appPublic(a, false, c.env),
+        icon_url: mediaUrl(a.icon_key, c.env, 200, versionToken(a.icon_key, stamp)),
+        feature_url: mediaUrl(a.feature_key, c.env, 800, versionToken(a.feature_key, stamp)) };
       if (aggMap) {
         const snap = mergeAggregate(aggMap, [String(a.id), String(a.slug || '')]);
         out.rating = snap.rating; out.rating_count = snap.count; out.stars = snap.count;
@@ -1692,13 +1723,19 @@ app.get('/apps/:slug', async (c) => {
   
   const screenshotsData = await listScreenshots(c.env, appData.id);
   // استخدام shot_url بدقة 720 لجلب صور الشاشات
-  const screenshots = screenshotsData.map(s => ({ id: s.id, position: s.position, url: shot_url(s.r2_key, c.env) }));
+  /* Each screenshot gets its own `?v=` from the row's created_at: a replaced
+   * picture keeps its key, so a URL without a version could never change. */
+  const screenshots = screenshotsData.map((s: any) => ({
+    id: s.id, position: s.position,
+    url: mediaUrl(s.r2_key, c.env, 720, versionToken(s.r2_key, s.created_at || s.updated_at)),
+  }));
   const videos = await videosFor(c.env, appData.id);
   
   const detailAliases = await appAliases(c.env, appData);
   const detailSnap = await ratingSnapshot(c.env, detailAliases);
   const detailApp: any = { ...appPublic(appData, false, c.env),
-    icon_url: icon_url(appData.icon_key, c.env), feature_url: feature_url(appData.feature_key, c.env),
+    icon_url: mediaUrl(appData.icon_key, c.env, 200, versionToken(appData.icon_key, appData.updated_at)),
+    feature_url: mediaUrl(appData.feature_key, c.env, 800, versionToken(appData.feature_key, appData.updated_at)),
     rating: detailSnap.rating, rating_count: detailSnap.count, stars: detailSnap.count,
     reviews_count: detailSnap.reviews_count };
   c.header('Cache-Control', 'private, no-store');
@@ -3937,12 +3974,29 @@ app.post('/admin/apps/:id/apk', async (c) => {
   const head = await r2Head(c.env, body.apk_key); if (!head) return c.json({ error: 'not_found' }, 400);
   const old: any = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(c.req.param('id')).first();
   if (!old) return c.json({ error: 'not_found' }, 404);
-  // Idempotent: a retried «replace APK» with the same object must not write
-  // again (that re-fired an «إصدار جديد» notification per retry).
-  if (old.apk_key === body.apk_key) return c.json({ ok: true, unchanged: true });
+
+  /* «عندما حدّثت التطبيق كل الصور نُشرت مرة ثانية».
+   *
+   * The key of an existing item's file is deterministic — `apk/<slug>.apk` — so
+   * replacing the APK produces THE SAME KEY with new bytes. The guard below used
+   * to treat that as a retry and return `unchanged: true`: the row was never
+   * touched (old version, old size) and the notification was correctly skipped,
+   * which looked from the panel like a silent failure. It also meant a genuine
+   * re-upload was invisible to the site.
+   *
+   * A same-key write is only a no-op when the stored size and version are the
+   * ones we were told; otherwise the bytes really changed and it is a release. */
+  const sizeNow = Number(head.size) || 0;
+  const versionNow = String(body.version_name || old.version_name || '');
+  const codeNow = body.version_code !== undefined ? Number(body.version_code) : old.version_code;
+  const sameKey = old.apk_key === body.apk_key;
+  const sameFile = sameKey && Number(old.size_bytes || 0) === sizeNow
+    && String(old.version_name || '') === versionNow
+    && (body.version_code === undefined || Number(old.version_code) === codeNow);
+  if (sameFile) return c.json({ ok: true, unchanged: true, notified: false });
 
   await c.env.DB.prepare('UPDATE apps SET apk_key=?, size_bytes=?, version_name=?, version_code=?, updated_at=? WHERE id=?')
-    .bind(body.apk_key, head.size, body.version_name||old.version_name, body.version_code!==undefined?body.version_code:old.version_code, nowSec(), old.id).run();
+    .bind(body.apk_key, sizeNow, versionNow, codeNow, nowSec(), old.id).run();
 
   /* The previous APK is deleted NOW and the result is reported.
      The row is already updated first, so a failed cleanup is only a leftover
@@ -3986,6 +4040,7 @@ app.post('/admin/apps/:id/icon', async (c) => {
   await c.env.DB.prepare('UPDATE apps SET icon_key=?, updated_at=? WHERE id=?').bind(body.icon_key, nowSec(), old.id).run();
   const cleanup = await replaceOldFile(c.env, old.icon_key, body.icon_key);
   await purgeAppsCache(c.env);
+  await purgeMediaUrl(c.env, body.icon_key);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -3995,6 +4050,7 @@ app.post('/admin/apps/:id/feature', async (c) => {
   await c.env.DB.prepare('UPDATE apps SET feature_key=?, updated_at=? WHERE id=?').bind(body.feature_key, nowSec(), old.id).run();
   const cleanup = await replaceOldFile(c.env, old.feature_key, body.feature_key);
   await purgeAppsCache(c.env);
+  await purgeMediaUrl(c.env, body.feature_key);
   return c.json({ ok: true, cleaned: cleanup.cleaned, leftover_key: cleanup.key || null });
 });
 
@@ -4015,20 +4071,66 @@ app.post('/admin/apps/:id/screenshots', async (c) => {
     organiseKey(String(raw), `${slugForSs}-${position + 1}`);
   const max: any = await c.env.DB.prepare('SELECT MAX(position) as max_pos FROM screenshots WHERE app_id = ?').bind(id).first();
   let pos = (max?.max_pos || 0) + 1;
-  
-  const moved: string[] = [], failed: string[] = [];
+
+  /* «عندما حدّثت التطبيق كل الصور نُشرت مرة ثانية».
+   *
+   * Two things made a re-uploaded picture appear twice:
+   *
+   * 1. An upload for an existing item is named `ss/<slug>-<slot>.ext` — a
+   *    DETERMINISTIC key. Re-picking slot 3 produced the same key (new bytes,
+   *    same name) and this route appended a NEW row for it, so the page showed
+   *    the same slot twice: the new picture and the old row pointing at the same
+   *    object.
+   * 2. `pos` was always `MAX(position)+1`, so a replaced picture could never
+   *    occupy the place of the one it replaces.
+   *
+   * The slot is read from the incoming key (`…-3.jpg` → slot 3); when that slot
+   * already has a row, it is UPDATED instead of duplicated. Only a key with no
+   * slot (or a slot that is free) adds a row. */
+  const slotOf = (key: string): number => {
+    const base = String(key).split('/').pop() || '';
+    const m = base.match(/-(\d+)\.[A-Za-z0-9]+$/);
+    return m ? Math.max(1, Number(m[1])) : 0;
+  };
+  const slots = new Map<number, string>();
+  const existing: any = await c.env.DB.prepare('SELECT id, position FROM screenshots WHERE app_id = ?').bind(id)
+    .all().catch(() => ({ results: [] }));
+  for (const row of existing.results || []) slots.set(Number(row.position) || 0, String(row.id));
+
+  const moved: string[] = [], failed: string[] = [], replaced: number[] = [], added: number[] = [];
   for (const k of body.screenshot_keys) {
     if (!isValidR2Key(k, 'ss')) continue;
-    const wanted = ssKeyFor(k, pos);
-    let finalKey = k;
-    if (wanted !== k) {
-      const mv = await r2Move(c.env, k, wanted);
-      if (mv.ok) finalKey = mv.key; else failed.push(k);
+    const slot = slotOf(k);
+    if (slot && slots.has(slot)) {
+      // The same slot, new bytes: replace the row, keep its place in the order.
+      // created_at is the picture's version token, so it moves with the bytes.
+      await c.env.DB.prepare('UPDATE screenshots SET r2_key = ?, created_at = ? WHERE id = ?')
+        .bind(k, nowSec(), slots.get(slot)).run();
+      replaced.push(slot);
+    } else {
+      const wanted = ssKeyFor(k, pos);
+      let finalKey = k;
+      if (wanted !== k) {
+        const mv = await r2Move(c.env, k, wanted);
+        if (mv.ok) finalKey = mv.key; else failed.push(k);
+      }
+      await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, finalKey, pos, nowSec()).run();
+      if (finalKey !== k) moved.push(finalKey);
+      added.push(pos);
+      pos++;
     }
-    await c.env.DB.prepare('INSERT INTO screenshots (id, app_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)').bind(randomId(), id, finalKey, pos++, nowSec()).run();
-    if (finalKey !== k) moved.push(finalKey);
   }
-  return c.json({ ok: true, moved, failed });
+  /* Every row is re-read once and checked: a screenshot whose object is gone is
+   * a broken picture on the page and used to be invisible until a visitor
+   * reported it. */
+  const missing: string[] = [];
+  const finalRows: any = await c.env.DB.prepare('SELECT id, r2_key FROM screenshots WHERE app_id = ?').bind(id)
+    .all().catch(() => ({ results: [] }));
+  for (const row of finalRows.results || []) {
+    if (!row.r2_key) continue;
+    if (!(await r2Head(c.env, String(row.r2_key)).catch(() => null))) missing.push(String(row.r2_key));
+  }
+  return c.json({ ok: true, moved, failed, replaced, added, missing });
 });
 
 app.delete('/admin/apps/:id/screenshots/:sid', async (c) => {

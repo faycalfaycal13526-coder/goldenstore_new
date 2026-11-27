@@ -39,14 +39,21 @@ var messaging = firebase.messaging();
  *   • a picture is cache-first (it never changes under the same name),
  *   • everything else stays out of the way — this worker must never break a page.
  */
-const IMG_HOSTS = ['pub-19788071c0444841a00871f67e620d63.r2.dev'];
+/* The bucket's public host.
+ *
+ * A hard-coded list was one more place to forget: when the owner replaced his
+ * bucket, this worker kept recognising the OLD host (and none of the new one), so
+ * push pictures stopped being cached. The store's pictures travel on its own
+ * domain now, and any `*.r2.dev` host is accepted, so replacing the bucket never
+ * requires editing this file again. */
 const IMG_EXT = /\.(?:png|jpe?g|webp|gif|avif|svg)(?:\?|$)/i;
 
 function isCacheableImage(url) {
   try {
     const u = new URL(url);
-    if (u.origin === self.location.origin && IMG_EXT.test(u.pathname)) return true;
-    return IMG_HOSTS.includes(u.hostname) && IMG_EXT.test(u.pathname);
+    if (!IMG_EXT.test(u.pathname) && !u.pathname.startsWith('/api/media/')) return false;
+    if (u.origin === self.location.origin) return true;
+    return /\.r2\.dev$/i.test(u.hostname);
   } catch (e) { return false; }
 }
 

@@ -3765,6 +3765,77 @@
       } finally { healthRun.disabled = false; }
     };
 
+    /* ── «حذفت الحاوية القديمة وصنعت واحدة أخرى» — which bucket is live? ──────
+     * The store shows nothing the moment its public host changes, and NOTHING on
+     * the page says which host the API is actually generating. Three facts decide
+     * it, so this prints all three and repairs what can be repaired from here:
+     *   1. the host the API writes into every url (R2_PUBLIC_URL),
+     *   2. whether the bucket answers at all, and how many objects it holds,
+     *   3. how many stored urls still point at a DEAD host — with one press that
+     *      rewrites them to the live bucket and reports each one by name.
+     */
+    const linkOut = el('div', { style: { fontSize: '13px', lineHeight: '1.8', width: '100%' } });
+    const linkCheck = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('check'), 'الحاوية والروابط');
+    const linkFix = el('button', { class: 'btn btn-primary btn-sm', type: 'button', style: { display: 'none' } }, ico('upload'), 'عدّل الروابط الميتة');
+    const linkBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } }, linkCheck, linkFix, linkOut);
+
+    const linkRender = (r) => {
+      linkOut.innerHTML = '';
+      const b = (r && r.bucket) || {};
+      linkOut.append(el('div', null,
+        'الروابط التي يولّدها الموقع تشير إلى: ',
+        el('code', { style: { direction: 'ltr', display: 'inline-block' } }, String(b.url || 'غير مضبوط'))));
+      if (b.name_mismatch) {
+        linkOut.append(el('div', { style: { color: 'var(--danger)', fontWeight: '600' } },
+          'اسم الحاوية غير مطابق: ' + (b.list_error || '') + ' — الحاوية الجديدة تحمل اسماً آخر، ويجب ضبط R2_BUCKET على اسمها.'));
+      }
+      linkOut.append(el('div', { style: { color: b.reachable ? 'var(--success)' : 'var(--danger)' } },
+        b.reachable === true
+          ? `الحاوية تستجيب — ${b.objects} ملفاً داخلها.`
+          : b.reachable === false
+            ? 'الحاوية لا تستجيب لهذا الرابط. إن كانت جديدة وفارغة فهذا طبيعي، وإن كانت فيها ملفات فراجع تفعيل Public Development URL لهذه الحاوية.'
+            : 'تعذّر قياس الحاوية.'));
+      const dead = Number(r && r.dead_links) || 0;
+      linkOut.append(el('div', { style: { color: dead ? 'var(--danger)' : 'var(--success)' } },
+        dead
+          ? `يوجد ${dead} رابطاً محفوظاً في القاعدة يشير إلى حاوية قديمة ميتة.`
+          : 'لا يوجد أي رابط محفوظ يشير إلى حاوية قديمة.'));
+      if (r && r.details && r.details.length) {
+        linkOut.append(el('div', { class: 'hint', style: { marginTop: '6px' } },
+          r.details.slice(0, 12).map((d) => `${d.kind} — ${d.key} ${d.in_new_bucket ? '✓' : '✗ غير موجود في الحاوية الجديدة'}`).join(' · ')));
+      }
+      linkFix.style.display = dead ? '' : 'none';
+      linkFix.dataset.dead = String(dead);
+    };
+    linkCheck.onclick = async () => {
+      linkCheck.disabled = true;
+      linkOut.textContent = 'أفحص الحاوية والروابط المحفوظة…';
+      try {
+        const r = await api('/api/admin/storage/check', { timeoutMs: 120000 });
+        linkRender(r);
+      } catch (e) {
+        linkOut.textContent = (e && e.status === 401) ? 'انتهت الجلسة، أعد الدخول.' : 'تعذّر الفحص.';
+      } finally { linkCheck.disabled = false; }
+    };
+    linkFix.onclick = async () => {
+      linkFix.disabled = true;
+      linkOut.textContent = 'أعدّل الروابط الميتة…';
+      try {
+        const r = await api('/api/admin/repair-urls?apply=1', { method: 'POST', timeoutMs: 180000 });
+        toast(r.rewritten
+          ? `عُدّل ${r.rewritten} رابطاً نحو الحاوية الحالية`
+          : 'لا يوجد رابط ميت محفوظ — كل الروابط تشير إلى الحاوية الحالية',
+          r.still_missing ? 'error' : 'success');
+        if (r.still_missing) {
+          toast(`${r.still_missing} ملفاً مذكوراً في القاعدة غير موجود في الحاوية الجديدة — أعد رفعه من صفحة العنصر`, 'error');
+        }
+        const again = await api('/api/admin/storage/check', { timeoutMs: 120000 });
+        linkRender(again);
+      } catch (e) {
+        toast('تعذّر تعديل الروابط: ' + ((e && e.message) || 'حاول لاحقاً'), 'error');
+      } finally { linkFix.disabled = false; }
+    };
+
     /* ── «التحديث لا يرفع ولا يبعث إشعاراً» — فحص يشغّل المسار الحقيقي ────────
      * The two promises of the «تحديث» button failed in two different places, and
      * both used to surface as the same word: «فشل». This runs the real path:
@@ -4180,6 +4251,7 @@
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('package'), '«رفعت تطبيقاً ولم يُنشر» — الفحص والإصلاح'),
         el('div', { class: 'hint' }, 'يقرأ قاعدة البيانات والحاوية معاً: هل الملفات موجودة؟ هل العنصر ظاهر في المتجر؟ وإن لم يكن، فما السبب بالضبط — مع زر «انشر الآن» للعناصر المخفية.'),
+        linkBox,
         healthBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('wrench'), 'التحديث والرفع والإشعارات — فحص'),

@@ -40,12 +40,14 @@ STORE_DOMAIN = "goldenstore.online"
 STORE_LOGO_URL = "https://goldenstore.online/images/logo.png"
 R2_BUCKET = "goldenstore"
 R2_ACCOUNT_ID = "3d6027f4b14f48a62a2dba1db3f8d082"
-# Served by R2's public development URL directly: the old CDN hostname has no
-# DNS record any more (the bucket it pointed at was deleted), so every image
-# 404'd. Changing this one value fixes every URL the API generates — app icons,
-# screenshots, video thumbnails and APK links — with no DNS step and no redeploy
-# of the site itself. A custom domain can replace it later at any time.
-R2_PUBLIC_URL = "https://pub-19788071c0444841a00871f67e620d63.r2.dev"
+# Served by R2's public development URL directly. The owner has replaced the
+# bucket twice: the first hostname 404'd (bucket deleted) and the second began
+# answering 401 (its public development URL was switched off), which is why the
+# store showed no files at all. This is the third bucket's public URL. Changing
+# this ONE value fixes every URL the API generates — icons, screenshots, video
+# thumbnails and APK links — and the console's own health panel reads it back, so
+# a mismatch is visible instead of guessed. A custom domain can replace it later.
+R2_PUBLIC_URL = "https://pub-c44b01728ce5456685569f9e4981c04e.r2.dev"
 FIREBASE_PROJECT_ID = "golden-store-40dd6"
 # Public zone identifier (NOT a secret). Also auto-discovered from
 # STORE_DOMAIN when absent. Only CF_API_TOKEN needs to be a Worker secret.

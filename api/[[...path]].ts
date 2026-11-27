@@ -848,13 +848,27 @@ async function setDownloadBaseline(env: Env, requested: number): Promise<number>
  * point at another CDN later), so this only repairs a URL that still points at a
  * host we know is dead, and only when the object really lives in our bucket.
  */
+/* Every host that has ever served this bucket, and that is dead now.
+ *
+ * Owner (this round): «حذفت الحاوية القديمة وصنعت واحدة أخرى جديدة … عدل كل
+ * الروابط الميتة». A stored FULL url outlives the bucket it named, so a release
+ * row written last month kept pointing at a hostname that no longer answers —
+ * the download button then fails with nothing to diagnose. The list covers the
+ * old CDN, the API host, and every `pub-….r2.dev` bucket id this store has used.
+ * Nothing else is rewritten: a url that points at a host we do not own is left
+ * exactly as it is.
+ */
+const DEAD_MEDIA_HOSTS = [
+  /^https?:\/\/(?:cdn|api)\.goldenstore\.online\//i,
+  /^https?:\/\/pub-19788071c0444841a00871f67e620d63\.r2\.dev\//i,
+];
 function repairReleaseUrl(raw: unknown, env: Env): string {
   const url = String(raw || '');
   if (!url) return url;
-  const dead = /^https?:\/\/(cdn|api)\.goldenstore\.online\//i;
-  if (!dead.test(url)) return url;
-  const key = url.replace(dead, '');
-  try { return r2PublicUrl(key, env); } catch { return url; }
+  const dead = DEAD_MEDIA_HOSTS.find((re) => re.test(url));
+  if (!dead) return url;
+  const key = url.replace(dead, '').split('?')[0];
+  try { return r2PublicUrl(decodeURIComponent(key), env); } catch { return url; }
 }
 
 app.get('/app-update', async (c) => {
@@ -5108,8 +5122,17 @@ app.get('/admin/storage/check', async (c) => {
     else sizes[key] = head.size;
   }));
 
-  // What is in the bucket that nothing points at (the leftover pile).
-  const objects = await r2List(c.env, '', 5000).catch(() => []);
+  /* What is in the bucket that nothing points at (the leftover pile).
+   *
+   * A failed LIST is not an empty bucket, and the difference decides what the
+   * owner must change: «NoSuchBucket» means he made the new bucket under a
+   * DIFFERENT NAME than R2_BUCKET, which no amount of URL fixing can repair.
+   * Swallowing that error is how a renamed bucket looks like an empty one. */
+  let listError = '';
+  const objects = await r2List(c.env, '', 5000).catch((e: any) => {
+    listError = String(e?.message || e || 'list_failed');
+    return [] as any[];
+  });
   const known = new Set(wanted.keys());
   const strays = objects.filter((o) => !known.has(o.key));
 
@@ -5124,15 +5147,62 @@ app.get('/admin/storage/check', async (c) => {
 
   const total = keys.length + (releaseKey ? 1 : 0);
   const missingTotal = missing.length + (releaseOk === false ? 1 : 0);
+
+  /* WHICH BUCKET IS LIVE, measured rather than assumed.
+   *
+   * The owner replaces buckets, and a stale public host makes the whole store
+   * look empty with nothing on screen to explain it. So the public url named by
+   * R2_PUBLIC_URL is fetched for real: does it answer, and how many objects does
+   * it hold? `reachable: false` with `objects: 0` is the signature of a bucket
+   * whose public development URL is switched off — the state the previous bucket
+   * was left in (HTTP 401) and the state that made every file vanish. */
+  const publicBase = String(c.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+  let reachable: boolean | null = null;
+  if (publicBase) {
+    try {
+      const probe = await fetch(`${publicBase}/${encodeURIComponent('apk/goldenstore-app.apk')}`, { method: 'HEAD' });
+      // 401/403 means the host exists but is not public — that is NOT reachable.
+      reachable = probe.status < 400;
+    } catch { reachable = false; }
+  }
+
+  /* Stored urls that still name a dead host. Counted here, rewritten by
+   * /admin/repair-urls — never silently, always named. */
+  const deadDetails: any[] = [];
+  const scanDead = async (kind: string, rows2: any[], column: string) => {
+    for (const r of rows2) {
+      const v = String(r[column] || '');
+      const dead = DEAD_MEDIA_HOSTS.find((re) => re.test(v));
+      if (!dead) continue;
+      const key = decodeURIComponent(v.replace(dead, '').split('?')[0]);
+      const head = await r2Head(c.env, key).catch(() => null);
+      deadDetails.push({ kind, id: r.id || null, key, in_new_bucket: !!head });
+    }
+  };
+  await scanDead('release', (await c.env.DB.prepare('SELECT id, apk_url FROM app_updates').all().catch(() => ({ results: [] }))).results || [], 'apk_url');
+  await scanDead('release_history', (await c.env.DB.prepare('SELECT id, apk_url FROM app_update_releases').all().catch(() => ({ results: [] }))).results || [], 'apk_url');
+  await scanDead('screenshot', (await c.env.DB.prepare("SELECT id, r2_key FROM screenshots WHERE r2_key LIKE 'http%'").all().catch(() => ({ results: [] }))).results || [], 'r2_key');
+  await scanDead('video_thumb', (await c.env.DB.prepare("SELECT id, thumb_key FROM app_videos WHERE thumb_key LIKE 'http%'").all().catch(() => ({ results: [] }))).results || [], 'thumb_key');
+  for (const col of ['apk_key', 'icon_key', 'feature_key']) {
+    await scanDead('app', (await c.env.DB.prepare(`SELECT id, ${col} AS ${col} FROM apps WHERE ${col} LIKE 'http%'`).all().catch(() => ({ results: [] }))).results || [], col);
+  }
+
   return c.json({
-    ok: missingTotal === 0,
+    ok: missingTotal === 0 && deadDetails.length === 0,
     bucket: {
       name: r2Bucket(c.env),
       account: c.env.R2_ACCOUNT_ID || null,
       public_url: c.env.R2_PUBLIC_URL || null,
+      url: publicBase || null,
+      reachable,
+      objects: objects.length,
       objects_listed: objects.length,
-      note: 'الملفات تُخدَم الآن عبر نطاق المتجر (/api/media) — لا يوجد رابط عام مكشوف للصور.',
+      list_error: listError || null,
+      name_mismatch: /NoSuchBucket|not exist/i.test(listError),
+      note: 'الملفات تُخدَم عبر نطاق المتجر (/api/media) الذي يقرأ من هذه الحاوية نفسها.',
     },
+    dead_links: deadDetails.length,
+    details: deadDetails.slice(0, 60),
     checked: { apps: apps.length, screenshots: (shots.results || []).length,
       videos: (vids.results || []).length, files: total },
     missing_files: missing,
@@ -5140,9 +5210,124 @@ app.get('/admin/storage/check', async (c) => {
     release: releaseKey ? { key: releaseKey, present: releaseOk } : null,
     strays: { count: strays.length, bytes: strays.reduce((n, o) => n + (o.size || 0), 0),
       samples: strays.slice(0, 50).map((o) => o.key) },
-    verdict: missingTotal === 0
-      ? 'كل ملف يشير إليه الموقع موجود فعلاً في الحاوية — لا رابط ميت.'
-      : `${missingTotal} ملفاً مفقوداً — الروابط أدناه ميتة وتحتاج إعادة رفع أو تصحيح المسار.`,
+    verdict: /NoSuchBucket|not exist/i.test(listError)
+      ? `اسم الحاوية غير مطابق: الكود يكتب في «${r2Bucket(c.env)}» وهي غير موجودة بهذا الاسم. صحّح R2_BUCKET ليطابق اسم الحاوية الجديدة في لوحة Cloudflare.`
+      : reachable === false
+      ? 'الحاوية الحالية لا تجيب على رابطها العام: فعّل Public Development URL لها في لوحة Cloudflare، ثم أعد الفحص.'
+      : deadDetails.length
+        ? `${deadDetails.length} رابطاً محفوظاً يشير إلى حاوية قديمة — زر «عدّل الروابط الميتة» يصلحها.`
+        : missingTotal === 0
+          ? 'كل ملف يشير إليه الموقع موجود فعلاً في الحاوية — لا رابط ميت.'
+          : `${missingTotal} ملفاً مفقوداً — الروابط أدناه ميتة وتحتاج إعادة رفع أو تصحيح المسار.`,
+  });
+});
+
+/* ── «عدل كل الروابط الميتة» — one press, and every dead URL is rewritten ────
+ *
+ * Owner: he deleted the old bucket and made a new one, and asked for every old
+ * link to be replaced so storage works again.
+ *
+ * Three kinds of link exist, and only one of them is in the code:
+ *   1. what the API GENERATES — icons, screenshots, feature images, APK links.
+ *      Those come from R2_PUBLIC_URL, so changing the variable fixes all of them
+ *      at once, with no stored value and no migration. Already done in
+ *      wrangler.toml (this build).
+ *   2. what is STORED as a full url — the release row's `apk_url` and any key
+ *      that was saved as a url instead of a key. A stored url outlives the
+ *      bucket, which is exactly how a download stayed dead after the move.
+ *   3. what a BROWSER cached — handled by the `?v=` token and the media cache.
+ *
+ * This route repairs 2. It only rewrites hosts we know are dead (DEAD_MEDIA_HOSTS)
+ * and only when the object really exists in the CURRENT bucket, so a link that
+ * points somewhere we do not own is never touched. It reports every change by
+ * name, and it is safe to run twice — after the first run there is nothing dead
+ * left to find. `?apply=1` writes; without it, it is a dry run that lists what it
+ * would fix.
+ */
+app.all('/admin/repair-urls', async (c) => {
+  const apply = ['1', 'true', 'yes'].includes(String(c.req.query('apply') || '').toLowerCase());
+  const base = (c.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+  const changes: any[] = [];
+  const skipped: any[] = [];
+
+  const rewrite = async (kind: string, id: string, value: string, column: string) => {
+    const dead = DEAD_MEDIA_HOSTS.find((re) => re.test(value));
+    if (!dead) return;
+    const key = decodeURIComponent(value.replace(dead, '').split('?')[0]);
+    const head = await r2Head(c.env, key).catch(() => null);
+    if (!head) {
+      // The stored url names a file the new bucket does not have. Rewriting it
+      // would only produce a second dead link, so it is reported instead.
+      skipped.push({ kind, id, column, key, reason: 'not_in_new_bucket' });
+      return;
+    }
+    const fresh = `${base}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    changes.push({ kind, id, column, from: value, to: fresh, size: head.size || 0 });
+    if (apply) {
+      try { await c.env.DB.prepare(`UPDATE ${kind === 'release' ? 'app_updates' : 'apps'} SET ${column} = ? WHERE id = ?`).bind(fresh, id).run(); }
+      catch (e: any) { changes[changes.length - 1].write_error = String(e?.message || e); }
+    }
+  };
+
+  // 1) the release row(s) that the update dialog downloads
+  const releases: any = await c.env.DB.prepare('SELECT id, apk_url FROM app_updates').all().catch(() => ({ results: [] }));
+  for (const r of releases.results || []) if (r.apk_url) await rewrite('release', String(r.id), String(r.apk_url), 'apk_url');
+  const rels: any = await c.env.DB.prepare('SELECT id, apk_url FROM app_update_releases').all().catch(() => ({ results: [] }));
+  for (const r of rels.results || []) if (r.apk_url) {
+    const dead = DEAD_MEDIA_HOSTS.find((re) => re.test(String(r.apk_url)));
+    if (!dead) continue;
+    const key = decodeURIComponent(String(r.apk_url).replace(dead, '').split('?')[0]);
+    const head = await r2Head(c.env, key).catch(() => null);
+    if (!head) { skipped.push({ kind: 'release_history', id: r.id, column: 'apk_url', key, reason: 'not_in_new_bucket' }); continue; }
+    const fresh = `${base}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    changes.push({ kind: 'release_history', id: r.id, column: 'apk_url', from: r.apk_url, to: fresh });
+    if (apply) await c.env.DB.prepare('UPDATE app_update_releases SET apk_url = ? WHERE id = ?').bind(fresh, r.id).run().catch(() => {});
+  }
+
+  // 2) any app row whose key column was saved as a whole url
+  for (const col of ['apk_key', 'icon_key', 'feature_key']) {
+    const rows: any = await c.env.DB.prepare(
+      `SELECT id, ${col} AS v FROM apps WHERE ${col} LIKE 'http%'`,
+    ).all().catch(() => ({ results: [] }));
+    for (const r of rows.results || []) await rewrite('app', String(r.id), String(r.v), col);
+  }
+
+  // 3) screenshots and video thumbnails stored as urls
+  const shots: any = await c.env.DB.prepare("SELECT id, r2_key FROM screenshots WHERE r2_key LIKE 'http%'").all().catch(() => ({ results: [] }));
+  for (const r of shots.results || []) {
+    const dead = DEAD_MEDIA_HOSTS.find((re) => re.test(String(r.r2_key)));
+    if (!dead) continue;
+    const key = decodeURIComponent(String(r.r2_key).replace(dead, '').split('?')[0]);
+    const head = await r2Head(c.env, key).catch(() => null);
+    if (!head) { skipped.push({ kind: 'screenshot', id: r.id, key, reason: 'not_in_new_bucket' }); continue; }
+    const fresh = `${base}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    changes.push({ kind: 'screenshot', id: r.id, from: r.r2_key, to: fresh });
+    if (apply) await c.env.DB.prepare('UPDATE screenshots SET r2_key = ? WHERE id = ?').bind(fresh, r.id).run().catch(() => {});
+  }
+  const thumbs: any = await c.env.DB.prepare("SELECT id, thumb_key FROM app_videos WHERE thumb_key LIKE 'http%'").all().catch(() => ({ results: [] }));
+  for (const r of thumbs.results || []) {
+    const dead = DEAD_MEDIA_HOSTS.find((re) => re.test(String(r.thumb_key)));
+    if (!dead) continue;
+    const key = decodeURIComponent(String(r.thumb_key).replace(dead, '').split('?')[0]);
+    const head = await r2Head(c.env, key).catch(() => null);
+    if (!head) { skipped.push({ kind: 'video_thumb', id: r.id, key, reason: 'not_in_new_bucket' }); continue; }
+    const fresh = `${base}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    changes.push({ kind: 'video_thumb', id: r.id, from: r.thumb_key, to: fresh });
+    if (apply) await c.env.DB.prepare('UPDATE app_videos SET thumb_key = ? WHERE id = ?').bind(fresh, r.id).run().catch(() => {});
+  }
+
+  if (apply && changes.length) {
+    await purgeAppsCache(c.env);
+    await recordActivity(c.env, consoleActor(c), `إصلاح ${changes.length} رابطاً ميتاً نحو الحاوية الجديدة`, 'storage');
+  }
+  return c.json({
+    ok: true, applied: apply, bucket_url: base,
+    found: changes.length, rewritten: apply ? changes.filter((x) => !x.write_error).length : 0,
+    still_missing: skipped.length,
+    changes, skipped,
+    note: apply
+      ? (changes.length ? 'كُتبت الروابط الجديدة في قاعدة البيانات وأُبطل الكاش.' : 'لا يوجد رابط ميت محفوظ — كل الروابط تشير إلى الحاوية الحالية.')
+      : 'هذه معاينة فقط. أضف apply=1 لكتابة التغييرات.',
   });
 });
 

@@ -3634,6 +3634,79 @@
       } finally { orphanDelete.disabled = false; }
     };
 
+    /* ── «رفعت تطبيقاً ولم يُنشر» — كل عنصر، وسببه، وزر النشر ────────────────
+     * The owner kept seeing files in the bucket for items that never appeared in
+     * the store. The site cannot be diagnosed from the bucket's object list, so
+     * this walks D1 + storage and answers per item: is every file really there,
+     * what does the console's publication row say, would /api/apps show it, and
+     * if not — WHY. A hidden item gets a one-press «انشر الآن».
+     */
+    const healthOut = el('div', { style: { fontSize: '13px', lineHeight: '1.8', width: '100%' } });
+    const healthRun = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('check'), 'لماذا لم يُنشر؟');
+    const healthBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } }, healthRun, healthOut);
+
+    const REASON = {
+      draft: 'محفوظ كمسوّدة — مخفي عن المتجر',
+      scheduled_for_later: 'مجدول لوقت لاحق',
+      file_missing: 'ملف مذكور في القاعدة غير موجود في الحاوية',
+      no_apk: 'لا يوجد ملف APK',
+    };
+
+    healthRun.onclick = async () => {
+      healthRun.disabled = true;
+      healthOut.textContent = 'أفحص كل عنصر وملفاته…';
+      try {
+        const r = await api('/api/admin/publish/health', { timeoutMs: 180000 });
+        const c1 = r.counts || {};
+        healthOut.innerHTML = '';
+        healthOut.append(el('div', null,
+          `${formatNum(c1.items || 0)} عنصراً · ظاهر ${formatNum(c1.visible || 0)} · مخفي ${formatNum(c1.hidden || 0)}`
+          + ` · ملفات مفقودة ${formatNum(c1.files_missing || 0)}`
+          + ` · ملفات مرفوعة بلا حفظ ${formatNum(c1.files_never_saved || 0)}`));
+        healthOut.append(el('div', { style: { color: r.ok ? 'var(--success)' : 'var(--danger)' } }, r.verdict || ''));
+
+        const hidden = (r.items || []).filter((it) => !it.visible_in_catalogue);
+        if (hidden.length) {
+          const t = el('table', { class: 'table admin-table', style: { marginTop: '8px' } },
+            el('thead', null, el('tr', null,
+              el('th', null, 'العنصر'), el('th', null, 'السبب'), el('th', null, 'ملفات'), el('th', null, 'إجراء'))));
+          const tb = el('tbody');
+          hidden.forEach((it) => {
+            const btn = el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, ico('upload'), 'انشر الآن');
+            btn.onclick = async () => {
+              btn.disabled = true;
+              try {
+                await api('/api/admin/publication', { method: 'POST', body: { slug: it.slug, status: 'published' } });
+                toast(`نُشر «${it.name}»`, 'success');
+                healthRun.click();
+              } catch (e) { toast('تعذّر النشر — أعد المحاولة', 'error'); }
+              finally { btn.disabled = false; }
+            };
+            tb.append(el('tr', null,
+              el('td', null, el('div', null, it.name), el('div', { class: 'hint' }, it.slug)),
+              el('td', null, REASON[it.blocked_by] || it.blocked_by || '—'),
+              el('td', null, it.files_missing.length
+                ? `مفقود: ${it.files_missing.join(' , ')}`
+                : `${formatNum(it.files.length)} ملفاً سليماً`),
+              el('td', null, it.blocked_by === 'draft' || it.blocked_by === 'scheduled_for_later'
+                ? btn : el('span', { class: 'hint' }, 'أعد رفع الملف من صفحة العنصر'))));
+          });
+          t.append(tb);
+          healthOut.append(t);
+        }
+
+        const never = (r.files_never_saved || []).slice(0, 10);
+        if (never.length) {
+          healthOut.append(el('div', { class: 'hint', style: { marginTop: '8px' } },
+            'ملفات في الحاوية لا يشير إليها أي عنصر (رفع اكتمل ثم لم يُحفظ): '
+            + never.map((f) => f.key).join(' · ')
+            + ' — «تنظيف الحاوية» يحذفها.'));
+        }
+      } catch (e) {
+        healthOut.textContent = (e && e.status === 401) ? 'انتهت الجلسة، أعد الدخول.' : 'تعذّر الفحص.';
+      } finally { healthRun.disabled = false; }
+    };
+
     /* ── «التحديث لا يرفع ولا يبعث إشعاراً» — فحص يشغّل المسار الحقيقي ────────
      * The two promises of the «تحديث» button failed in two different places, and
      * both used to surface as the same word: «فشل». This runs the real path:
@@ -4046,6 +4119,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('package'), '«رفعت تطبيقاً ولم يُنشر» — الفحص والإصلاح'),
+        el('div', { class: 'hint' }, 'يقرأ قاعدة البيانات والحاوية معاً: هل الملفات موجودة؟ هل العنصر ظاهر في المتجر؟ وإن لم يكن، فما السبب بالضبط — مع زر «انشر الآن» للعناصر المخفية.'),
+        healthBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('wrench'), 'التحديث والرفع والإشعارات — فحص'),
         el('div', { class: 'hint' }, 'يشغّل مسار الرفع الحقيقي (ملف صغير + APK كبير متعدد الأجزاء) ويفحص محرّك الإشعارات: هل الدفع مفعّل؟ كم جهازاً مسجّلاً؟ وهل كُتب إشعار لآخر إصدار؟'),
@@ -5084,8 +5161,14 @@
           toast(res.duplicate
             ? 'هذا العنصر منشور بالفعل — فتحنا نسخته الأصلية ولم ننشئ نسخة ثانية'
             : 'الاسم مستخدم بالفعل لعنصر آخر — فتحناه ولم ننشئ نسخة ثانية. غيّر الاسم أو عدّل العنصر الموجود', 'info');
+        } else if (!res || (!res.id && !res.slug)) {
+          /* A 200 without a row is not a success. Before this, the panel said
+             «تم رفع التطبيق بنجاح» while nothing was saved — the exact
+             «رفعت تطبيقاً ولم يُنشر» report — and the uploaded files stayed in
+             the bucket with no row pointing at them. */
+          throw Object.assign(new Error('row_not_saved'), { status: 502 });
         } else {
-            toast('تم رفع التطبيق بنجاح', 'success');
+          toast('تم رفع التطبيق بنجاح', 'success');
         }
         // The row exists now, so it owns every file this attempt uploaded.
         uploadSession.keys.length = 0;

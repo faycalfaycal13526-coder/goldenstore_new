@@ -2330,6 +2330,102 @@ app.get('/admin/console/state', async (c) => {
   return c.json({ publication, order, categories, activity, roles, releases });
 });
 
+/* =========================================================================
+   GET /admin/publish/health — «رفعت تطبيقاً ولم يُنشر» answered with evidence
+   -------------------------------------------------------------------------
+   This is the route that removes the guessing. It walks everything a publish
+   leaves behind and says, per item, where the chain stopped:
+
+     files[].uploaded      the key exists in the bucket (HEAD, real bytes)
+     files[].referenced_by a row in D1 actually points at that key
+     publication           the console's status row (missing / draft / scheduled)
+     visible_in_catalogue   would /api/apps show it right now?
+     blocked_by            the one reason it is not on the site
+
+   And, because a bucket swapped by hand is *the* way files get orphaned, it also
+   compares the bucket with the store: `files_never_saved` are uploads that exist
+   in storage and that NO row mentions — every one of them is an upload the
+   console finished but never saved.
+   ========================================================================= */
+app.get('/admin/publish/health', async (c) => {
+  await ensureConsoleTables(c.env.DB);
+  const now = nowSec();
+  const rows: any = await c.env.DB.prepare(
+    'SELECT id, slug, name, apk_key, icon_key, feature_key, updated_at, created_at, version_name FROM apps ORDER BY updated_at DESC',
+  ).all().catch(() => ({ results: [] }));
+  const pub: any = await c.env.DB.prepare('SELECT slug, status, publish_at FROM app_publication')
+    .all().catch(() => ({ results: [] }));
+  const pubBySlug = new Map<string, any>((pub.results || []).map((r: any) => [String(r.slug), r] as [string, any]));
+  const shots: any = await c.env.DB.prepare('SELECT app_id, r2_key, position FROM screenshots')
+    .all().catch(() => ({ results: [] }));
+  const ssByApp = new Map<string, any[]>();
+  for (const r of shots.results || []) {
+    const list = ssByApp.get(String(r.app_id)) || [];
+    list.push(r);
+    ssByApp.set(String(r.app_id), list);
+  }
+  const referenced = await referencedKeys(c.env);
+
+  const items: any[] = [];
+  for (const r of rows.results || []) {
+    const files = [
+      { kind: 'apk', key: r.apk_key }, { kind: 'icon', key: r.icon_key },
+      { kind: 'feature', key: r.feature_key },
+      ...(ssByApp.get(String(r.id)) || []).map((s: any) => ({ kind: 'screenshot', key: s.r2_key })),
+    ].filter((f) => f.key);
+    const checked: any[] = [];
+    for (const f of files) {
+      const head = await r2Head(c.env, String(f.key)).catch(() => null);
+      checked.push({ kind: f.kind, key: f.key, uploaded: !!head, size: head?.size || 0 });
+    }
+    const p: any = pubBySlug.get(String(r.slug));
+    const status = p ? String(p.status) : 'missing';
+    const scheduled = status === 'scheduled' && Number(p?.publish_at || 0) > now;
+    const hidden = status === 'draft' || scheduled;
+    const missingFiles = checked.filter((f) => !f.uploaded);
+    items.push({
+      id: r.id, slug: r.slug, name: r.name, version_name: r.version_name,
+      files: checked,
+      files_missing: missingFiles.map((f) => f.key),
+      publication: { status, publish_at: Number(p?.publish_at || 0) || 0, scheduled },
+      visible_in_catalogue: !hidden && !!r.apk_key,
+      blocked_by: hidden
+        ? (status === 'draft' ? 'draft' : 'scheduled_for_later')
+        : missingFiles.length ? 'file_missing' : !r.apk_key ? 'no_apk' : null,
+    });
+  }
+
+  /* Uploads that exist in storage and that no row mentions. These are exactly
+     the files a publish uploaded and then failed to save (or a save that
+     pointed at a key the bucket no longer has). */
+  const objects = await r2List(c.env, '', 5000).catch(() => []);
+  const filesNeverSaved = objects.filter((o) => !referenced.has(o.key))
+    .map((o) => ({ key: o.key, size: o.size || 0 }));
+
+  const byKey = new Map(objects.map((o) => [o.key, o]));
+  const notVisible = items.filter((x) => !x.visible_in_catalogue);
+  return c.json({
+    ok: notVisible.length === 0 && filesNeverSaved.length === 0,
+    server_time: now,
+    bucket: { objects: objects.length, referenced: referenced.size },
+    counts: {
+      items: items.length,
+      visible: items.length - notVisible.length,
+      hidden: notVisible.length,
+      files_missing: items.reduce((n, x) => n + x.files_missing.length, 0),
+      files_never_saved: filesNeverSaved.length,
+      files_never_saved_bytes: filesNeverSaved.reduce((n, o) => n + (byKey.get(o.key)?.size || 0), 0),
+    },
+    items,
+    files_never_saved: filesNeverSaved.slice(0, 200),
+    verdict: notVisible.length
+      ? `${notVisible.length} عنصراً مرفوعاً لا يظهر في المتجر — السبب مذكور لكل واحد في blocked_by.`
+      : filesNeverSaved.length
+        ? `كل العناصر ظاهرة، لكن ${filesNeverSaved.length} ملفاً رُفع إلى الحاوية ولم يُحفظ في الموقع (رفع توقّف قبل النشر).`
+        : 'كل شئ متّسق: ما رُفع محفوظ، وما حُفظ ظاهر.',
+  });
+});
+
 app.post('/admin/publication', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const slug = String(body.slug || '').trim();

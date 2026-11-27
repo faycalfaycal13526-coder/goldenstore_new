@@ -5,6 +5,21 @@
 (function () {
   'use strict';
 
+  /* Capture this script's own URL NOW, while it is still executing.
+   * `document.currentScript` is null inside the setTimeout that kicks off
+   * loadDict(), so the dictionary used to fall back to a bare
+   * `/js/lang-dict.js?v=` — a URL that NEVER changes. With `Cache-Control:
+   * max-age=604800` the browser then kept the old dictionary for a week, so
+   * newly added UI strings stayed untranslated for every existing visitor.
+   * Reading the version here keeps the dictionary on the same cache-busting
+   * token as every other asset. */
+  var SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
+  var ASSET_VERSION = '';
+  try {
+    ASSET_VERSION = (SCRIPT_SRC.match(/[?&]v=([^&]*)/) || ['', ''])[1];
+  } catch (e) { ASSET_VERSION = ''; }
+  if (ASSET_VERSION) window.__gsAssetVersion = ASSET_VERSION;
+
   var LANGS = [
     { code: 'ar', label: 'العربية', dir: 'rtl' },
     { code: 'en', label: 'English', dir: 'ltr' },
@@ -346,12 +361,17 @@
   function loadDict() {
     if (dictLoading) return dictLoading;
     if (Object.keys(O).length) return Promise.resolve(O);
-    var src = document.currentScript && document.currentScript.src;
+    // Use the URL captured at load time (currentScript is null by now).
+    var src = SCRIPT_SRC || (document.currentScript && document.currentScript.src);
     var base = '/js/lang-dict.js';
     try { if (src) base = new URL('lang-dict.js', src).href; } catch (e) {}
+    // Strip any inherited query, then apply the real asset token so a dictionary
+    // update reaches browsers that cached the previous one.
+    base = base.split('?')[0];
+    var ver = ASSET_VERSION || window.__gsAssetVersion || '';
     dictLoading = new Promise(function (resolve) {
       var s = document.createElement('script');
-      s.src = base + (/\?/.test(base) ? '&' : '?') + 'v=' + (window.__gsAssetVersion || '');
+      s.src = base + '?v=' + encodeURIComponent(ver);
       s.async = true;
       s.onload = function () { adoptDict(window.GS_DICT); resolve(O); };
       s.onerror = function () { resolve(O); };

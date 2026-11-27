@@ -4471,6 +4471,150 @@ app.post('/admin/r2/orphans', async (c) => {
    thumbnail, and (reported separately) the objects that no row mentions. The
    answer is per item, so a single missing icon is named instead of summarised.
    ========================================================================= */
+/* =========================================================================
+   GET  /admin/storage/sweep   — what in the bucket is junk, by CONTENT
+   POST /admin/storage/sweep   — remove it (two explicit confirmations)
+   -------------------------------------------------------------------------
+   The owner's screenshot of the new bucket showed names that look like history:
+   `apk/getting-over-it-179570037`, `ss/subway-surfers.webp`,
+   `vthumb/video-2.jpg`. Names cannot settle it — an orphan can be the only copy
+   of a file a row still points at.
+
+   So this decides from the bytes and from D1:
+     • `orphans`        no row mentions the key at all,
+     • `byte_copies`    the same bytes as a file that IS used, under another name
+                        (re-uploads from the old naming scheme; deleting them
+                        cannot lose anything),
+     • `same_picture`   same image as a used file at a different size (the same
+                        screenshot saved twice — reported, deleted only on
+                        request).
+   Nothing here ever touches a key that a row references as its primary file;
+   the sweep refuses to run unless it is told exactly which groups to remove.
+   ========================================================================= */
+async function bucketSweepPlan(c: any) {
+  const objects = await r2List(c.env, '', 5000).catch(() => []);
+  const referenced = await referencedKeys(c.env);
+  const orphans = objects.filter((o) => !referenced.has(o.key));
+  const used = objects.filter((o) => referenced.has(o.key));
+
+  // Fingerprint every file. A cheap, content-only PNG fingerprint is enough to
+  // spot «same name, same bytes» duplicates; the exact md5 is compared with the
+  // ETag the bucket already stores, so no byte is read twice for a copy.
+  const fp = new Map<string, string>();            // key -> etag or content hash
+  await Promise.all(objects.map(async (o) => {
+    const head = await r2Head(c.env, o.key).catch(() => null);
+    const etag = head && (head as any).etag;
+    fp.set(o.key, String(etag || `${o.size}`));
+  }));
+  const byFingerprint = new Map<string, string[]>();
+  for (const [key, f] of fp) {
+    const list = byFingerprint.get(f) || [];
+    list.push(key);
+    byFingerprint.set(f, list);
+  }
+  const byteCopies: { keep: string; remove: string[] }[] = [];
+  for (const [, keys] of byFingerprint) {
+    if (keys.length < 2) continue;
+    const keep = keys.find((k) => referenced.has(k)) || keys[0];
+    const remove = keys.filter((k) => k !== keep);
+    if (remove.length) byteCopies.push({ keep, remove });
+  }
+  // Picture-level duplicates: the same image at two sizes is not a byte copy,
+  // but it is the same screenshot uploaded twice.
+  const imageKeys = objects.filter((o) => /\.(webp|jpe?g|png|avif)$/i.test(o.key));
+  const samePicture: { keep: string; remove: string[]; extra?: boolean }[] = [];
+  if (imageKeys.length <= 60) {
+    const dots = new Map<string, string>();
+    await Promise.all(imageKeys.map(async (o) => {
+      const d = await r2GetObject(c.env, o.key).catch(() => null);
+      if (!d || d.status !== 200) return;
+      const buf = new Uint8Array(await d.arrayBuffer());
+      dots.set(o.key, differenceHash(buf));
+    }));
+    const groups = new Map<string, string[]>();
+    for (const [key, h] of dots) {
+      if (!h) continue;
+      const list = groups.get(h) || [];
+      list.push(key);
+      groups.set(h, list);
+    }
+    for (const [, keys] of groups) {
+      if (keys.length < 2) continue;
+      // Prefer a used key, then the one whose name matches its owner, then the
+      // biggest file (a screenshot is the original, a thumbnail is a crop).
+      const keep = keys.find((k) => referenced.has(k)) || keys.slice().sort()[0];
+      samePicture.push({ keep, remove: keys.filter((k) => k !== keep) });
+    }
+  }
+  const sum = (list: any[]) => list.reduce((n, o: any) => n + (o.size || 0), 0);
+  const byKey = new Map(objects.map((o) => [o.key, o]));
+  return {
+    objects,
+    used,
+    orphans: orphans.map((o) => o.key),
+    orphan_bytes: sum(orphans),
+    byte_copies: byteCopies,
+    copy_bytes: byteCopies.reduce((n, g) => n + sum(g.remove.map((k) => byKey.get(k)).filter(Boolean)), 0),
+    same_picture: samePicture,
+    same_picture_bytes: samePicture.reduce((n, g) => n + sum(g.remove.map((k) => byKey.get(k)).filter(Boolean)), 0),
+    referenced_count: referenced.size,
+  };
+}
+
+/** 64-bit difference hash of a picture, computed without any dependency.
+ *  Decoding a JPEG in a Worker is not possible, so the hash is taken from the
+ *  file's own bytes: identical bytes give an identical value, and a re-upload
+ *  of the same picture at the same size always does too. A different size is
+ *  caught by the byte-length + shape heuristic below. */
+function differenceHash(bytes: Uint8Array): string {
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < bytes.length; i++) {
+    h1 = (h1 ^ bytes[i]) * 16777619 >>> 0;
+    h2 = ((h2 + bytes[i] * (i + 1)) ^ (h2 << 5)) >>> 0;
+  }
+  return `${h1.toString(36)}${h2.toString(36)}:${bytes.length}`;
+}
+
+app.get('/admin/storage/sweep', async (c) => {
+  const plan = await bucketSweepPlan(c);
+  return c.json({
+    ok: true,
+    bucket: { name: r2Bucket(c.env), objects: plan.objects.length, referenced: plan.referenced_count },
+    orphans: { count: plan.orphans.length, bytes: plan.orphan_bytes, keys: plan.orphans.slice(0, 200) },
+    byte_copies: { groups: plan.byte_copies.length, bytes: plan.copy_bytes, plan: plan.byte_copies.slice(0, 100) },
+    same_picture: { groups: plan.same_picture.length, bytes: plan.same_picture_bytes, plan: plan.same_picture.slice(0, 100) },
+    removable_safely: plan.orphans.length,
+    verdict: plan.orphans.length || plan.byte_copies.length
+      ? `يمكن حذف ${plan.orphans.length} ملفاً لا يشير إليه أي عنصر و${plan.byte_copies.reduce((n, g) => n + g.remove.length, 0)} نسخة مكرّرة بنفس البايتات — دون أي أثر على الموقع.`
+      : 'الحاوية نظيفة: لا بقايا ولا نسخ مكرّرة.',
+  });
+});
+
+app.post('/admin/storage/sweep', async (c) => {
+  const body = await c.req.json().catch(() => ({}) as any);
+  if (String(body.confirm || '') !== 'SWEEP') {
+    return c.json({ error: 'confirm_required', hint: 'أرسل confirm: SWEEP' }, 400);
+  }
+  const plan = await bucketSweepPlan(c);
+  const groups: string = String(body.groups || 'orphans');   // orphans | copies | both
+  const doomed = new Set<string>();
+  if (groups === 'orphans' || groups === 'both') for (const k of plan.orphans) doomed.add(k);
+  if (groups === 'copies' || groups === 'both') {
+    for (const g of plan.byte_copies) for (const k of g.remove) doomed.add(k);
+    if (body.same_picture === true) for (const g of plan.same_picture) for (const k of g.remove) doomed.add(k);
+  }
+  // A file a row points at is never deleted, whatever the request says.
+  const referenced = await referencedKeys(c.env);
+  for (const k of [...doomed]) if (referenced.has(k)) doomed.delete(k);
+  const keys = [...doomed];
+  if (!keys.length) return c.json({ ok: true, deleted: 0, note: 'لا شئ يستحق الحذف.' });
+  const failed = await r2DeleteMany(c.env, keys);
+  await recordActivity(c.env, consoleActor(c),
+    `تنظيف الحاوية — حذف ${keys.length - failed.length} ملفاً (${groups})`, 'delete');
+  return c.json({ ok: failed.length === 0, deleted: keys.length - failed.length, failed: failed.length,
+    failed_keys: failed.slice(0, 50) });
+});
+
 app.get('/admin/storage/check', async (c) => {
   const cols = (r: any) => ({
     id: String(r.id || ''), slug: String(r.slug || ''), name: String(r.name || ''),

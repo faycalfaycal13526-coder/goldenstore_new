@@ -3581,6 +3581,65 @@
       } finally { orphanDelete.disabled = false; }
     };
 
+    /* ── تنظيف الحاوية: بقايا الأسماء القديمة ونسخ مكرّرة ─────────────────────
+     * The new bucket's object list still shows history:
+     * `apk/getting-over-it-179570037`, `ss/subway-surfers.webp`,
+     * `vthumb/video-2.jpg`. This decides from the bytes and from D1 — a name
+     * that is not referenced IS junk, and a file whose bytes match a used file
+     * is a copy — then lets the owner delete both in one press.
+     */
+    const sweepOut = el('div', { style: { fontSize: '13px', lineHeight: '1.8', width: '100%' } });
+    const sweepPlan = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, ico('search'), 'اكتشف البقايا');
+    const sweepGo = el('button', { class: 'btn btn-danger btn-sm', type: 'button', style: { display: 'none' } }, ico('trash'), 'احذف البقايا والنسخ');
+    const sweepBox = el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } }, sweepPlan, sweepGo, sweepOut);
+
+    sweepPlan.onclick = async () => {
+      sweepPlan.disabled = true;
+      sweepOut.textContent = 'أفحص بايتات كل ملف…';
+      try {
+        const r = await api('/api/admin/storage/sweep', { timeoutMs: 180000 });
+        sweepOut.innerHTML = '';
+        const o = r.orphans || {}, bc = r.byte_copies || {}, sp = r.same_picture || {};
+        sweepOut.append(
+          el('div', null, `الحاوية: ${formatNum((r.bucket || {}).objects || 0)} ملفاً · يشير إليها الموقع: ${formatNum((r.bucket || {}).referenced || 0)}`),
+          el('div', null, `بقايا لا يشير إليها أي عنصر: ${formatNum(o.count || 0)} (${formatBytes(o.bytes || 0)})`),
+          el('div', null, `نسخ بنفس البايتات لملف مستخدم: ${formatNum((bc.plan || []).reduce((n, g) => n + (g.remove || []).length, 0))} (${formatBytes(bc.bytes || 0)})`),
+          el('div', { style: { color: 'var(--success)' } }, r.verdict || ''),
+        );
+        // «same picture, another size» is reported but never deleted automatically:
+        // the owner decides whether the duplicate screenshot is the good one.
+        const spGroups = (sp.plan || []).slice(0, 5);
+        spGroups.forEach((g) => sweepOut.append(el('div', { class: 'hint' },
+          `نفس الصورة باسمين: يُبقى ${g.keep} — يُحذف ${(g.remove || []).join(' , ')}`)));
+        const list = (o.keys || []).slice(0, 12);
+        if (list.length) {
+          sweepOut.append(el('div', { class: 'hint', style: { marginTop: '4px' } }, 'أمثلة: ' + list.join(' · ')));
+        }
+        const total = Number(o.count || 0) + (bc.plan || []).reduce((n, g) => n + (g.remove || []).length, 0);
+        sweepGo.style.display = total ? '' : 'none';
+        sweepGo.dataset.total = String(total);
+      } catch (e) {
+        sweepOut.textContent = (e && e.status === 401) ? 'انتهت الجلسة، أعد الدخول.' : 'تعذّر الفحص الآن.';
+      } finally { sweepPlan.disabled = false; }
+    };
+
+    sweepGo.onclick = async () => {
+      const n = Number(sweepGo.dataset.total || 0);
+      if (!n) return;
+      if (!confirm(`سيُحذف ${n} ملفاً من الحاوية: بقايا لا يشير إليها أي عنصر + نسخ مكرّرة. لا يُحذف أي ملف يستخدمه الموقع. متابعة؟`)) return;
+      sweepGo.disabled = true;
+      try {
+        const r = await api('/api/admin/storage/sweep', {
+          method: 'POST', timeoutMs: 180000, body: { confirm: 'SWEEP', groups: 'both' },
+        });
+        toast(`حُذف ${formatNum(r.deleted || 0)} ملفاً` + (r.failed ? ` — تعذّر حذف ${r.failed}` : ''), r.failed ? 'error' : 'success');
+        sweepOut.textContent = 'انتهى. اضغط «اكتشف البقايا» مرة أخرى للتأكيد — يجب أن تظهر صفراً.';
+        sweepGo.style.display = 'none';
+      } catch (e) {
+        toast('تعذّر الحذف', 'error');
+      } finally { sweepGo.disabled = false; }
+    };
+
     /* ── الحاوية الجديدة: هل كل ملف موجود فعلاً؟ ─────────────────────────────
      * The owner replaced the bucket. A replaced bucket is silent: the site keeps
      * answering 200, the row keeps its key, and only the picture is missing. This
@@ -3875,6 +3934,10 @@
         el('div', { class: 'panel-head' }, ico('trash'), 'ملفات غير مستخدمة'),
         el('div', { class: 'hint' }, 'يقارن ما في كلاود بما يستخدمه المتجر فعلاً، ويعرض الملفات اليتيمة (مثل صورة مصغّرة بقيت بعد حذف فيديو) قبل حذفها.'),
         orphanBox),
+      el('div', { class: 'panel' },
+        el('div', { class: 'panel-head' }, ico('trash'), 'تنظيف الحاوية — البقايا والنسخ المكرّرة'),
+        el('div', { class: 'hint' }, 'يقرأ بايتات كل ملف ويقرر من قاعدة البيانات: ملف لا يشير إليه أي عنصر = بقايا (مثل apk/getting-over-it-179570037)، وملف بنفس بايتات ملف مستخدم = نسخة. لا يُحذف أبداً ملف يستخدمه الموقع.'),
+        sweepBox),
       el('div', { class: 'panel' },
         el('div', { class: 'panel-head' }, ico('check'), 'الحاوية الجديدة — هل كل ملف موجود؟'),
         el('div', { class: 'hint' }, 'يفحص كل ملف يشير إليه الموقع (APK، أيقونة، صورة عرضية، لقطات، أغلفة فيديو) ويسأل الحاوية نفسها: هل الملف موجود؟ أي رابط ميت يُذكر بالاسم.'),

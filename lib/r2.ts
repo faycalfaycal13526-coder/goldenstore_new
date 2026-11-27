@@ -283,13 +283,19 @@ export async function r2AbortMultipartUploadByKey(env: Env, key: string, uploadI
   }
 }
 
-export async function r2Head(env: Env, key: string): Promise<{ size: number; contentType: string } | null> {
+export async function r2Head(
+  env: Env, key: string,
+): Promise<{ size: number; contentType: string; etag?: string | null } | null> {
   try {
     const response = await clientFor(env).fetch(objectUrl(env, key), { method: 'HEAD' });
     if (!response.ok) return null;
     return {
       size: Number(response.headers.get('content-length') || 0),
       contentType: response.headers.get('content-type') || 'application/octet-stream',
+      // R2 answers with an ETag for every object. The storage sweep uses it as a
+      // content fingerprint: two keys with the same ETag and size are the same
+      // file, without downloading either of them.
+      etag: response.headers.get('etag'),
     };
   } catch {
     return null;

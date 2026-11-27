@@ -38,7 +38,7 @@ ALLOWED_ORIGINS = "https://goldenstore.online,https://www.goldenstore.online,htt
 STORE_NAME = "Goldenstore"
 STORE_DOMAIN = "goldenstore.online"
 STORE_LOGO_URL = "https://goldenstore.online/images/logo.png"
-R2_BUCKET = "goldenstore"
+R2_BUCKET = "sgoldenstore"
 R2_ACCOUNT_ID = "3d6027f4b14f48a62a2dba1db3f8d082"
 # Served by R2's public development URL directly. The owner has replaced the
 # bucket twice: the first hostname 404'd (bucket deleted) and the second began

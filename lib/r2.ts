@@ -23,7 +23,7 @@ function clientFor(env: Env): AwsClient {
 }
 
 export function r2Bucket(env: Env): string {
-  return env.R2_BUCKET || 'goldenstore';
+  return env.R2_BUCKET || 'sgoldenstore';
 }
 
 function objectUrl(env: Env, key: string): URL {

@@ -38,7 +38,7 @@ We are committed to respecting intellectual property rights and only distribute 
 > The catalogue itself lives in **Cloudflare D1** (binding `DB`). Firestore is only used through the REST adapter in `lib/firebase.ts` where legacy routes need it.
 
 ### Cloudflare R2
-1. Create a bucket (the deployed name is `goldenstore`, set by `R2_BUCKET`) and enable Public Access or connect a CDN domain.
+1. Create a bucket (the deployed name is `sgoldenstore`, set by `R2_BUCKET`) and enable Public Access or connect a CDN domain.
 2. Create an R2 API token with Object Read & Write permissions on this bucket only.
 3. Prepare the Account ID, Access Key ID, Secret Access Key, and public read URL.
 4. Allow uploads from the site origin in the bucket → **CORS Policy**. Example:

@@ -132,7 +132,6 @@ const PUBLIC_WRITE_EXACT = new Set([
   '/api/notifications/preference', '/api/notifications/receipt',
   '/api/notifications/click', '/api/notifications/self-test',
   '/api/profile/demographics', '/api/support/threads', '/api/publish-request',
-  '/api/__upload-diag', // TEMP upload diagnostic (DIAG_KEY-guarded) — removed after verification
 ]);
 const PUBLIC_WRITE_PATTERNS: RegExp[] = [
   /^\/api\/apps\/[^/]+\/(star|star-check|request-update|report|follow)$/,
@@ -224,7 +223,7 @@ const MAX_BODY_SIZE = 1024 * 1024;
 const UPLOAD_BODY_LIMIT = 32 * 1024 * 1024;
 app.use('*', async (c, next) => {
   const cl = c.req.header('content-length');
-  const limit = (c.req.path === '/api/admin/r2/put' || c.req.path === '/api/__upload-diag') ? UPLOAD_BODY_LIMIT : MAX_BODY_SIZE;
+  const limit = c.req.path === '/api/admin/r2/put' ? UPLOAD_BODY_LIMIT : MAX_BODY_SIZE;
   if (cl && Number(cl) > limit) return c.json({ error: 'payload_too_large', limit }, 413);
   await next();
 });
@@ -5048,6 +5047,12 @@ app.all('/admin/r2/put', async (c) => {
     const partNumber = Number(c.req.query('part') || 0);
     if (uploadId && partNumber > 0) {
       const etag = await r2PutUploadPart(c.env, key, uploadId, partNumber, body);
+      /* The console reads the part's ETag from the RESPONSE HEADER (the same
+       * place the bucket's presigned PUT returns it). Returning it only inside
+       * the JSON body made every same-origin part resolve to a null ETag, so the
+       * publish aborted with «upload_etag_missing» — shown as «تعذّر الاتصال
+       * بالخادم أثناء ملف التطبيق». Set the header so both upload paths agree. */
+      c.header('ETag', etag);
       return c.json({ ok: true, key, part: partNumber, etag });
     }
     await r2PutObject(c.env, key, body, c.req.header('content-type') || 'application/octet-stream');
@@ -6173,45 +6178,6 @@ app.delete('/apps/:slug/follow', async (c) => {
 });
 app.get('/admin/apps/:slug/followers', async (c) =>
   c.json({ count: await appFollowerCount(c.env, c.req.param('slug')) }));
-
-/* TEMPORARY upload diagnostic — guarded by DIAG_KEY. GET runs the exact
- * multipart cycle the console uses (create → 10 MB part → complete → head →
- * delete) server-side. PUT echoes how many body bytes arrived, to test the
- * Pages-proxy body path. Removed once the upload failure is located. */
-app.all('/__upload-diag', async (c) => {
-  const want = String((c.env as any).DIAG_KEY || '');
-  const got = String(c.req.query('key') || '');
-  if (!want || !got || !constantTimeEqual(got, want)) return c.json({ error: 'not_found' }, 404);
-  c.header('Cache-Control', 'no-store');
-  if (c.req.method === 'PUT') {
-    const t0 = Date.now();
-    const buf = await c.req.arrayBuffer();
-    return c.json({ received_bytes: buf.byteLength, ms: Date.now() - t0, cl: c.req.header('content-length') || null });
-  }
-  const out: any = { bucket: r2Bucket(c.env), steps: {} };
-  const key = `health/up-diag-${Date.now()}.apk`;
-  try {
-    let t = Date.now();
-    const uploadId = await r2CreateMultipartUpload(c.env, key, 'application/vnd.android.package-archive');
-    out.steps.create = { ok: true, ms: Date.now() - t };
-    t = Date.now();
-    const part = new Uint8Array(10 * 1024 * 1024);
-    const etag = await r2PutUploadPart(c.env, key, uploadId, 1, part);
-    out.steps.part_10mb = { ok: true, ms: Date.now() - t, etag };
-    t = Date.now();
-    await r2CompleteMultipartUpload(c.env, key, uploadId, [{ PartNumber: 1, ETag: etag }]);
-    out.steps.complete = { ok: true, ms: Date.now() - t };
-    const head = await r2Head(c.env, key);
-    out.steps.head = { ok: !!head, size: head?.size || 0 };
-    await r2DeleteStrict(c.env, key);
-    out.steps.cleanup = { ok: true };
-    out.ok = true;
-  } catch (e: any) {
-    out.ok = false;
-    out.error = String(e?.message || e).slice(0, 500);
-  }
-  return c.json(out);
-});
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => { console.error('[api error]', err); return c.json({ error: 'internal_error' }, 500); });

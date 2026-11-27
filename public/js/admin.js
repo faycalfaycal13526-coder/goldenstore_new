@@ -355,7 +355,14 @@
       xhr.ontimeout = () => reject(new Error('upload_timeout'));
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          const etag = xhr.getResponseHeader('ETag');
+          // The bucket's presigned PUT returns the part ETag as a header; the
+          // same-origin Worker route also sets that header now, but older
+          // deployments returned it only in the JSON body. Accept either so a
+          // multipart publish never dies with a null ETag («upload_etag_missing»).
+          let etag = xhr.getResponseHeader('ETag');
+          if (!etag) {
+            try { const j = JSON.parse(xhr.responseText || '{}'); if (j && j.etag) etag = String(j.etag); } catch (e) { /* not JSON */ }
+          }
           resolve(etag);
         } else {
           reject(new Error(`upload_failed_${xhr.status}`));

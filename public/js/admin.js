@@ -338,6 +338,18 @@
 
   const MULTIPART_THRESHOLD = 10 * 1024 * 1024; // 10 MB
 
+  /* Upload failure beacon: the panel used to show only a generic «تعذّر الاتصال»
+   * while the real reason (null ETag, a 4xx, a network drop, which URL) stayed
+   * in the browser. Mirror the precise failure to the admin activity log so it
+   * can be diagnosed server-side. Never blocks the UI. */
+  let __lastXhrFail = null;
+  function reportUploadDiag(payload) {
+    try {
+      const action = JSON.stringify({ diag: 'upload_fail', ...payload, last_xhr: __lastXhrFail }).slice(0, 900);
+      api('/api/admin/activity', { method: 'POST', body: { action, kind: 'upload_diag' }, timeoutMs: 15000 }).catch(() => {});
+    } catch (e) { /* diagnostics must never break a publish */ }
+  }
+
   function xhrPut(url, data, contentType, onProgress, timeoutMs) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -352,9 +364,10 @@
           if (e.lengthComputable) onProgress(e.loaded, e.total);
         };
       }
-      xhr.ontimeout = () => reject(new Error('upload_timeout'));
+      xhr.ontimeout = () => { __lastXhrFail = { url: String(url).slice(0, 140), err: 'timeout' }; reject(new Error('upload_timeout')); };
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
+          __lastXhrFail = null;
           // The bucket's presigned PUT returns the part ETag as a header; the
           // same-origin Worker route also sets that header now, but older
           // deployments returned it only in the JSON body. Accept either so a
@@ -365,10 +378,11 @@
           }
           resolve(etag);
         } else {
+          __lastXhrFail = { url: String(url).slice(0, 140), status: xhr.status, body: String(xhr.responseText || '').slice(0, 160) };
           reject(new Error(`upload_failed_${xhr.status}`));
         }
       };
-      xhr.onerror = () => reject(new Error('upload_error'));
+      xhr.onerror = () => { __lastXhrFail = { url: String(url).slice(0, 140), err: 'network' }; reject(new Error('upload_error')); };
       xhr.send(data);
     });
   }
@@ -754,6 +768,11 @@
 
       return trackUploaded(key, kind);
     } catch (err) {
+      reportUploadDiag({
+        phase: 'multipart', kind, file_size: file.size, key,
+        parts_done: completedParts.length, parts_total: pending.length,
+        msg: String(err && err.message || err), status: Number(err && err.status) || 0,
+      });
       // Abort multipart upload on failure (cleanup)
       api('/api/admin/multipart/abort', {
         method: 'POST',
@@ -5400,6 +5419,7 @@
          * owner is told what is still missing and that pressing publish again
          * resumes from where it stopped. */
         const base = publishErrorText(err, step, data.name);
+        reportUploadDiag({ phase: 'publish', step, app: data.name, msg: String(err && err.message || err), status: Number(err && err.status) || 0 });
         /* Nothing is deleted while the owner still wants this item.
          *
          * The files already uploaded are remembered as a STAGING draft (in this

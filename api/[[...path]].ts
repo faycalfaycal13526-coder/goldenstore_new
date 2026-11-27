@@ -6173,36 +6173,6 @@ app.delete('/apps/:slug/follow', async (c) => {
 app.get('/admin/apps/:slug/followers', async (c) =>
   c.json({ count: await appFollowerCount(c.env, c.req.param('slug')) }));
 
-/* TEMPORARY storage diagnostic — guarded by the DIAG_KEY secret (never in the
- * repo). Reports the REAL S3 error for the configured bucket (NoSuchBucket vs
- * AccessDenied vs success) and can apply the bucket CORS rule. Removed after
- * the bucket migration is verified. */
-app.get('/__storage-diag', async (c) => {
-  const want = String((c.env as any).DIAG_KEY || '');
-  const got = String(c.req.query('key') || '');
-  if (!want || !got || !constantTimeEqual(got, want)) return c.json({ error: 'not_found' }, 404);
-  const out: any = { bucket: r2Bucket(c.env), public_url: c.env.R2_PUBLIC_URL || null, server_time: nowSec() };
-  try {
-    const k = 'health/diag-probe.txt';
-    await r2PutObject(c.env, k, new TextEncoder().encode('probe'), 'text/plain');
-    const h = await r2Head(c.env, k);
-    out.write_ok = !!h;
-    out.probe_size = h?.size || 0;
-    await r2DeleteStrict(c.env, k);
-  } catch (e: any) { out.write_ok = false; out.write_error = String(e?.message || e).slice(0, 400); }
-  if (out.write_ok) {
-    try { out.objects = (await r2List(c.env, '', 20)).map((o) => o.key); } catch { out.objects = []; }
-  }
-  if (out.write_ok && c.req.query('cors') === '1') {
-    try {
-      await r2ConfigureCors(c.env, (c.env.ALLOWED_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean));
-      out.cors_ok = true;
-    } catch (e: any) { out.cors_ok = false; out.cors_error = String(e?.message || e).slice(0, 300); }
-  }
-  c.header('Cache-Control', 'no-store');
-  return c.json(out);
-});
-
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => { console.error('[api error]', err); return c.json({ error: 'internal_error' }, 500); });
 

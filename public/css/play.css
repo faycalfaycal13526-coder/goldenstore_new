@@ -4815,3 +4815,45 @@ a.tab.active { text-decoration: none; }
 }
 .rate-guest-gate p { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-2); }
 .rate-guest-gate .btn { min-width: 180px; }
+
+/* ---------- Categories: three per row ---------- */
+/* Owner: «اجعل كل سطر ثلاث فئات». A fixed 3-column grid on every screen size,
+ * so the shelves read like Play Store's category grid instead of a long
+ * single-column list. Cards are compact: icon on top, name, then the count. */
+.gs-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.gs-cat-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 6px; text-align: center;
+  padding: 12px 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  text-decoration: none;
+  min-width: 0;
+  transition: background .15s ease, border-color .15s ease;
+}
+.gs-cat-card:active { background: var(--surface-2); }
+.gs-cat-card .gs-cat-ico {
+  display: grid; place-items: center;
+  width: 40px; height: 40px; border-radius: 12px;
+  background: var(--surface-2); color: var(--brand, var(--text));
+  flex: none;
+}
+.gs-cat-card .gs-cat-ico .icon { width: 22px; height: 22px; }
+.gs-cat-card .gs-cat-nm {
+  font-size: 12px; font-weight: 700; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
+}
+.gs-cat-card .gs-cat-sub { font-size: 10px; color: var(--text-2); line-height: 1.2; }
+@media (min-width: 700px) {
+  .gs-cat-grid { gap: 10px; }
+  .gs-cat-card { padding: 14px 8px; }
+  .gs-cat-card .gs-cat-nm { font-size: 13px; }
+}

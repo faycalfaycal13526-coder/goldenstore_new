@@ -195,27 +195,24 @@
       content.innerHTML = '';
       // Same labelled shelves as the apps page, but games-only groups.
       const shelves = (groups && groups.length) ? groups : [{ slug: '', name: '' }];
-      const row = (c) => el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
-        el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
-        el('div', { class: 'info' },
-          el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
-          el('div', { class: 'sub' }, `${c.count || 0} ${t('لعبة')}`),
-        ),
-        ico('chevronStart', 'icon'),
+      const row = (c) => el('a', { href: `/search?category=${c.slug}`, class: 'gs-cat-card' },
+        el('div', { class: 'gs-cat-ico' }, ico(c.icon, 'icon')),
+        el('div', { class: 'gs-cat-nm' }, S.categoryName(c.slug) || t(c.name)),
+        el('div', { class: 'gs-cat-sub' }, `${c.count || 0} ${t('لعبة')}`),
       );
       let shown = 0;
       shelves.forEach((g) => {
         const items = categories.filter((c) => (g.slug ? (c.group || 'g_family') === g.slug : true));
         if (!items.length) return;
         shown += items.length;
-        const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+        const list = el('div', { class: 'gs-cat-grid' });
         items.forEach((c) => list.append(row(c)));
         content.append(el('div', { class: 'section' },
           g.name ? el('div', { class: 'section-head' }, el('h2', null, t(g.name))) : null,
           list));
       });
       if (!shown) {
-        const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+        const list = el('div', { class: 'gs-cat-grid' });
         categories.forEach((c) => list.append(row(c)));
         content.append(el('div', { class: 'section' }, list));
       }

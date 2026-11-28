@@ -191,20 +191,34 @@
     }
 
     async function renderCategories() {
-      const { categories } = await api('/api/categories?type=game');
+      const { categories, groups } = await api('/api/categories?type=game');
       content.innerHTML = '';
-      const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
-      categories.forEach((c) => {
-        list.append(el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
-          el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
-          el('div', { class: 'info' },
-            el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
-            el('div', { class: 'sub' }, `${c.count || 0} ${t('لعبة')}`),
-          ),
-          ico('chevronStart', 'icon'),
-        ));
+      // Same labelled shelves as the apps page, but games-only groups.
+      const shelves = (groups && groups.length) ? groups : [{ slug: '', name: '' }];
+      const row = (c) => el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
+        el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
+        el('div', { class: 'info' },
+          el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
+          el('div', { class: 'sub' }, `${c.count || 0} ${t('لعبة')}`),
+        ),
+        ico('chevronStart', 'icon'),
+      );
+      let shown = 0;
+      shelves.forEach((g) => {
+        const items = categories.filter((c) => (g.slug ? (c.group || 'g_family') === g.slug : true));
+        if (!items.length) return;
+        shown += items.length;
+        const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+        items.forEach((c) => list.append(row(c)));
+        content.append(el('div', { class: 'section' },
+          g.name ? el('div', { class: 'section-head' }, el('h2', null, t(g.name))) : null,
+          list));
       });
-      content.append(el('div', { class: 'section' }, list));
+      if (!shown) {
+        const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+        categories.forEach((c) => list.append(row(c)));
+        content.append(el('div', { class: 'section' }, list));
+      }
     }
   });
 

@@ -35,7 +35,9 @@ import {
 } from '../lib/r2.js';
 import { COOKIE_NAME, constantTimeEqual, signJwt, verifyJwt } from '../lib/auth.js';
 import { nowSec, randomId, safeExt, searchTerms, slugify, sanitizeText, sanitizeUrl, safeInt, sha1Hex, sha256Hex, parseYouTubeUrl } from '../lib/utils.js';
-import { DEFAULT_CATEGORIES, APP_CATEGORIES, GAME_CATEGORIES, type App, type Category, type Screenshot } from '../lib/types.js';
+import { DEFAULT_CATEGORIES, APP_CATEGORIES, GAME_CATEGORIES,
+  APP_CATEGORY_GROUPS, GAME_CATEGORY_GROUPS, CATEGORY_GROUPS,
+  type App, type Category, type Screenshot } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
 import {
   ratingSnapshot, allVoteAggregates, mergeAggregate, appAliases,
@@ -1551,6 +1553,8 @@ app.get('/categories', async (c) => {
     categoriesCache.data = counts; categoriesCache.ts = now;
   }
   const source = type === 'app' ? APP_CATEGORIES : type === 'game' ? GAME_CATEGORIES : DEFAULT_CATEGORIES;
+  const groupSource = type === 'app' ? APP_CATEGORY_GROUPS
+    : type === 'game' ? GAME_CATEGORY_GROUPS : CATEGORY_GROUPS;
   // Admin-managed categories are additive and override a static category with
   // the same slug (rename / icon / position), without touching lib/types.ts.
   await ensureConsoleTables(c.env.DB);
@@ -1561,10 +1565,20 @@ app.get('/categories', async (c) => {
     if (type === 'game' && r.type === 'app') return;
     const hit = merged.find((x) => x.slug === r.slug);
     if (hit) { hit.name = r.name; hit.icon = r.icon || hit.icon; hit.position = Number(r.position) || hit.position; }
-    else merged.push({ slug: r.slug, name: r.name, icon: r.icon || 'grid', position: Number(r.position) || 99, count: counts[r.slug] || 0 });
+    else merged.push({ slug: r.slug, name: r.name, icon: r.icon || 'grid',
+      group: r.type === 'game' ? 'g_family' : 'custom',
+      position: Number(r.position) || 99, count: counts[r.slug] || 0 });
   });
   merged.sort((a, b) => (a.position || 0) - (b.position || 0));
-  return c.json({ categories: merged });
+  // Groups let the UI show labelled shelves (apps separate from games) instead
+  // of one long mixed list. A category with no known group falls back to the
+  // last shelf of its own type so nothing is ever dropped from the page.
+  const groups = groupSource.map((g) => ({ ...g }));
+  const known = new Set(groups.map((g) => g.slug));
+  merged.forEach((m: any) => {
+    if (!m.group || !known.has(m.group)) m.group = type === 'game' ? 'g_family' : 'custom';
+  });
+  return c.json({ categories: merged, groups });
 });
 
 /* =========================================================================

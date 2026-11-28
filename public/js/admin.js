@@ -3329,21 +3329,65 @@
       el('option', { value: 'app' }, 'تطبيق'), el('option', { value: 'game' }, 'لعبة'));
     const posIn = el('input', { class: 'input', type: 'number', value: '99', min: '0', 'aria-label': t('فرز حسب') });
     const list = el('div', { class: 'admin-phase2-list' });
+    /* The owner used to see ONLY custom rows here, so the built-in Play-Store
+     * taxonomy was invisible and the page looked empty. Show the whole catalogue
+     * instead, split into «فئات التطبيقات» and «فئات الألعاب» and grouped into
+     * labelled shelves. Custom rows stay deletable; built-ins are read-only. */
+    const customSlugs = new Set(custom.map((c) => c.slug));
+    let appCats = [], gameCats = [], appGroups = [], gameGroups = [];
+    try {
+      const [a, g] = await Promise.all([
+        api('/api/categories?type=app'), api('/api/categories?type=game'),
+      ]);
+      appCats = a.categories || []; gameCats = g.categories || [];
+      appGroups = a.groups || []; gameGroups = g.groups || [];
+    } catch (e) { /* fall back to custom-only below */ }
+
+    function shelf(title, items, groups, kind) {
+      const wrap = el('div', { style: { marginBottom: '14px' } });
+      wrap.append(el('div', { class: 'panel-head', style: { marginTop: '6px' } },
+        ico(kind === 'game' ? 'gamepad' : 'apps', 'icon'),
+        el('strong', null, title),
+        el('span', { class: 'admin-order-meta' }, `${items.length} ${t('فئة')}`)));
+      const renderRow = (c) => el('div', { class: 'admin-phase2-row' },
+        ico(c.icon || 'grid', 'icon'),
+        el('strong', null, t(c.name)),
+        el('code', null, c.slug),
+        el('span', { class: 'admin-order-meta' }, `${c.count || 0}`),
+        customSlugs.has(c.slug)
+          ? el('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => {
+              if (!confirm(`حذف الفئة «${c.name}»؟`)) return;
+              try {
+                await api(`/api/admin/categories/${encodeURIComponent(c.slug)}`, { method: 'DELETE' });
+                logAdminAction(`حذف الفئة «${c.name}»`);
+                renderCategories(body);
+              } catch (e) { toast('فشل الحذف', 'error'); }
+            } }, t('حذف الفئة'))
+          : el('span', { class: 'admin-order-meta' }, t('أساسية')));
+      if (groups.length) {
+        groups.forEach((g) => {
+          const mine = items.filter((c) => (c.group || (kind === 'game' ? 'g_family' : 'custom')) === g.slug);
+          if (!mine.length) return;
+          wrap.append(el('div', { class: 'hint', style: { margin: '8px 0 4px', fontWeight: '700' } }, t(g.name)));
+          mine.forEach((c) => wrap.append(renderRow(c)));
+        });
+      } else {
+        items.forEach((c) => wrap.append(renderRow(c)));
+      }
+      return wrap;
+    }
+
     function draw() {
       list.innerHTML = '';
-      if (!custom.length) { list.append(el('div', { class: 'hint' }, t('لا توجد نتائج'))); return; }
-      custom.forEach((c) => list.append(el('div', { class: 'admin-phase2-row' },
-        el('strong', null, c.name),
-        el('code', null, c.slug),
-        el('span', { class: 'admin-order-meta' }, c.type === 'game' ? 'لعبة' : 'تطبيق'),
-        el('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => {
-          if (!confirm(`حذف الفئة «${c.name}»؟`)) return;
-          try {
-            await api(`/api/admin/categories/${encodeURIComponent(c.slug)}`, { method: 'DELETE' });
-            logAdminAction(`حذف الفئة «${c.name}»`);
-            renderCategories(body);
-          } catch (e) { toast('فشل الحذف', 'error'); }
-        } }, t('حذف الفئة')))));
+      if (!appCats.length && !gameCats.length) {
+        if (!custom.length) { list.append(el('div', { class: 'hint' }, t('لا توجد نتائج'))); return; }
+        custom.forEach((c) => list.append(el('div', { class: 'admin-phase2-row' },
+          el('strong', null, c.name), el('code', null, c.slug),
+          el('span', { class: 'admin-order-meta' }, c.type === 'game' ? 'لعبة' : 'تطبيق'))));
+        return;
+      }
+      list.append(shelf(t('فئات التطبيقات'), appCats, appGroups, 'app'));
+      list.append(shelf(t('فئات الألعاب'), gameCats, gameGroups, 'game'));
     }
     draw();
     body.append(

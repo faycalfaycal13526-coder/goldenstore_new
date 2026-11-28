@@ -214,20 +214,36 @@
     }
 
     async function renderCategories() {
-      const { categories } = await api('/api/categories?type=app');
+      const { categories, groups } = await api('/api/categories?type=app');
       content.innerHTML = '';
-      const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
-      categories.forEach((c) => {
-        list.append(el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
-          el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
-          el('div', { class: 'info' },
-            el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
-            el('div', { class: 'sub' }, `${c.count || 0} ${t('تطبيق')}`),
-          ),
-          ico('chevronStart', 'icon'),
-        ));
+      // Play-Store-style shelves: every category sits under a labelled group so
+      // the page reads as organised sections, never one long mixed list.
+      const shelves = (groups && groups.length) ? groups : [{ slug: '', name: '' }];
+      const row = (c) => el('a', { href: `/search?category=${c.slug}`, class: 'approw' },
+        el('div', { class: 'art', style: { background: 'var(--surface-2)' } }, ico(c.icon, 'icon icon-lg')),
+        el('div', { class: 'info' },
+          el('div', { class: 'nm' }, S.categoryName(c.slug) || t(c.name)),
+          el('div', { class: 'sub' }, `${c.count || 0} ${t('تطبيق')}`),
+        ),
+        ico('chevronStart', 'icon'),
+      );
+      let shown = 0;
+      shelves.forEach((g) => {
+        const items = categories.filter((c) => (g.slug ? (c.group || 'custom') === g.slug : true));
+        if (!items.length) return;
+        shown += items.length;
+        const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+        items.forEach((c) => list.append(row(c)));
+        content.append(el('div', { class: 'section' },
+          g.name ? el('div', { class: 'section-head' }, el('h2', null, t(g.name))) : null,
+          list));
       });
-      content.append(el('div', { class: 'section' }, list));
+      // Safety net: an API build without groups still lists every category.
+      if (!shown) {
+        const list = el('div', { class: 'applist', style: { marginTop: '8px' } });
+        categories.forEach((c) => list.append(row(c)));
+        content.append(el('div', { class: 'section' }, list));
+      }
     }
   });
 
